@@ -5,7 +5,11 @@ import Observation
 @Observable
 final class SearchViewModel {
     var searchText = ""
-    var results: [AssetLite] = []
+    private var loadedResults: [AssetLite] = []
+    var results: [AssetLite] {
+        get { loadedResults.filter { !dataManager.nonTimelineAssetIDs.contains($0.id) } }
+        set { loadedResults = newValue }
+    }
     /// Jumlah SELURUH yang cocok di server, bukan cuma yang sudah dimuat.
     ///
     /// Halamannya seratusan sekali ambil, jadi `results.count` menjawab
@@ -35,6 +39,7 @@ final class SearchViewModel {
     private let peopleRepo: PeopleRepository?
     private let assetRepo: AssetDetailRepository
     private let albumRepo: AlbumRepository
+    private let dataManager: SwiftDataManager
     /// Penomor pencarian.
     ///
     /// `loadMore` berjalan di task lepas yang tidak pernah dibatalkan
@@ -50,12 +55,14 @@ final class SearchViewModel {
         repo: SearchRepository,
         assetRepo: AssetDetailRepository,
         albumRepo: AlbumRepository,
-        peopleRepo: PeopleRepository? = nil
+        peopleRepo: PeopleRepository? = nil,
+        dataManager: SwiftDataManager? = nil
     ) {
         self.repo = repo
         self.assetRepo = assetRepo
         self.albumRepo = albumRepo
         self.peopleRepo = peopleRepo
+        self.dataManager = dataManager ?? .shared
     }
 
     /// Ada sesuatu untuk dicari: kata kunci, penyaring, atau keduanya.
@@ -103,7 +110,7 @@ final class SearchViewModel {
         do {
             let response = try await fetch(page: 1)
             guard !Task.isCancelled else { return }
-            results = response.assets.items.map(Self.makeAssetLite)
+            results = response.assets.items.filter(\.isTimelineVisible).map(Self.makeAssetLite)
             totalResults = response.assets.total
             nextPage = response.assets.nextPage
             phase = .loaded(())
@@ -126,11 +133,11 @@ final class SearchViewModel {
             // pertanyaan yang sudah tidak ditanyakan lagi.
             guard startedAt == generation else { return }
             currentPage += 1
-            let existing = Set(results.map(\.id))
+            let existing = Set(loadedResults.map(\.id))
             let newAssets = response.assets.items
-                .filter { !existing.contains($0.id) }
+                .filter { $0.isTimelineVisible && !existing.contains($0.id) }
                 .map(Self.makeAssetLite)
-            results.append(contentsOf: newAssets)
+            loadedResults.append(contentsOf: newAssets)
             nextPage = response.assets.nextPage
         } catch {
             // Halaman berikutnya gagal — biarkan; onAppear sel terakhir akan mencoba lagi.
@@ -145,7 +152,7 @@ final class SearchViewModel {
     /// menjawabnya.
     private func fetch(page: Int) async throws -> SearchResponseDTO {
         let query = searchText.trimmingCharacters(in: .whitespaces)
-        var request = SearchRequestDTO(page: page, size: 100)
+        var request = SearchRequestDTO(page: page, size: 100, visibility: "timeline")
         filters.apply(to: &request)
 
         guard !query.isEmpty else {
@@ -274,17 +281,17 @@ final class SearchViewModel {
     /// mengetuknya berujung "not found".
     func removeLocally(_ ids: [String]) {
         let gone = Set(ids)
-        let before = results.count
-        results.removeAll { gone.contains($0.id) }
+        let before = loadedResults.count
+        loadedResults.removeAll { gone.contains($0.id) }
         // Totalnya ikut turun sebanyak yang benar-benar hilang dari daftar ini.
         // Mengurangi `ids.count` mentah-mentah akan salah kalau sebagiannya
         // memang belum pernah dimuat.
-        totalResults = max(0, totalResults - (before - results.count))
+        totalResults = max(0, totalResults - (before - loadedResults.count))
     }
 
     func patchFavorite(_ id: String, to value: Bool) {
-        guard let index = results.firstIndex(where: { $0.id == id }) else { return }
-        results[index].isFavorite = value
+        guard let index = loadedResults.firstIndex(where: { $0.id == id }) else { return }
+        loadedResults[index].isFavorite = value
     }
 
     /// `fallback` sudah berupa `String` yang dilokalkan di titik panggilnya,

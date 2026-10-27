@@ -184,6 +184,7 @@ final class AssetDetailViewModel {
         do {
             try await repo.toggleArchive(id, to: newValue)
             detail?.isArchived = newValue
+            detail?.visibility = newValue ? "archive" : "timeline"
             persistDetail()
         } catch {
             actionError = ErrorEvent(Self.describe(error))

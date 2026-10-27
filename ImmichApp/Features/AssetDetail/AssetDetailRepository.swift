@@ -49,9 +49,11 @@ struct AssetEditRecord: Decodable, Sendable {
 
 class AssetDetailRepository {
     private let api: APIClient
+    private let dataManager: SwiftDataManager?
 
-    init(api: APIClient) {
+    init(api: APIClient, dataManager: SwiftDataManager? = nil) {
         self.api = api
+        self.dataManager = dataManager
     }
 
     func fetchAsset(_ id: String) async throws -> AssetResponseDTO {
@@ -88,8 +90,17 @@ class AssetDetailRepository {
         case locked
     }
 
+    @MainActor
     func setVisibility(_ id: String, to value: Visibility) async throws {
+        let context = api.session.snapshot
+        let owner = api.session.backupQueueOwner
         try await update(id, with: AssetMutation(visibility: value.rawValue))
+        guard api.session.baseURL == context.baseURL,
+              api.session.authHeaders == context.authHeaders,
+              api.session.backupQueueOwner == owner else { throw CancellationError() }
+        // Every successful visibility mutation must suppress its device copy,
+        // including actions from Search or Library and partial batch results.
+        try (dataManager ?? .shared).setTimelineVisibility([id], inTimeline: value == .timeline)
     }
 
     /// Compatibility shim untuk satu-satunya kontrak mutasi asset yang tersedia

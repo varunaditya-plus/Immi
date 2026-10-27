@@ -14,8 +14,9 @@ struct SearchRequestDTO: Encodable {
     var city: String? = nil
     var personIds: [String]? = nil
     var size: Int? = nil
-    /// "timeline" | "archive" | "locked" — dipakai layar Archived & Locked.
-    var visibility: String? = nil
+    /// Explicitly preserve timeline-only browsing on both Immich v2 and v3.
+    /// Archived and Locked Folder pass their own visibility.
+    var visibility: String? = "timeline"
     /// Menyertakan aset yang sudah dibuang ke trash.
     ///
     /// TIDAK berarti "hanya yang di trash" — namanya `with`, dan itu memang

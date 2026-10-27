@@ -77,6 +77,7 @@ final class TimelineViewModel {
     /// tanpa jaringan (pratinjau, tes).
     private let matcher: DeviceAssetMatcher?
     private let calendar: Calendar
+    private let localPhotos: @MainActor () -> [LocalPhoto]
 
     /// Maksimal tiga tanggal teramai per bulan, ditampilkan lama → baru.
     var monthNavigationItems: [TimelineNavigationItem] {
@@ -94,12 +95,14 @@ final class TimelineViewModel {
         assetRepo: AssetDetailRepository? = nil,
         albumRepo: AlbumRepository? = nil,
         matcher: DeviceAssetMatcher? = nil,
-        calendar: Calendar = .current
+        calendar: Calendar = .current,
+        localPhotos: @escaping @MainActor () -> [LocalPhoto] = { LocalPhotoLibrary.shared.photos }
     ) {
         self.dataManager = dataManager
         self.assetRepo = assetRepo
         self.albumRepo = albumRepo
         self.matcher = matcher
+        self.localPhotos = localPhotos
         // MonthKey memakai kalender Gregorian. Preferensi kalender sistem
         // tidak boleh membuat label harinya memakai bulan/tahun yang berbeda.
         var timelineCalendar = Calendar(identifier: .gregorian)
@@ -206,11 +209,12 @@ final class TimelineViewModel {
     /// Linimasa hanya berubah lewat sync atau aksi lokal, dan keduanya sudah
     /// memuat ulang sendiri, jadi pembukaan tab tidak perlu melakukan apa pun.
     func loadTimelineIfNeeded() async {
-        guard !hasLoaded else { return }
+        guard !hasLoaded || signature?.nonTimelineAssetIDs != (dataManager?.nonTimelineAssetIDs ?? []) else { return }
         await loadTimeline()
     }
 
     private func rebuild() async {
+        let nonTimelineIDs = dataManager?.nonTimelineAssetIDs ?? []
         let rows = mergedRows()
         hasLocalData = !rows.isEmpty
 
@@ -233,7 +237,7 @@ final class TimelineViewModel {
         // setiap sync tetap mengganti seluruh array `sections` — SwiftUI lalu
         // membanding-bandingkan ulang seluruh grid, dan posisi gulir pengguna
         // ikut terguncang tanpa ada satu foto pun yang berubah.
-        let newSignature = Signature(rows)
+        let newSignature = Signature(rows, nonTimelineAssetIDs: nonTimelineIDs)
         guard newSignature != signature else {
             hasLoaded = true
             phase = .loaded(())
@@ -247,6 +251,10 @@ final class TimelineViewModel {
         // butuh main thread.
         let built = await Self.build(rows, calendar: calendar)
         guard accountGeneration == LocalSnapshot.generation else { return }
+        guard nonTimelineIDs == (dataManager?.nonTimelineAssetIDs ?? []) else {
+            await rebuild()
+            return
+        }
 
         signature = newSignature
         content = built.content
@@ -266,7 +274,10 @@ final class TimelineViewModel {
     /// bulan di sana satu lintasan tanpa sorting — satu foto yang tersisip di
     /// tempat salah akan memecah bulannya jadi dua bagian terpisah.
     private func mergedRows() -> [TimelineRow] {
-        let serverRows = markDeviceCopies(dataManager?.timelineAssets() ?? [])
+        let privateIDs = dataManager?.nonTimelineAssetIDs ?? []
+        let serverRows = markDeviceCopies((dataManager?.timelineAssets() ?? []).filter {
+            !privateIDs.contains($0.asset.id)
+        })
         let deviceRows = localRows(existingServerIDs: Set(serverRows.map(\.asset.id)))
         guard !deviceRows.isEmpty else { return serverRows }
         guard !serverRows.isEmpty else { return deviceRows }
@@ -304,37 +315,20 @@ final class TimelineViewModel {
         }
     }
 
-    /// Foto perangkat, dengan lencana yang sesuai keadaannya.
-    ///
-    /// **Petak lokal dibuang hanya kalau petak SERVER-nya benar-benar sudah ada
-    /// di cache** — bukan sekadar karena unggahannya tercatat berhasil.
-    ///
-    /// Dulu penyaringnya cuma "ada catatan unggahan?", dan itu meninggalkan
-    /// lubang di antara dua kejadian: unggahan selesai lebih dulu, aset servernya
-    /// baru turun pada sync berikutnya. Di sela itu fotonya hilang dari linimasa
-    /// — bukan berganti lencana, melainkan lenyap. Yang paling membingungkan
-    /// justru karena terjadi tepat setelah sesuatu berhasil.
-    ///
-    /// Sekarang petak lokalnya bertahan dan lencananya berganti jadi "ada di
-    /// keduanya" seketika. Begitu sync membawa aset servernya, petak lokal itu
-    /// menghilang dan petak server menggantikannya dengan lencana yang sama —
-    /// pergantian yang tidak terlihat sama sekali.
-    ///
-    /// - Parameter existingServerIDs: id aset yang SUDAH ada di cache linimasa.
+    /// Newly uploaded photos remain as local fallbacks until their server rows
+    /// arrive. Known private or deleted assets stay suppressed even when their
+    /// server rows are absent from the rebuildable timeline cache.
     private func localRows(existingServerIDs: Set<String>) -> [TimelineRow] {
         let links = dataManager?.serverAssetIDsByLocalIdentifier() ?? [:]
-        let deletedServerIDs = DeletedServerAssetRegistry.shared.suppressedIDs
-
-        return LocalPhotoLibrary.shared.photos.compactMap { photo -> TimelineRow? in
+        let suppressedServerIDs = DeletedServerAssetRegistry.shared.suppressedIDs
+            .union(dataManager?.nonTimelineAssetIDs ?? [])
+        return localPhotos().compactMap { photo -> TimelineRow? in
             var origin = AssetOrigin.device
             if let serverID = links[photo.id] {
-                // Mapping backup sengaja bertahan setelah delete supaya file
-                // lokal tidak naik lagi. Ia tidak berarti foto tersebut masih
-                // boleh kembali ke timeline sebagai fallback lokal.
-                guard !deletedServerIDs.contains(serverID) else { return nil }
-                // Petak servernya sudah berdiri sendiri; dua petak untuk satu
-                // foto yang sama adalah persis yang ingin dihindari.
-                guard !existingServerIDs.contains(serverID) else { return nil }
+                // Backup mappings survive deletion, archive, and locking. The
+                // mapping must not make a private asset visible as a local copy.
+                guard !suppressedServerIDs.contains(serverID),
+                      !existingServerIDs.contains(serverID) else { return nil }
                 origin = .both
             }
 
@@ -370,6 +364,9 @@ final class TimelineViewModel {
         let count: Int
         let firstID: String?
         let lastID: String?
+        // An interior asset may become private while another becomes visible,
+        // leaving counts and endpoints unchanged.
+        let nonTimelineAssetIDs: Set<String>
 
         /// Jumlah aset perangkat ikut dihitung TERPISAH.
         ///
@@ -393,7 +390,8 @@ final class TimelineViewModel {
         /// setengah dari lubangnya.
         let linkedCount: Int
 
-        init(_ rows: [TimelineRow]) {
+        init(_ rows: [TimelineRow], nonTimelineAssetIDs: Set<String>) {
+            self.nonTimelineAssetIDs = nonTimelineAssetIDs
             count = rows.count
             firstID = rows.first?.asset.id
             lastID = rows.last?.asset.id
@@ -610,12 +608,6 @@ final class TimelineViewModel {
             try await assetRepo.toggleArchive(asset.id, to: true)
             guard accountGeneration == LocalSnapshot.generation else { return }
             removeAsset(asset.id)
-            // Cache lokal ikut ditambal, bukan cuma gridnya.
-            //
-            // Linimasa dirender DARI cache itu; membuang selnya saja berarti
-            // fotonya muncul lagi pada rebuild berikutnya — dan rebuild terjadi
-            // pada ketukan kedua tab Photos maupun setiap sync selesai.
-            try? dataManager?.setTimelineVisibility([asset.id], inTimeline: false)
         } catch {
             actionError = Self.describe(error)
         }
@@ -684,7 +676,6 @@ final class TimelineViewModel {
                 guard accountGeneration == LocalSnapshot.generation else { return false }
             }
             removeAssets(Set(ids))
-            try? dataManager?.setTimelineVisibility(ids, inTimeline: false)
             return true
         } catch {
             actionError = Self.describe(error)
@@ -702,7 +693,6 @@ final class TimelineViewModel {
                 guard accountGeneration == LocalSnapshot.generation else { return false }
             }
             removeAssets(Set(ids))
-            try? dataManager?.setTimelineVisibility(ids, inTimeline: false)
             return true
         } catch {
             actionError = Self.describe(error)

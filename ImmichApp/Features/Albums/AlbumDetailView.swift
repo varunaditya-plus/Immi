@@ -298,8 +298,6 @@ final class AlbumDetailViewModel {
                 try await assetRepo.setVisibility(id, to: archived ? .archive : .timeline)
                 guard snapshotGeneration == LocalSnapshot.generation else { return }
             }
-            // Linimasa dirender dari cache lokal — lihat AssetGridViewModel.
-            try? SwiftDataManager.shared.setTimelineVisibility(ids, inTimeline: !archived)
         } catch {
             phase = .failed((error as? APIError)?.errorDescription
                 ?? String(localized: "Failed to archive photos"))
@@ -332,8 +330,6 @@ final class AlbumDetailViewModel {
             let moved = Set(ids)
             assets.removeAll { moved.contains($0.id) }
             persist()
-            // Linimasa dirender dari cache lokal — lihat AssetGridViewModel.
-            try? SwiftDataManager.shared.setTimelineVisibility(ids, inTimeline: false)
         } catch {
             phase = .failed((error as? APIError)?.errorDescription
                 ?? String(localized: "Failed to move photos"))

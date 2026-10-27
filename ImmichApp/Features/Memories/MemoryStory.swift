@@ -19,7 +19,8 @@ struct MemoryStory: Identifiable {
 
     /// Kenangan yang layak ditampilkan, terbaru dulu.
     ///
-    /// Dua penyaringan, keduanya di sini dan bukan di view:
+    /// Only timeline-visible photos may appear in an ordinary memory card.
+    /// The remaining filters also run here rather than in the view:
     ///
     /// - Yang tidak punya foto dibuang. Kenangan kosong tidak bisa jadi story
     ///   dan kartunya pun tidak punya sampul; kalau dibiarkan lewat, ia cuma
@@ -32,17 +33,19 @@ struct MemoryStory: Identifiable {
         let calendar = Calendar.current
         let today = calendar.dateComponents([.month, .day], from: now)
 
-        return memories
-            .filter { !$0.assets.isEmpty && isToday($0.memoryAt, today) }
+        return Array(memories
+            .filter { isToday($0.memoryAt, today) }
             .sorted { $0.memoryAt > $1.memoryAt }
-            .prefix(limit)
-            .map { memory in
-                MemoryStory(
+            .compactMap { memory -> MemoryStory? in
+                let visibleAssets = memory.assets.filter(\.isTimelineVisible)
+                guard !visibleAssets.isEmpty else { return nil }
+                return MemoryStory(
                     id: memory.id,
                     title: yearsAgoTitle(for: memory, now: now, calendar: calendar),
                     subtitle: dateFormatter.string(from: memory.memoryAt),
-                    assets: memory.assets.map(AssetLite.init))
+                    assets: visibleAssets.map(AssetLite.init))
             }
+            .prefix(limit))
     }
 
     /// Kalender UTC untuk membaca `memoryAt`.

@@ -48,6 +48,7 @@ private struct BackupRecordSnapshot: Codable, Equatable {
 private struct BackupRecordJournal: Codable {
     let version: Int
     let records: [BackupRecordSnapshot]
+    var nonTimelineAssetIDs: [String]? = nil
 }
 
 @MainActor
@@ -61,6 +62,10 @@ final class SwiftDataManager {
     private let backupJournalURL: URL
     private let fileManager: FileManager
     private(set) var startupState: LocalStoreStartupState
+    /// Kept with backup mappings because clearing the rebuildable cache must
+    /// not make a locked or archived device copy appear in Photos.
+    private(set) var nonTimelineAssetIDs: Set<String> = []
+    private(set) var visibilityMutationRevision = UUID()
 
     var isPersistentStoreAvailable: Bool {
         startupState.isPersistentStoreAvailable
@@ -261,7 +266,9 @@ final class SwiftDataManager {
 
     func insertOrUpdateCachedAsset(_ asset: CachedAsset) throws {
         upsert(asset)
-        try modelContext.save()
+        try saveWithTimelineVisibility([asset]) {
+            try modelContext.save()
+        }
     }
 
     /// Terapkan hasil satu putaran sync dalam SATU save, bukan save per aset.
@@ -283,8 +290,13 @@ final class SwiftDataManager {
     func applySyncBatch(
         upserts: [CachedAsset],
         deletedIds: [String],
-        isFullReset: Bool = false
+        isFullReset: Bool = false,
+        expectedVisibilityRevision: UUID? = nil
     ) throws {
+        if let expectedVisibilityRevision,
+           expectedVisibilityRevision != visibilityMutationRevision {
+            throw CancellationError()
+        }
         let context = ModelContext(modelContainer)
 
         if isFullReset {
@@ -304,7 +316,43 @@ final class SwiftDataManager {
             }
         }
 
-        try context.save()
+        try saveWithTimelineVisibility(upserts) {
+            try context.save()
+        }
+    }
+
+    private func saveWithTimelineVisibility(
+        _ assets: [CachedAsset], save: () throws -> Void
+    ) throws {
+        var storageError: Error?
+        do {
+            try updateTimelineVisibility(from: assets)
+        } catch {
+            storageError = error
+        }
+        do {
+            try save()
+        } catch {
+            if storageError == nil { storageError = error }
+        }
+        if let storageError { throw storageError }
+    }
+
+    private func updateTimelineVisibility(from assets: [CachedAsset]) throws {
+        let previous = nonTimelineAssetIDs
+        for asset in assets {
+            if asset.isArchived {
+                nonTimelineAssetIDs.insert(asset.id)
+            } else {
+                nonTimelineAssetIDs.remove(asset.id)
+            }
+        }
+        if previous != nonTimelineAssetIDs {
+            if !nonTimelineAssetIDs.subtracting(previous).isEmpty {
+                WidgetSnapshotExporter.clear()
+            }
+            try writeBackupRecordJournal(currentBackupRecordSnapshots())
+        }
     }
 
     /// Membuang aset dari cache lokal tanpa lewat sync.
@@ -368,14 +416,40 @@ final class SwiftDataManager {
 
     // MARK: - Tambalan dari layar lain
 
-    /// Mengubah "ada di linimasa atau tidak" untuk aset yang SUDAH ada di cache.
-    ///
-    /// Dipakai layar Archived dan Locked Folder: mengembalikan foto ke linimasa
-    /// harus langsung terlihat di tab Photos, bukan menunggu sync berikutnya.
-    /// Linimasa dirender dari cache ini, jadi menambalnya di sini sama dengan
-    /// menambal layarnya.
+    /// Track whether a server asset and its mapped device copy may appear in
+    /// Photos, even when the server row is absent from the rebuildable cache.
     func setTimelineVisibility(_ ids: [String], inTimeline: Bool) throws {
         guard !ids.isEmpty else { return }
+        visibilityMutationRevision = UUID()
+        if inTimeline {
+            try saveCachedTimelineVisibility(ids, inTimeline: true)
+            let remaining = nonTimelineAssetIDs.subtracting(ids)
+            try writeBackupRecordJournal(
+                currentBackupRecordSnapshots(), nonTimelineAssetIDs: remaining)
+            nonTimelineAssetIDs = remaining
+            return
+        }
+
+        let newlyHidden = Set(ids).subtracting(nonTimelineAssetIDs)
+        nonTimelineAssetIDs.formUnion(ids)
+        if !newlyHidden.isEmpty { WidgetSnapshotExporter.clear() }
+        // Preserve either durable copy when the other storage path fails. The
+        // in-memory set already prevents the current UI from exposing the asset.
+        var storageError: Error?
+        do {
+            try writeBackupRecordJournal(currentBackupRecordSnapshots())
+        } catch {
+            storageError = error
+        }
+        do {
+            try saveCachedTimelineVisibility(ids, inTimeline: false)
+        } catch {
+            if storageError == nil { storageError = error }
+        }
+        if let storageError { throw storageError }
+    }
+
+    private func saveCachedTimelineVisibility(_ ids: [String], inTimeline: Bool) throws {
         for asset in fetchAssets(ids: ids, in: modelContext).values {
             asset.isArchived = !inTimeline
         }
@@ -397,7 +471,7 @@ final class SwiftDataManager {
                 assetId: asset.id,
                 type: asset.isVideo ? "VIDEO" : "IMAGE",
                 isFavorite: asset.isFavorite,
-                isArchived: false,
+                isArchived: nonTimelineAssetIDs.contains(asset.id),
                 duration: asset.duration,
                 livePhotoVideoId: asset.livePhotoVideoID,
                 createdAt: asset.createdAt,
@@ -432,6 +506,9 @@ final class SwiftDataManager {
     }
 
     func clearAllCache() throws {
+        // Preserve known private visibility before a full sync removes the rows
+        // that identified it. The server may omit locked assets until unlocked.
+        try writeBackupRecordJournal(currentBackupRecordSnapshots())
         try modelContext.delete(model: CachedAsset.self)
         try modelContext.save()
     }
@@ -483,8 +560,16 @@ final class SwiftDataManager {
         guard startupState.isPersistentStoreAvailable else { return }
 
         do {
-            let protectedRecords = try readBackupRecordJournal()
-            let restoredCount = try restoreMissingBackupRecords(protectedRecords)
+            let hiddenRows = try modelContext.fetch(FetchDescriptor<CachedAsset>(
+                predicate: #Predicate { $0.isArchived }))
+            nonTimelineAssetIDs = Set(hiddenRows.map(\.id))
+            let journal = try readBackupRecordJournal()
+            let protectedIDs = Set(journal.nonTimelineAssetIDs ?? [])
+            nonTimelineAssetIDs.formUnion(protectedIDs)
+            if !nonTimelineAssetIDs.subtracting(protectedIDs).isEmpty {
+                WidgetSnapshotExporter.clear()
+            }
+            let restoredCount = try restoreMissingBackupRecords(journal.records)
             try writeBackupRecordJournal(currentBackupRecordSnapshots())
 
             if case let .recovered(quarantinedStore, _, warning) = startupState {
@@ -494,6 +579,14 @@ final class SwiftDataManager {
                     warning: warning)
             }
         } catch {
+            // Unknown visibility must not turn mapped device copies into public
+            // fallbacks. A fresh timeline sync can release these conservative IDs.
+            if let records = try? currentBackupRecordSnapshots() {
+                let mappedIDs = Set(records.map(\.assetId))
+                let newlyHidden = mappedIDs.subtracting(nonTimelineAssetIDs)
+                nonTimelineAssetIDs.formUnion(mappedIDs)
+                if !newlyHidden.isEmpty { WidgetSnapshotExporter.clear() }
+            }
             let message = "Backup mapping protection is unavailable: \(error.localizedDescription)"
             if case let .recovered(quarantinedStore, restoredCount, warning) = startupState {
                 startupState = .recovered(
@@ -506,14 +599,16 @@ final class SwiftDataManager {
         }
     }
 
-    private func readBackupRecordJournal() throws -> [BackupRecordSnapshot] {
-        guard fileManager.fileExists(atPath: backupJournalURL.path) else { return [] }
+    private func readBackupRecordJournal() throws -> BackupRecordJournal {
+        guard fileManager.fileExists(atPath: backupJournalURL.path) else {
+            return BackupRecordJournal(version: 1, records: [])
+        }
         let data = try Data(contentsOf: backupJournalURL)
         let journal = try JSONDecoder().decode(BackupRecordJournal.self, from: data)
         guard journal.version == 1 else {
             throw CocoaError(.coderReadCorrupt)
         }
-        return journal.records
+        return journal
     }
 
     private func currentBackupRecordSnapshots() throws -> [BackupRecordSnapshot] {
@@ -552,14 +647,17 @@ final class SwiftDataManager {
     }
 
     private func writeBackupRecordJournal(
-        _ snapshots: [BackupRecordSnapshot]
+        _ snapshots: [BackupRecordSnapshot],
+        nonTimelineAssetIDs: Set<String>? = nil
     ) throws {
         let directory = backupJournalURL.deletingLastPathComponent()
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        let data = try encoder.encode(BackupRecordJournal(version: 1, records: snapshots))
+        let data = try encoder.encode(BackupRecordJournal(
+            version: 1, records: snapshots,
+            nonTimelineAssetIDs: (nonTimelineAssetIDs ?? self.nonTimelineAssetIDs).sorted()))
         try data.write(to: backupJournalURL, options: [.atomic])
 
         var values = URLResourceValues()
@@ -634,16 +732,18 @@ final class SwiftDataManager {
     /// full sync. Logout juga harus menghapus checkpoint sync, pasangan backup,
     /// dan checksum lokal agar akun berikutnya tidak mewarisi keadaan akun lama.
     func clearAllAccountData() throws {
+        visibilityMutationRevision = UUID()
         let previousMappings = try currentBackupRecordSnapshots()
         // Kosongkan journal lebih dahulu agar mapping akun lama tidak dapat
         // dipulihkan ke akun baru bila proses dihentikan tepat setelah logout.
-        try writeBackupRecordJournal([])
+        try writeBackupRecordJournal([], nonTimelineAssetIDs: [])
         do {
             try modelContext.delete(model: CachedAsset.self)
             try modelContext.delete(model: BackupRecord.self)
             try modelContext.delete(model: SyncState.self)
             try modelContext.delete(model: LocalAssetChecksum.self)
             try modelContext.save()
+            nonTimelineAssetIDs.removeAll()
         } catch {
             modelContext.rollback()
             // Logout yang gagal tidak boleh sekaligus menghapus salinan

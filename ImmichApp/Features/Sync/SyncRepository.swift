@@ -29,11 +29,14 @@ class SyncRepository {
     @MainActor
     private func sync(reset: Bool, isRetryAfterReset: Bool = false) async throws {
         let context = api.session.snapshot
+        let visibilityRevision = dataManager.visibilityMutationRevision
         try api.checkCurrent(context)
+        try checkVisibility(visibilityRevision)
         if reset { try dataManager.clearAllCache() }
 
-        let outcome = try await streamAndApply(reset: reset, context: context)
+        let outcome = try await streamAndApply(reset: reset, context: context, visibilityRevision: visibilityRevision)
         try api.checkCurrent(context)
+        try checkVisibility(visibilityRevision)
 
         if outcome.serverRequestedReset {
             guard !isRetryAfterReset else {
@@ -49,6 +52,7 @@ class SyncRepository {
         }
 
         try api.checkCurrent(context)
+        try checkVisibility(visibilityRevision)
         let state = dataManager.getSyncState()
         let now = Date()
         if reset || state.lastFullSyncAt == nil { state.lastFullSyncAt = now }
@@ -73,7 +77,7 @@ class SyncRepository {
     private static let chunkSize = 500
 
     @MainActor
-    private func streamAndApply(reset: Bool, context: SessionRequestContext) async throws -> StreamOutcome {
+    private func streamAndApply(reset: Bool, context: SessionRequestContext, visibilityRevision: UUID) async throws -> StreamOutcome {
         // Immich v3 mempertahankan nama request AssetsV1 di enum, tetapi
         // handler server-nya sengaja selalu membalas 400 karena sudah
         // deprecated. Aplikasi sebelumnya tetap memintanya, lalu background
@@ -88,6 +92,7 @@ class SyncRepository {
         }
 
         try api.checkCurrent(context)
+        try checkVisibility(visibilityRevision)
         let requestType = serverMajor >= 3 ? "AssetsV2" : "AssetsV1"
         var request = SyncStreamRequestDTO(types: [requestType])
         if reset { request.reset = true }
@@ -100,6 +105,7 @@ class SyncRepository {
 
         for try await line in lines {
             try api.checkCurrent(context)
+            try checkVisibility(visibilityRevision)
             guard !line.isEmpty, let data = line.data(using: .utf8) else { continue }
             let envelope = try JSONDecoder.immich.decode(SyncLineEnvelopeDTO.self, from: data)
 
@@ -148,11 +154,11 @@ class SyncRepository {
             }
 
             if upserts.count >= Self.chunkSize || deletes.count >= Self.chunkSize {
-                try await flush(&upserts, &deletes, isFullReset: reset, context: context)
+                try await flush(&upserts, &deletes, isFullReset: reset, context: context, visibilityRevision: visibilityRevision)
             }
         }
 
-        try await flush(&upserts, &deletes, isFullReset: reset, context: context)
+        try await flush(&upserts, &deletes, isFullReset: reset, context: context, visibilityRevision: visibilityRevision)
         return outcome
     }
 
@@ -161,19 +167,29 @@ class SyncRepository {
         _ upserts: inout [CachedAsset],
         _ deletes: inout [String],
         isFullReset: Bool,
-        context: SessionRequestContext
+        context: SessionRequestContext,
+        visibilityRevision: UUID
     ) async throws {
         try api.checkCurrent(context)
+        try checkVisibility(visibilityRevision)
         guard !upserts.isEmpty || !deletes.isEmpty else { return }
 
         try dataManager.applySyncBatch(
             upserts: upserts,
             deletedIds: deletes,
-            isFullReset: isFullReset)
+            isFullReset: isFullReset,
+            expectedVisibilityRevision: visibilityRevision)
 
         upserts.removeAll(keepingCapacity: true)
         deletes.removeAll(keepingCapacity: true)
         await Task.yield()
+    }
+
+    @MainActor
+    private func checkVisibility(_ expectedRevision: UUID) throws {
+        guard expectedRevision == dataManager.visibilityMutationRevision else {
+            throw CancellationError()
+        }
     }
 
     @MainActor

@@ -19,6 +19,8 @@ struct AssetResponseDTO: Codable, Identifiable {
     let fileCreatedAt: Date
     var isFavorite: Bool
     var isArchived: Bool
+    /// Missing only in older API responses and existing offline snapshots.
+    var visibility: String?
     let isTrashed: Bool
     /// Durasi video dalam detik (null/0 untuk foto).
     ///
@@ -33,6 +35,10 @@ struct AssetResponseDTO: Codable, Identifiable {
     /// Id aset video pasangan sebuah Live Photo; nil untuk foto biasa.
     let livePhotoVideoId: String?
 
+    var isTimelineVisible: Bool {
+        !isArchived && !isTrashed && (visibility == nil || visibility == "timeline")
+    }
+
     var isVideo: Bool { type == "VIDEO" }
     var isLivePhoto: Bool { livePhotoVideoId != nil }
 
@@ -43,7 +49,7 @@ struct AssetResponseDTO: Codable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, type, originalFileName, fileCreatedAt, isFavorite, isArchived
+        case id, type, originalFileName, fileCreatedAt, isFavorite, isArchived, visibility
         case isTrashed, duration, thumbhash, localDateTime, exifInfo, people
         case livePhotoVideoId
     }
@@ -56,6 +62,7 @@ struct AssetResponseDTO: Codable, Identifiable {
         fileCreatedAt = try c.decode(Date.self, forKey: .fileCreatedAt)
         isFavorite = try c.decode(Bool.self, forKey: .isFavorite)
         isArchived = try c.decode(Bool.self, forKey: .isArchived)
+        visibility = try c.decodeIfPresent(String.self, forKey: .visibility)
         isTrashed = try c.decode(Bool.self, forKey: .isTrashed)
         thumbhash = try c.decodeIfPresent(String.self, forKey: .thumbhash)
         localDateTime = try c.decode(Date.self, forKey: .localDateTime)
@@ -107,7 +114,8 @@ extension AssetResponseDTO {
         localDateTime: Date,
         exifInfo: ExifDTO?,
         people: [PersonDTO]?,
-        livePhotoVideoId: String? = nil
+        livePhotoVideoId: String? = nil,
+        visibility: String? = nil
     ) {
         self.id = id
         self.type = type
@@ -115,6 +123,7 @@ extension AssetResponseDTO {
         self.fileCreatedAt = fileCreatedAt
         self.isFavorite = isFavorite
         self.isArchived = isArchived
+        self.visibility = visibility
         self.isTrashed = isTrashed
         self.duration = duration
         self.thumbhash = thumbhash

@@ -9,7 +9,8 @@ struct AuthStatusDTO: Decodable {
 }
 
 /// Aksi PIN untuk Locked Folder.
-final class PinRepository {
+@MainActor
+class PinRepository {
     private let api: APIClient
 
     init(api: APIClient) {
@@ -40,138 +41,223 @@ final class PinRepository {
     }
 }
 
-/// Locked Folder: isinya baru dimuat setelah PIN dimasukkan.
-///
-/// Gerbangnya di sini, bukan di dalam `PhotoCollectionScreen`: elevasi sesi
-/// adalah urusan autentikasi, dan menaruhnya di komponen grid berarti setiap
-/// koleksi lain ikut membawa cabang yang tidak pernah dipakainya.
+/// Local access is revoked before waiting for any server request. PIN and lock
+/// requests run in order so a late unlock cannot undo the background relock.
+@MainActor
+@Observable
+final class LockedFolderAccess {
+    private let repo: PinRepository
+    private(set) var visitID = UUID()
+    private var pendingOperation: Task<AuthStatusDTO?, Error>?
+    private var pendingOperationID: UUID?
+    private var ignoresSheetDismissal = false
+
+    private(set) var status: AuthStatusDTO?
+    private(set) var isChecking = true
+    private(set) var isVerifying = false
+    private(set) var isActive = true
+    private(set) var errorMessage: String?
+    var showPinSheet = false
+
+    var isUnlocked: Bool { isActive && status?.isElevated == true }
+
+    init(repo: PinRepository) {
+        self.repo = repo
+    }
+
+    func enter() async {
+        guard isActive else { return }
+        visitID = UUID()
+        let expectedVisit = visitID
+        status = nil
+        isChecking = true
+        errorMessage = nil
+        let repo = repo
+        let operation = enqueue {
+            try await repo.lock()
+            let status = try await repo.status()
+            // Every visit requires a new PIN, even if the server still reports
+            // elevation from another request using the same session.
+            return AuthStatusDTO(pinCode: status.pinCode, isElevated: false)
+        }
+        do {
+            let fresh = try await operation.value
+            guard isActive, visitID == expectedVisit else { return }
+            status = fresh
+            isChecking = false
+            showPinSheet = true
+        } catch {
+            guard isActive, visitID == expectedVisit else { return }
+            isChecking = false
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func presentPIN() async {
+        guard isActive else { return }
+        if status != nil {
+            showPinSheet = true
+        } else {
+            await enter()
+        }
+    }
+
+    func unlock(pin: String, visit: UUID) async throws {
+        guard isActive, visitID == visit, !isChecking, !isVerifying, let status else {
+            throw CancellationError()
+        }
+        let expectedVisit = visitID
+        isVerifying = true
+        defer {
+            if visitID == expectedVisit { isVerifying = false }
+        }
+        let repo = repo
+        let operation = enqueue {
+            if !status.pinCode { try await repo.createPin(pin) }
+            try await repo.unlock(pin: pin)
+            return nil
+        }
+        _ = try await operation.value
+        guard isActive, visitID == expectedVisit else { throw CancellationError() }
+        self.status = AuthStatusDTO(pinCode: true, isElevated: true)
+        showPinSheet = false
+    }
+
+    func deactivate() {
+        guard isActive else { return }
+        isActive = false
+        visitID = UUID()
+        status = nil
+        isChecking = false
+        isVerifying = false
+        errorMessage = nil
+        ignoresSheetDismissal = showPinSheet
+        showPinSheet = false
+        let repo = repo
+        // This runs after an outstanding unlock, including one which completes
+        // after the app is already in the background.
+        _ = enqueue {
+            try await repo.lock()
+            return nil
+        }
+    }
+
+    func activate() async {
+        guard !isActive else { return }
+        isActive = true
+        await enter()
+    }
+
+    func shouldLeaveAfterSheetDismissal() -> Bool {
+        if ignoresSheetDismissal {
+            ignoresSheetDismissal = false
+            return false
+        }
+        return isActive && !isUnlocked && !isVerifying && !isChecking
+    }
+
+    private func enqueue(
+        _ operation: @escaping @MainActor () async throws -> AuthStatusDTO?
+    ) -> Task<AuthStatusDTO?, Error> {
+        let previous = pendingOperation
+        let id = UUID()
+        pendingOperationID = id
+        let task = Task { @MainActor [weak self] in
+            _ = try? await previous?.value
+            defer {
+                if self?.pendingOperationID == id { self?.pendingOperation = nil }
+            }
+            return try await operation()
+        }
+        pendingOperation = task
+        return task
+    }
+}
+
+/// The collection is removed when access is revoked, including its loaded data.
 struct LockedFolderView: View {
     @Environment(SessionManager.self) private var session
     @Environment(\.dismiss) private var dismiss
-    @State private var repo: PinRepository?
-    @State private var status: AuthStatusDTO?
-    @State private var isChecking = true
-    @State private var showPinSheet = false
-    /// Penjaga supaya penguncian ulang hanya terjadi saat BENAR-BENAR masuk.
-    ///
-    /// `task` ikut berjalan lagi setiap kembali dari layar detail foto —
-    /// mendorong satu foto lalu menutupnya tidak boleh dihitung sebagai membuka
-    /// folder ini dari awal, kalau tidak PIN-nya diminta terus-menerus.
-    @State private var hasEntered = false
-    /// PIN sudah benar dan statusnya sedang diperiksa ulang ke server.
-    ///
-    /// Selama ini menyala, menutupnya sheet TIDAK berarti membatalkan.
-    @State private var isVerifying = false
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var access: LockedFolderAccess?
 
     var body: some View {
         content
             .navigationTitle("Locked Folder")
             .navigationBarTitleDisplayMode(.inline)
-            .sheet(isPresented: $showPinSheet, onDismiss: leaveIfStillLocked) {
-                pinSheet
+            .sheet(isPresented: Binding(
+                get: { access?.showPinSheet == true },
+                set: { access?.showPinSheet = $0 }), onDismiss: leaveIfStillLocked) {
+                    pinSheet
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active {
+                    Task { await access?.activate() }
+                } else {
+                    access?.deactivate()
+                }
             }
             .task {
-                guard !hasEntered else { return }
-                hasEntered = true
-                await enter()
+                guard access == nil else { return }
+                let access = LockedFolderAccess(repo: PinRepository(api: APIClient(session: session)))
+                self.access = access
+                if scenePhase == .active {
+                    await access.enter()
+                } else {
+                    access.deactivate()
+                }
             }
     }
 
     @ViewBuilder
     private var content: some View {
-        if isChecking {
+        if access == nil || access?.isChecking == true {
             ProgressView()
-        } else if isUnlocked {
+        } else if access?.isUnlocked == true {
             AssetCollectionView(
                 title: "Locked Folder",
                 request: SearchRequestDTO(size: 200, visibility: "locked"),
                 layout: .monthly)
+                .background {
+                    LockedContentPrivacyGuard(onDeactivate: { access?.deactivate() })
+                        .frame(width: 0, height: 0)
+                }
         } else {
             lockedPlaceholder
         }
     }
 
-    private var isUnlocked: Bool {
-        status?.isElevated == true
-    }
-
-    /// Latar di belakang sheet. Tetap ada setelah sheet ditutup manual, jadi
-    /// pengguna punya jalan untuk mencoba lagi tanpa keluar-masuk layar.
     private var lockedPlaceholder: some View {
         ContentUnavailableView {
             Label("Locked", systemImage: "lock.fill")
         } description: {
-            Text("Enter your PIN to see the photos in this folder.")
+            if let message = access?.errorMessage {
+                Text(message)
+            } else {
+                Text("Enter your PIN to see the photos in this folder.")
+            }
         } actions: {
-            Button("Enter PIN") { showPinSheet = true }
+            Button("Enter PIN") { Task { await access?.presentPIN() } }
                 .buttonStyle(.borderedProminent)
         }
     }
 
     @ViewBuilder
     private var pinSheet: some View {
-        if let repo {
+        if let access {
+            let visit = access.visitID
             PinPromptSheet(
-                repo: repo,
-                needsSetup: status?.pinCode == false,
-                onUnlocked: {
-                    // Sheet-nya TIDAK ditutup di sini.
-                    //
-                    // Menutupnya menjalankan `onDismiss`, dan itu terjadi begitu
-                    // animasinya selesai — sementara `/auth/status` masih dalam
-                    // perjalanan. Yang terbaca di sana masih status LAMA (belum
-                    // elevated), jadi layarnya ikut ditutup persis setelah PIN
-                    // yang benar dimasukkan. `checkStatus` yang menutupnya,
-                    // setelah jawabannya ada.
-                    Task {
-                        isVerifying = true
-                        await checkStatus(assumingUnlocked: true)
-                        isVerifying = false
-                    }
-                })
-            // Tetap ringkas, tetapi cukup untuk petunjuk 4–6 digit dan tombol
-            // Continue yang dibutuhkan PIN empat atau lima digit.
-            .presentationDetents([.height(360)])
-            .presentationDragIndicator(.visible)
+                needsSetup: access.status?.pinCode == false,
+                unlock: { try await access.unlock(pin: $0, visit: visit) })
+                .id(visit)
+                .interactiveDismissDisabled(access.isVerifying)
+                .presentationDetents([.height(360)])
+                .presentationDragIndicator(.visible)
         }
     }
 
-    /// Menutup sheet tanpa membuka kunci berarti membatalkan — layarnya ikut
-    /// ditutup, bukan meninggalkan halaman kosong yang tidak bisa apa-apa.
     private func leaveIfStillLocked() {
-        guard !isUnlocked, !isVerifying else { return }
-        dismiss()
-    }
-
-    /// Dijalankan sekali per kunjungan.
-    ///
-    /// Sesi DIKUNCI ULANG lebih dulu, bukan sekadar diperiksa: elevasi bertahan
-    /// sampai sesinya kedaluwarsa, jadi tanpa ini sekali memasukkan PIN berarti
-    /// folder ini terbuka terus sepanjang sesi — termasuk untuk siapa pun yang
-    /// memegang ponselnya setelah itu.
-    private func enter() async {
-        if repo == nil {
-            repo = PinRepository(api: APIClient(session: session))
-        }
-        try? await repo?.lock()
-        await checkStatus()
-    }
-
-    /// - Parameter assumingUnlocked: dipanggil tepat setelah PIN diterima.
-    ///
-    ///   Kalau `/auth/status` gagal di detik itu — jaringan putus sekejap —
-    ///   menimpa statusnya dengan nil berarti sheet PIN tidak pernah tertutup
-    ///   padahal PIN-nya sudah benar dan input sudah terkirim, sehingga tidak
-    ///   bisa dikirim ulang tanpa menghapusnya dulu. Server
-    ///   sudah bilang "diterima"; itu cukup untuk melanjutkan.
-    private func checkStatus(assumingUnlocked: Bool = false) async {
-        if let fresh = try? await repo?.status() {
-            status = fresh
-        } else if assumingUnlocked {
-            status = AuthStatusDTO(pinCode: true, isElevated: true)
-        }
-        isChecking = false
-        showPinSheet = !isUnlocked
+        if access?.shouldLeaveAfterSheetDismissal() == true { dismiss() }
     }
 }
 
@@ -195,10 +281,9 @@ enum PinCodeContract {
 /// atau lima digit tersedia tombol Continue karena panjang akhirnya tidak bisa
 /// diketahui hanya dari ketikan.
 struct PinPromptSheet: View {
-    let repo: PinRepository
     /// true kalau pengguna belum pernah membuat PIN sama sekali.
     let needsSetup: Bool
-    var onUnlocked: () -> Void
+    var unlock: (String) async throws -> Void
 
     @State private var pin = ""
     @State private var isWorking = false
@@ -301,11 +386,7 @@ struct PinPromptSheet: View {
         defer { isWorking = false }
 
         do {
-            if needsSetup {
-                try await repo.createPin(pin)
-            }
-            try await repo.unlock(pin: pin)
-            onUnlocked()
+            try await unlock(pin)
         } catch {
             // Digoyang lebih dulu, baru dikosongkan setelah goyangannya selesai
             // — kalau langsung dikosongkan, lingkarannya sudah putih sebelum
