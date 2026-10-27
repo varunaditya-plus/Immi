@@ -183,7 +183,10 @@ class SessionManager {
     }
 
     func loginPassword(email: String, password: String) async throws {
+        let requestedSession = snapshot
         try await waitForCleanup()
+        try Task.checkCancellation()
+        try checkCurrent(requestedSession)
         try requireCompatibleServer(passwordLogin: true)
         let attempt = beginAuthentication()
         defer { finishAttempt(attempt) }
@@ -197,7 +200,10 @@ class SessionManager {
     }
 
     func loginOIDC() async throws {
+        let requestedSession = snapshot
         try await waitForCleanup()
+        try Task.checkCancellation()
+        try checkCurrent(requestedSession)
         try requireCompatibleServer(passwordLogin: false)
         guard serverCompatibility?.features.oauth == true else {
             throw ServerCompatibilityError.oauthUnavailable
@@ -227,11 +233,20 @@ class SessionManager {
     }
 
     func loginApiKey(_ key: String) async throws {
+        let requestedSession = snapshot
         try await waitForCleanup()
+        try Task.checkCancellation()
+        try checkCurrent(requestedSession)
         try requireCompatibleServer(passwordLogin: false)
         let attempt = beginAuthentication()
         defer { finishAttempt(attempt) }
         try await completeLogin(token: key, mode: .apiKey, context: snapshot, attempt: attempt)
+    }
+
+    func cancelAuthentication() {
+        guard authenticationAttempt != nil || !isLoggedIn else { return }
+        authenticationAttempt = nil
+        invalidateRequests()
     }
 
     private func beginAuthentication() -> UUID {
@@ -450,7 +465,7 @@ class SessionManager {
         }
     }
 
-    private func waitForCleanup() async throws {
+    func waitForCleanup() async throws {
         if let cleanupTask { try await cleanupTask.value }
     }
 

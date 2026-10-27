@@ -4,6 +4,166 @@ import XCTest
 
 @MainActor
 final class SessionManagerTests: XCTestCase {
+    func testLoginCannotSendCredentialsToAServerChangedDuringCleanup() async throws {
+        for entry in CleanupLoginEntry.allCases {
+            let fixture = try SessionFixture()
+            defer { fixture.cleanup() }
+            let replacement = SessionTestServer()
+            defer { replacement.close() }
+            let session = cleanupWaitingSession(fixture)
+            fixture.server.respond(to: "/server/features", status: 200,
+                json: #"{"passwordLogin":true,"oauth":true}"#)
+            replacement.respond(to: "/server/features", status: 200,
+                json: #"{"passwordLogin":true,"oauth":true}"#)
+            try session.setServer(fixture.server.baseURL.absoluteString)
+            try await session.checkServerCompatibility()
+            let login = Task { try await entry.login(session) }
+            defer { login.cancel(); session.finishCleanupWait() }
+            await fulfillment(of: [session.cleanupStarted], timeout: 2)
+
+            try session.setServer(replacement.baseURL.absoluteString)
+            try await session.checkServerCompatibility()
+            session.finishCleanupWait()
+
+            do {
+                try await login.value
+                XCTFail("The \(entry) login must reject a changed destination")
+            } catch is CancellationError {}
+            for path in ["/auth/login", "/oauth/authorize", "/users/me"] {
+                XCTAssertFalse(replacement.hasRequested(path), "Credentials cannot reach the replacement server")
+                XCTAssertFalse(fixture.server.hasRequested(path))
+            }
+            XCTAssertFalse(session.isLoggedIn)
+            XCTAssertNil(fixture.credentials.read("token"))
+        }
+    }
+
+    func testCurrentLoginsContinueAfterCleanupWithoutChangingTheirDestination() async throws {
+        for entry in CleanupLoginEntry.allCases {
+            let fixture = try SessionFixture()
+            defer { fixture.cleanup() }
+            let session = cleanupWaitingSession(fixture)
+            fixture.server.respond(to: "/server/features", status: 200,
+                json: #"{"passwordLogin":true,"oauth":true}"#)
+            fixture.server.respond(to: "/oauth/authorize", status: 401)
+            try session.setServer(fixture.server.baseURL.absoluteString)
+            try await session.checkServerCompatibility()
+            let login = Task { try await entry.login(session) }
+            defer { login.cancel(); session.finishCleanupWait() }
+            await fulfillment(of: [session.cleanupStarted], timeout: 2)
+
+            session.finishCleanupWait()
+
+            if entry == .oidc {
+                do {
+                    try await login.value
+                    XCTFail("The fixture rejects OAuth before opening a browser")
+                } catch APIError.unauthorized {}
+                XCTAssertTrue(fixture.server.hasRequested("/oauth/authorize"))
+            } else {
+                try await login.value
+                XCTAssertTrue(session.isLoggedIn)
+                XCTAssertEqual(session.currentUser?.id, fixture.server.userID)
+                XCTAssertTrue(fixture.server.hasRequested("/users/me"))
+                let expected = entry == .password ? "Bearer initial-token" : nil
+                XCTAssertEqual(fixture.server.header("Authorization", for: "/users/me"), expected)
+                if entry == .apiKey {
+                    XCTAssertEqual(fixture.server.header("x-api-key", for: "/users/me"), "cleanup-test-key")
+                }
+            }
+            XCTAssertEqual(session.baseURL, fixture.server.baseURL.appendingPathComponent("api"))
+        }
+    }
+
+    func testCanceledLoginsDoNotSendCredentialsAfterCleanupFinishes() async throws {
+        for entry in CleanupLoginEntry.allCases {
+            let fixture = try SessionFixture()
+            defer { fixture.cleanup() }
+            let session = cleanupWaitingSession(fixture)
+            fixture.server.respond(to: "/server/features", status: 200,
+                json: #"{"passwordLogin":true,"oauth":true}"#)
+            try session.setServer(fixture.server.baseURL.absoluteString)
+            try await session.checkServerCompatibility()
+            let login = Task { try await entry.login(session) }
+            defer { login.cancel(); session.finishCleanupWait() }
+            await fulfillment(of: [session.cleanupStarted], timeout: 2)
+
+            login.cancel()
+            session.finishCleanupWait()
+
+            do {
+                try await login.value
+                XCTFail("A canceled \(entry) login must not continue after cleanup")
+            } catch is CancellationError {}
+            XCTAssertFalse(session.isLoggedIn)
+            for path in ["/auth/login", "/oauth/authorize", "/users/me"] {
+                XCTAssertFalse(fixture.server.hasRequested(path))
+            }
+        }
+    }
+
+    private func cleanupWaitingSession(_ fixture: SessionFixture) -> CleanupWaitingSession {
+        CleanupWaitingSession(urlSession: fixture.urlSession, defaults: fixture.defaults,
+            dataManager: fixture.dataManager, credentialStore: fixture.credentials,
+            sharedSessionStore: fixture.sharedSessionStore, restoresSession: false)
+    }
+
+    func testLeavingOnboardingCancelsLoginBeforeCredentialsOrAccountPublication() async throws {
+        for waitsForCleanup in [true, false] {
+            for editsAddress in [true, false] {
+                let fixture = try SessionFixture()
+                defer { fixture.cleanup() }
+                let waiting = waitsForCleanup ? cleanupWaitingSession(fixture) : nil
+                let session: SessionManager = waiting ?? fixture.session
+                let model = OnboardingViewModel(session: session)
+                model.serverText = fixture.server.baseURL.absoluteString
+                model.email = "person@example.com"
+                model.password = "password"
+                let connected = await model.connectToServer()
+                XCTAssertTrue(connected)
+                let started = waiting?.cleanupStarted ?? expectation(description: "The candidate profile is pending")
+                if !waitsForCleanup { fixture.server.hold("/users/me", started: started) }
+                let login = Task { await model.signIn() }
+                defer {
+                    login.cancel()
+                    waiting?.finishCleanupWait()
+                    fixture.server.release("/users/me", status: 200, json: fixture.server.profileJSON)
+                }
+                await fulfillment(of: [started], timeout: 2)
+
+                if editsAddress { model.serverText = "https://another-server.example" }
+                else { model.prepareToEditServer() }
+                waiting?.finishCleanupWait()
+                fixture.server.release("/users/me", status: 200, json: fixture.server.profileJSON)
+                let accepted = await login.value
+
+                XCTAssertFalse(accepted)
+                XCTAssertFalse(session.isLoggedIn)
+                XCTAssertNil(session.currentUser)
+                XCTAssertNil(fixture.credentials.read("token"))
+                XCTAssertNil(fixture.sharedSessionStore.load())
+                if waitsForCleanup {
+                    XCTAssertFalse(fixture.server.hasRequested("/auth/login"))
+                }
+            }
+        }
+    }
+
+    func testCancelingOnboardingDoesNotInvalidateAnEstablishedSession() async throws {
+        let fixture = try SessionFixture()
+        defer { fixture.cleanup() }
+        try await fixture.signIn()
+        let context = fixture.session.snapshot
+        let shared = try XCTUnwrap(fixture.sharedSessionStore.load())
+
+        fixture.session.cancelAuthentication()
+
+        XCTAssertTrue(fixture.session.isLoggedIn)
+        XCTAssertEqual(fixture.session.snapshot, context)
+        XCTAssertEqual(fixture.sharedSessionStore.credential(for: shared)?.authHeaders,
+            fixture.session.authHeaders)
+    }
+
     func testAuthenticated401ExpiresSessionAndRemovesCredentials() async throws {
         let fixture = try SessionFixture()
         defer { fixture.cleanup() }
@@ -823,6 +983,12 @@ private final class SessionTestServer: @unchecked Sendable {
         return requests["/api" + path]?.value(forHTTPHeaderField: name)
     }
 
+    func hasRequested(_ path: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return requests["/api" + path] != nil
+    }
+
     func release(_ path: String, status: Int, json: String = "{}") {
         lock.lock()
         let request = heldRequests.removeValue(forKey: "/api" + path)
@@ -900,5 +1066,36 @@ private final class SessionTestURLProtocol: URLProtocol {
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(json.utf8))
         client?.urlProtocolDidFinishLoading(self)
+    }
+}
+
+@MainActor
+private final class CleanupWaitingSession: SessionManager {
+    let cleanupStarted = XCTestExpectation(description: "Login is waiting for account cleanup")
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    override func waitForCleanup() async throws {
+        await withCheckedContinuation {
+            continuation = $0
+            cleanupStarted.fulfill()
+        }
+    }
+
+    func finishCleanupWait() {
+        continuation?.resume()
+        continuation = nil
+    }
+}
+
+private enum CleanupLoginEntry: CaseIterable {
+    case password, apiKey, oidc
+
+    @MainActor
+    func login(_ session: SessionManager) async throws {
+        switch self {
+        case .password: try await session.loginPassword(email: "person@example.com", password: "password")
+        case .apiKey: try await session.loginApiKey("cleanup-test-key")
+        case .oidc: try await session.loginOIDC()
+        }
     }
 }
