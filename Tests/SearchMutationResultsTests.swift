@@ -25,6 +25,8 @@ final class SearchMutationResultsTests: XCTestCase {
             XCTAssertEqual(fixture.model.actionError, "Rejected \(fixture.ids[failureIndex])")
             for (index, id) in fixture.ids.enumerated() {
                 XCTAssertEqual(fixture.manager.getCachedAsset(id: id)?.isArchived, index < failureIndex)
+                XCTAssertEqual(fixture.manager.archivedAssetIDs.contains(id), index < failureIndex)
+                XCTAssertTrue(AssetVisibilityPolicy(scope: .collection, dataManager: fixture.manager).allows(id: id))
             }
             assertLoaded(fixture.model)
         }
@@ -67,6 +69,10 @@ final class SearchMutationResultsTests: XCTestCase {
         XCTAssertNil(fixture.model.actionError)
         let reopened = SwiftDataManager(storeURL: fixture.store, backupJournalURL: fixture.journal)
         XCTAssertTrue(reopened.timelineAssets().isEmpty)
+        XCTAssertEqual(reopened.archivedAssetIDs, Set(fixture.ids))
+        XCTAssertTrue(fixture.ids.allSatisfy {
+            AssetVisibilityPolicy(scope: .collection, dataManager: reopened).allows(id: $0)
+        })
         assertLoaded(fixture.model)
     }
 

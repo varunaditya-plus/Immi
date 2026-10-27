@@ -58,6 +58,14 @@ final class TimelineMutationResultsTests: XCTestCase {
             XCTAssertTrue(fixture.manager.timelineAssets().isEmpty)
             XCTAssertNil(fixture.model.actionError)
             for id in fixture.ids { XCTAssertEqual(fixture.manager.getCachedAsset(id: id)?.isArchived, true) }
+            switch action {
+            case .archive:
+                XCTAssertEqual(fixture.manager.archivedAssetIDs, Set(fixture.ids))
+                XCTAssertTrue(fixture.manager.privateAssetIDs.isEmpty)
+            case .lock:
+                XCTAssertEqual(fixture.manager.privateAssetIDs, Set(fixture.ids))
+                XCTAssertTrue(fixture.manager.archivedAssetIDs.isEmpty)
+            }
             assertLoaded(fixture.model)
         }
     }

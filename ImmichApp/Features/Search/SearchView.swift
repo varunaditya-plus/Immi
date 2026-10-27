@@ -17,9 +17,11 @@ struct SearchView: View {
     @State private var isPreparingShare = false
     @State private var isPerformingAction = false
     @State private var shareURLs: [URL] = []
+    @State private var sharedAssetIDs: [String] = []
     @State private var isSharePresented = false
     @State private var albumPicker: SelectedAssets?
     @State private var selectionLink: SharedLinkPresentation?
+    @State private var linkedAssetIDs: [String] = []
     /// Foto yang menunggu konfirmasi hapus — dari seleksi maupun context menu.
     @State private var pendingDelete: SelectedAssets?
     /// Naik satu setiap penghapusan yang dikonfirmasi server.
@@ -49,6 +51,16 @@ struct SearchView: View {
                 .toolbar(isSelecting ? .hidden : .automatic, for: .tabBar)
                 .toolbar(isSelecting ? .visible : .hidden, for: .bottomBar)
                 .overlay { presentations }
+                .onChange(of: visibilityPolicy.state) { _, _ in
+                    if !sharedAssetIDs.allSatisfy({ visibilityPolicy.allows(id: $0) }) {
+                        isSharePresented = false
+                        cleanupPreparedShare()
+                    }
+                    if !linkedAssetIDs.allSatisfy({ visibilityPolicy.allows(id: $0) }) {
+                        selectionLink = nil
+                        linkedAssetIDs.removeAll()
+                    }
+                }
                 .onChange(of: searchText) { _, newValue in
                     vm?.searchText = newValue
                     vm?.scheduleSearch()
@@ -435,22 +447,40 @@ struct SearchView: View {
         selectedIDs.removeAll()
     }
 
+    private var visibilityPolicy: AssetVisibilityPolicy { AssetVisibilityPolicy(scope: .timeline) }
+
     private func share(_ ids: [String]) {
-        guard !ids.isEmpty else { return }
+        guard !ids.isEmpty, ids.allSatisfy({ visibilityPolicy.allows(id: $0) }) else { return }
+        let generation = LocalSnapshot.generation
         isPreparingShare = true
         Task {
             let urls = await vm?.shareURLs(for: ids) ?? []
             isPreparingShare = false
+            guard !Task.isCancelled, generation == LocalSnapshot.generation,
+                  ids.allSatisfy({ visibilityPolicy.allows(id: $0) }) else {
+                TemporaryMediaStore.remove(urls)
+                return
+            }
             guard !urls.isEmpty else { return }
             shareURLs = urls
+            sharedAssetIDs = ids
             isSharePresented = true
         }
     }
 
+    private func cleanupPreparedShare() {
+        TemporaryMediaStore.remove(shareURLs)
+        shareURLs.removeAll()
+        sharedAssetIDs.removeAll()
+    }
+
     private func createSharedLink(for ids: [String]) {
-        guard !ids.isEmpty else { return }
+        guard !ids.isEmpty, ids.allSatisfy({ visibilityPolicy.allows(id: $0) }) else { return }
+        let generation = LocalSnapshot.generation
         let repo = SharedLinkRepository(api: APIClient(session: session))
         Task {
+            guard !Task.isCancelled, generation == LocalSnapshot.generation,
+                  ids.allSatisfy({ visibilityPolicy.allows(id: $0) }) else { return }
             // Kegagalannya BERSUARA. Ditelan `try?` tanpa kabar, mengetuk
             // "Share Link" pada server yang menolak tidak menghasilkan apa-apa
             // di layar — dan tidak ada cara membedakannya dari ketukan yang
@@ -461,6 +491,9 @@ struct SearchView: View {
                 vm?.actionError = String(localized: "Failed to create shared link")
                 return
             }
+            guard !Task.isCancelled, generation == LocalSnapshot.generation,
+                  ids.allSatisfy({ visibilityPolicy.allows(id: $0) }) else { return }
+            linkedAssetIDs = ids
             selectionLink = SharedLinkPresentation(url: url)
         }
     }
@@ -490,7 +523,7 @@ struct SearchView: View {
     private var presentations: some View {
         Color.clear
             .frame(width: 0, height: 0)
-            .sheet(isPresented: $isSharePresented) {
+            .sheet(isPresented: $isSharePresented, onDismiss: cleanupPreparedShare) {
                 MultiShareSheet(urls: shareURLs)
             }
             .sheet(item: $albumPicker) { selection in
@@ -500,7 +533,9 @@ struct SearchView: View {
                     }
                 }
             }
-            .sheet(item: $selectionLink) { ShareSheet(url: $0.url) }
+            .sheet(item: $selectionLink, onDismiss: { linkedAssetIDs.removeAll() }) {
+                ShareSheet(url: $0.url)
+            }
             // Dialognya menempel di sini, bukan di tombol sampahnya: tombol itu
             // hidup di dalam `SelectionToolbar`, dan modifier presentasi pada
             // item toolbar tidak selalu punya tempat untuk menampilkannya.

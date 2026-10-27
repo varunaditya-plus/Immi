@@ -9,12 +9,16 @@ final class SearchViewModel {
     var results: [AssetLite] {
         get {
             guard snapshotGeneration == LocalSnapshot.generation else { return [] }
-            return loadedResults.filter { !dataManager.nonTimelineAssetIDs.contains($0.id) }
+            return AssetVisibilityPolicy(scope: .timeline, dataManager: dataManager).filter(loadedResults)
         }
         set { loadedResults = newValue }
     }
     /// Lower bound while more pages remain; Immich v3 totals can be page-local.
-    private(set) var totalResults = 0
+    private var fetchedTotal = 0
+    var totalResults: Int {
+        guard snapshotGeneration == LocalSnapshot.generation else { return 0 }
+        return max(0, fetchedTotal - (loadedResults.count - results.count))
+    }
     var phase: LoadingPhase<Void> = .idle
     private(set) var currentPage = 1
     private(set) var nextPage: String?
@@ -93,7 +97,7 @@ final class SearchViewModel {
         activeRequest = nil
         removedResultIDs.removeAll()
         results = []
-        totalResults = 0
+        fetchedTotal = 0
         currentPage = 1
         nextPage = nil
         isLoadingMore = false
@@ -124,8 +128,8 @@ final class SearchViewModel {
                 $0.isTimelineVisible && !removedResultIDs.contains($0.id) && seen.insert($0.id).inserted
             }
                 .map(Self.makeAssetLite)
-            totalResults = response.assets.nextPage == nil
-                ? results.count : max(response.assets.total, results.count)
+            fetchedTotal = response.assets.nextPage == nil
+                ? loadedResults.count : max(response.assets.total, loadedResults.count)
             activeRequest = request
             nextPage = response.assets.nextPage
             phase = .loaded(())
@@ -163,8 +167,8 @@ final class SearchViewModel {
             }
                 .map(Self.makeAssetLite)
             loadedResults.append(contentsOf: newAssets)
-            totalResults = response.assets.nextPage == nil
-                ? results.count : max(totalResults, response.assets.total, results.count)
+            fetchedTotal = response.assets.nextPage == nil
+                ? loadedResults.count : max(fetchedTotal, response.assets.total, loadedResults.count)
             currentPage = page
             self.nextPage = response.assets.nextPage
         } catch {
@@ -269,8 +273,9 @@ final class SearchViewModel {
                 guard snapshotGeneration == LocalSnapshot.generation else { return false }
                 removeLocally([id])
                 if !dataManager.nonTimelineAssetIDs.contains(id)
+                    || !dataManager.archivedAssetIDs.contains(id)
                     || dataManager.getCachedAsset(id: id)?.isArchived == false {
-                    try? dataManager.setTimelineVisibility([id], inTimeline: false)
+                    try? dataManager.setAssetVisibility([id], to: "archive")
                 }
             }
             return true
@@ -319,9 +324,12 @@ final class SearchViewModel {
 
     /// Yang gagal diunduh dilewati, bukan membatalkan seluruh operasi.
     func shareURLs(for ids: [String]) async -> [URL] {
-        guard snapshotGeneration == LocalSnapshot.generation, !Task.isCancelled else { return [] }
+        let policy = AssetVisibilityPolicy(scope: .timeline, dataManager: dataManager)
+        guard snapshotGeneration == LocalSnapshot.generation, !Task.isCancelled,
+              ids.allSatisfy({ policy.allows(id: $0) }) else { return [] }
         let urls = await assetRepo.shareFiles(ids)
-        guard snapshotGeneration == LocalSnapshot.generation, !Task.isCancelled else {
+        guard snapshotGeneration == LocalSnapshot.generation, !Task.isCancelled,
+              ids.allSatisfy({ policy.allows(id: $0) }) else {
             TemporaryMediaStore.remove(urls)
             return []
         }
@@ -342,7 +350,7 @@ final class SearchViewModel {
         // Totalnya ikut turun sebanyak yang benar-benar hilang dari daftar ini.
         // Mengurangi `ids.count` mentah-mentah akan salah kalau sebagiannya
         // memang belum pernah dimuat.
-        totalResults = max(0, totalResults - (before - loadedResults.count))
+        fetchedTotal = max(0, fetchedTotal - (before - loadedResults.count))
     }
 
     func patchFavorite(_ id: String, to value: Bool) {

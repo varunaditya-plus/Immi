@@ -229,7 +229,7 @@ final class AssetGridViewModel {
                 try await assetRepo.setVisibility(id, to: visibility)
                 guard snapshotGeneration == LocalSnapshot.generation else { return false }
                 assets.removeAll { $0.id == id }
-                cacheVisibilityIfNeeded(id, inTimeline: visibility == .timeline)
+                cacheVisibilityIfNeeded(id, visibility: visibility)
             }
             return true
         } catch {
@@ -256,11 +256,13 @@ final class AssetGridViewModel {
         }
     }
 
-    private func cacheVisibilityIfNeeded(_ id: String, inTimeline: Bool) {
+    private func cacheVisibilityIfNeeded(_ id: String, visibility: AssetDetailRepository.Visibility) {
+        let inTimeline = visibility == .timeline
         loadRevision = UUID()
         if dataManager.nonTimelineAssetIDs.contains(id) != !inTimeline
+            || dataManager.archivedAssetIDs.contains(id) != (visibility == .archive)
             || dataManager.getCachedAsset(id: id).map({ $0.isArchived != !inTimeline }) == true {
-            try? dataManager.setTimelineVisibility([id], inTimeline: inTimeline)
+            try? dataManager.setAssetVisibility([id], to: visibility.rawValue)
         }
     }
 

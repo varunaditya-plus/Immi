@@ -583,11 +583,13 @@ final class TimelineViewModel {
         }
     }
 
-    private func cacheVisibilityIfNeeded(_ id: String, inTimeline: Bool) {
+    private func cacheVisibilityIfNeeded(_ id: String, visibility: AssetDetailRepository.Visibility) {
+        let inTimeline = visibility == .timeline
         guard let dataManager else { return }
         if dataManager.nonTimelineAssetIDs.contains(id) != !inTimeline
+            || dataManager.archivedAssetIDs.contains(id) != (visibility == .archive)
             || dataManager.getCachedAsset(id: id).map({ $0.isArchived != !inTimeline }) == true {
-            try? dataManager.setTimelineVisibility([id], inTimeline: inTimeline)
+            try? dataManager.setAssetVisibility([id], to: visibility.rawValue)
         }
     }
 
@@ -598,7 +600,7 @@ final class TimelineViewModel {
             try await assetRepo.toggleArchive(asset.id, to: true)
             guard accountGeneration == LocalSnapshot.generation else { return }
             removeAsset(asset.id)
-            cacheVisibilityIfNeeded(asset.id, inTimeline: false)
+            cacheVisibilityIfNeeded(asset.id, visibility: .archive)
         } catch {
             actionError = Self.describe(error)
         }
@@ -667,7 +669,7 @@ final class TimelineViewModel {
                 try await assetRepo.toggleArchive(id, to: true)
                 guard accountGeneration == LocalSnapshot.generation else { return false }
                 removeAsset(id)
-                cacheVisibilityIfNeeded(id, inTimeline: false)
+                cacheVisibilityIfNeeded(id, visibility: .archive)
             }
             return true
         } catch {
@@ -686,7 +688,7 @@ final class TimelineViewModel {
                 try await assetRepo.setVisibility(id, to: .locked)
                 guard accountGeneration == LocalSnapshot.generation else { return false }
                 removeAsset(id)
-                cacheVisibilityIfNeeded(id, inTimeline: false)
+                cacheVisibilityIfNeeded(id, visibility: .locked)
             }
             return true
         } catch {

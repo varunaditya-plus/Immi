@@ -64,6 +64,7 @@ struct AssetCollectionView: View {
             onUnlockSelection: unlockSelection,
             onMoveToLocked: moveToLocked,
             onShareLink: { createSharedLink(for: $0) },
+            visibilityScope: request.visibility == "locked" ? .locked : .collection,
             selectionMenu: selectionMenu)
     }
 
@@ -82,12 +83,18 @@ struct AssetCollectionView: View {
     }
 
     private func createSharedLink(for ids: [String]) {
-        guard !ids.isEmpty else { return }
+        let policy = AssetVisibilityPolicy(scope: request.visibility == "locked" ? .locked : .collection)
+        guard !ids.isEmpty, ids.allSatisfy({ policy.allows(id: $0) }) else { return }
+        let generation = LocalSnapshot.generation
         let repo = SharedLinkRepository(api: APIClient(session: session))
         Task {
+            guard !Task.isCancelled, generation == LocalSnapshot.generation,
+                  ids.allSatisfy({ policy.allows(id: $0) }) else { return }
             vm?.actionError = nil
             do {
                 let link = try await repo.create(assetIds: ids)
+                guard !Task.isCancelled, generation == LocalSnapshot.generation,
+                      ids.allSatisfy({ policy.allows(id: $0) }) else { return }
                 guard let url = link.publicURL(base: session.baseURL) else {
                     vm?.actionError = String(localized: "Failed to create shared link")
                     return
@@ -175,7 +182,10 @@ struct AssetCollectionView: View {
                 snapshotKey: snapshotKey,
                 loader: {
                     let items = try await searchRepo.allMetadata(request)
-                    return items.map(AssetLite.init)
+                    let visible = request.visibility == "locked" ? items : items.filter {
+                        request.visibility == "archive" ? $0.isVisibleInAlbum : $0.isTimelineVisible
+                    }
+                    return visible.map(AssetLite.init)
                 })
         }
         // SETIAP kali, bukan sekali.

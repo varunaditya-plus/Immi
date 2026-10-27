@@ -161,6 +161,8 @@ final class CollectionMutationTests: XCTestCase {
             XCTAssertNil(fixture.model.actionError)
             let reopened = SwiftDataManager(storeURL: fixture.storeURL, backupJournalURL: fixture.journalURL)
             for id in fixture.ids { XCTAssertEqual(reopened.getCachedAsset(id: id)?.isArchived, action != .unlock) }
+            XCTAssertEqual(reopened.archivedAssetIDs, action == .archive ? Set(fixture.ids) : [])
+            XCTAssertEqual(reopened.privateAssetIDs, action == .lock ? Set(fixture.ids) : [])
             assertLoaded(fixture.model)
         }
     }
