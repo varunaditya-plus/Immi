@@ -259,14 +259,14 @@ final class BackupQueueStore {
     func bind(to owner: BackupQueueOwner) throws -> Bool {
         guard ledger.owner != owner || ledger.generation == nil else { return false }
         if ledger.owner == owner || (ledger.owner == nil && ledger.items.isEmpty && ledger.completed == 0) {
-            ledger.owner = owner
-            ledger.generation = UUID()
-            try persist()
+            var proposed = ledger
+            proposed.owner = owner
+            proposed.generation = UUID()
+            try persist(proposed)
             return false
         }
         let replacedExistingOwner = ledger.owner != nil || !ledger.items.isEmpty
-        ledger = Ledger(owner: owner, generation: UUID())
-        try persist()
+        try persist(Ledger(owner: owner, generation: UUID()))
         return replacedExistingOwner
     }
 
@@ -452,24 +452,26 @@ final class BackupQueueStore {
     }
 
     func markFailed(_ id: String, error: String, now: Date = .now) throws {
-        try update(id) { item in
-            item.state = .failed
-            item.lastError = error
-            item.nextAttemptAt = nil
-            item.taskIdentifier = nil
-            item.updatedAt = now
+        var proposed = ledger
+        if let index = proposed.items.firstIndex(where: { $0.id == id }) {
+            proposed.items[index].state = .failed
+            proposed.items[index].lastError = error
+            proposed.items[index].nextAttemptAt = nil
+            proposed.items[index].taskIdentifier = nil
+            proposed.items[index].updatedAt = now
         }
         // Also arms legacy queues that predate the persisted notification flag.
-        ledger.completionNotificationPending = true
-        try persist()
+        proposed.completionNotificationPending = true
+        try persist(proposed)
     }
 
     func markCompleted(_ id: String) throws {
         guard let index = ledger.items.firstIndex(where: { $0.id == id }) else { return }
-        ledger.items.remove(at: index)
-        ledger.completed += 1
-        ledger.completionNotificationPending = true
-        try persist()
+        var proposed = ledger
+        proposed.items.remove(at: index)
+        proposed.completed += 1
+        proposed.completionNotificationPending = true
+        try persist(proposed)
     }
 
     /// Atomically records that the terminal result for the current batch has
@@ -477,14 +479,16 @@ final class BackupQueueStore {
     /// render the completed queue without creating another banner.
     func consumeCompletionNotification() throws {
         guard ledger.completionNotificationPending == true else { return }
-        ledger.completionNotificationPending = false
-        try persist()
+        var proposed = ledger
+        proposed.completionNotificationPending = false
+        try persist(proposed)
     }
 
     func discard(_ id: String) throws {
         guard let index = ledger.items.firstIndex(where: { $0.id == id }) else { return }
-        ledger.items.remove(at: index)
-        try persist()
+        var proposed = ledger
+        proposed.items.remove(at: index)
+        try persist(proposed)
     }
 
     /// Menghapus beberapa record sekaligus dengan satu penulisan atomik.
@@ -495,9 +499,10 @@ final class BackupQueueStore {
     func discard(_ ids: Set<String>) throws -> Int {
         guard !ids.isEmpty else { return 0 }
         let previousCount = ledger.items.count
-        ledger.items.removeAll { ids.contains($0.id) }
-        let removedCount = previousCount - ledger.items.count
-        if removedCount > 0 { try persist() }
+        var proposed = ledger
+        proposed.items.removeAll { ids.contains($0.id) }
+        let removedCount = previousCount - proposed.items.count
+        if removedCount > 0 { try persist(proposed) }
         return removedCount
     }
 
@@ -534,33 +539,35 @@ final class BackupQueueStore {
     }
 
     func releaseAuthenticationWaits(now: Date = .now) throws {
+        var proposed = ledger
         var changed = false
-        for index in ledger.items.indices
-        where ledger.items[index].state == .waitingForAuthentication {
-            ledger.items[index].state = .queued
-            ledger.items[index].nextAttemptAt = nil
-            ledger.items[index].updatedAt = now
+        for index in proposed.items.indices
+        where proposed.items[index].state == .waitingForAuthentication {
+            proposed.items[index].state = .queued
+            proposed.items[index].nextAttemptAt = nil
+            proposed.items[index].updatedAt = now
             changed = true
         }
-        if changed { try persist() }
+        if changed { try persist(proposed) }
     }
 
     func markAllWaitingForAuthentication(
         error: String,
         now: Date = .now
     ) throws {
+        var proposed = ledger
         var changed = false
-        for index in ledger.items.indices
-        where ledger.items[index].state != .failed
-            && ledger.items[index].state != .cancelling {
-            ledger.items[index].state = .waitingForAuthentication
-            ledger.items[index].lastError = error
-            ledger.items[index].nextAttemptAt = nil
-            ledger.items[index].taskIdentifier = nil
-            ledger.items[index].updatedAt = now
+        for index in proposed.items.indices
+        where proposed.items[index].state != .failed
+            && proposed.items[index].state != .cancelling {
+            proposed.items[index].state = .waitingForAuthentication
+            proposed.items[index].lastError = error
+            proposed.items[index].nextAttemptAt = nil
+            proposed.items[index].taskIdentifier = nil
+            proposed.items[index].updatedAt = now
             changed = true
         }
-        if changed { try persist() }
+        if changed { try persist(proposed) }
     }
 
     func retryFailed(userRequested: Bool = false, now: Date = .now) throws {
@@ -607,23 +614,24 @@ final class BackupQueueStore {
         let activeByID = activeTasks.reduce(into: [String: BackupActiveTask]()) {
             $0[$1.context.localIdentifier] = $1
         }
+        var proposed = ledger
         var changed = false
 
         for task in activeTasks {
-            if let index = ledger.items.firstIndex(where: { $0.id == task.context.localIdentifier }) {
-                if ledger.items[index].state != .cancelling
-                    && (ledger.items[index].taskIdentifier != task.taskIdentifier
-                    || ledger.items[index].state != .uploading) {
-                    ledger.items[index].state = .uploading
-                    ledger.items[index].phase = task.context.phase
-                    ledger.items[index].checksum = task.context.checksum
-                    ledger.items[index].taskIdentifier = task.taskIdentifier
-                    ledger.items[index].nextAttemptAt = nil
-                    ledger.items[index].updatedAt = now
+            if let index = proposed.items.firstIndex(where: { $0.id == task.context.localIdentifier }) {
+                if proposed.items[index].state != .cancelling
+                    && (proposed.items[index].taskIdentifier != task.taskIdentifier
+                    || proposed.items[index].state != .uploading) {
+                    proposed.items[index].state = .uploading
+                    proposed.items[index].phase = task.context.phase
+                    proposed.items[index].checksum = task.context.checksum
+                    proposed.items[index].taskIdentifier = task.taskIdentifier
+                    proposed.items[index].nextAttemptAt = nil
+                    proposed.items[index].updatedAt = now
                     changed = true
                 }
             } else {
-                ledger.items.append(BackupQueueItem(
+                proposed.items.append(BackupQueueItem(
                     id: task.context.localIdentifier,
                     phase: task.context.phase,
                     state: .uploading,
@@ -635,19 +643,19 @@ final class BackupQueueStore {
                     motionAssetID: nil,
                     createdAt: now,
                     updatedAt: now))
-                ledger.completionNotificationPending = true
+                proposed.completionNotificationPending = true
                 changed = true
             }
         }
 
-        for index in ledger.items.indices {
-            let item = ledger.items[index]
+        for index in proposed.items.indices {
+            let item = proposed.items[index]
             if item.state == .cancelling, activeByID[item.id] == nil {
-                ledger.items[index].state = .failed
-                ledger.items[index].taskIdentifier = nil
-                ledger.items[index].nextAttemptAt = nil
-                ledger.items[index].lastError = String(localized: "Upload canceled.")
-                ledger.items[index].updatedAt = now
+                proposed.items[index].state = .failed
+                proposed.items[index].taskIdentifier = nil
+                proposed.items[index].nextAttemptAt = nil
+                proposed.items[index].lastError = String(localized: "Upload canceled.")
+                proposed.items[index].updatedAt = now
                 changed = true
                 continue
             }
@@ -655,16 +663,16 @@ final class BackupQueueStore {
                   activeByID[item.id] == nil,
                   now.timeIntervalSince(item.updatedAt) >= staleAfter
             else { continue }
-            ledger.items[index].state = .retryScheduled
-            ledger.items[index].taskIdentifier = nil
-            ledger.items[index].nextAttemptAt = now
-            ledger.items[index].lastError = String(
+            proposed.items[index].state = .retryScheduled
+            proposed.items[index].taskIdentifier = nil
+            proposed.items[index].nextAttemptAt = now
+            proposed.items[index].lastError = String(
                 localized: "The previous background transfer was interrupted and will resume.")
-            ledger.items[index].updatedAt = now
+            proposed.items[index].updatedAt = now
             changed = true
         }
 
-        if changed { try persist() }
+        if changed { try persist(proposed) }
     }
 
     func item(id: String) -> BackupQueueItem? {
@@ -677,8 +685,7 @@ final class BackupQueueStore {
     }
 
     func clear() throws {
-        ledger = Ledger()
-        try persist()
+        try persist(Ledger())
     }
 
     private func update(
@@ -686,12 +693,12 @@ final class BackupQueueStore {
         mutation: (inout BackupQueueItem) -> Void
     ) throws {
         guard let index = ledger.items.firstIndex(where: { $0.id == id }) else { return }
-        mutation(&ledger.items[index])
-        try persist()
+        var proposed = ledger
+        mutation(&proposed.items[index])
+        try persist(proposed)
     }
 
-    private func persist(_ proposed: Ledger? = nil) throws {
-        let value = proposed ?? ledger
+    private func persist(_ proposed: Ledger) throws {
         do {
             let directory = fileURL.deletingLastPathComponent()
             try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -703,13 +710,13 @@ final class BackupQueueStore {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
             encoder.outputFormatting = [.sortedKeys]
-            let data = try encoder.encode(value)
+            let data = try encoder.encode(proposed)
             try data.write(to: fileURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
             var mutableFile = fileURL
             try? mutableFile.setResourceValues(values)
             persistenceWarning = nil
-            if proposed != nil { ledger = value }
-            snapshot = Self.makeSnapshot(from: value)
+            ledger = proposed
+            snapshot = Self.makeSnapshot(from: proposed)
         } catch {
             let message = error.localizedDescription
             persistenceWarning = message
