@@ -19,22 +19,72 @@ final class TemporaryMediaStoreTests: XCTestCase {
         try? FileManager.default.removeItem(at: directory)
     }
 
-    func testShareFileIsUniqueAndRemovedExplicitly() throws {
-        let first = try TemporaryMediaStore.createShareFile(
-            data: Data("one".utf8),
+    func testShareFileMovesTheSourceIsUniqueAndRemovedExplicitly() throws {
+        let firstSource = directory.appendingPathComponent("one")
+        let secondSource = directory.appendingPathComponent("two")
+        try Data("one".utf8).write(to: firstSource)
+        try Data("two".utf8).write(to: secondSource)
+        let first = try TemporaryMediaStore.adoptShareFile(
+            at: firstSource,
             suggestedFilename: "../photo.jpg")
-        let second = try TemporaryMediaStore.createShareFile(
-            data: Data("two".utf8),
+        let second = try TemporaryMediaStore.adoptShareFile(
+            at: secondSource,
             suggestedFilename: "photo.jpg")
         defer { TemporaryMediaStore.remove([first, second]) }
 
         XCTAssertNotEqual(first, second)
         XCTAssertTrue(first.lastPathComponent.hasSuffix("-photo.jpg"))
         XCTAssertEqual(try Data(contentsOf: first), Data("one".utf8))
+        XCTAssertEqual(try Data(contentsOf: second), Data("two".utf8))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: firstSource.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: secondSource.path))
 
         TemporaryMediaStore.remove(first)
         XCTAssertFalse(FileManager.default.fileExists(atPath: first.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: second.path))
+    }
+
+    func testAdoptingAManagedShareDoesNotMoveOrDeleteIt() throws {
+        let source = directory.appendingPathComponent("source")
+        try Data("movie".utf8).write(to: source)
+        let managed = try TemporaryMediaStore.adoptShareFile(at: source, suggestedFilename: "movie.mp4")
+        defer { TemporaryMediaStore.remove(managed) }
+
+        let adopted = try TemporaryMediaStore.adoptShareFile(at: managed, suggestedFilename: "movie.mp4")
+
+        XCTAssertEqual(adopted, managed)
+        XCTAssertEqual(try Data(contentsOf: adopted), Data("movie".utf8))
+    }
+
+    func testFailedAdoptionRemovesItsOwnedSource() throws {
+        let source = directory.appendingPathComponent("source")
+        try Data("original".utf8).write(to: source)
+
+        XCTAssertThrowsError(try TemporaryMediaStore.adoptShareFile(
+            at: source, suggestedFilename: String(repeating: "x", count: 512) + ".mov"))
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
+    }
+
+    @MainActor
+    func testCanceledAdoptionRemovesUnmanagedAndManagedSources() async throws {
+        for alreadyManaged in [false, true] {
+            let original = directory.appendingPathComponent(UUID().uuidString)
+            try Data("original".utf8).write(to: original)
+            let source = alreadyManaged
+                ? try TemporaryMediaStore.adoptShareFile(at: original, suggestedFilename: "movie.mp4")
+                : original
+            let task = Task { try TemporaryMediaStore.adoptShareFile(at: source, suggestedFilename: "movie.mp4") }
+            task.cancel()
+            do {
+                let file = try await task.value
+                TemporaryMediaStore.remove(file)
+                XCTFail("Canceled preparation must not produce a share file")
+            } catch {
+                XCTAssertTrue(error is CancellationError)
+            }
+            XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
+        }
     }
 
     func testCleanupRemovesOnlyStaleRegularFiles() throws {

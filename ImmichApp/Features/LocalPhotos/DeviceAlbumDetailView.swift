@@ -175,14 +175,26 @@ struct DeviceAlbumDetailView: View {
     private func shareURLs(for ids: [String]) async -> [URL] {
         var urls: [URL] = []
         for id in ids {
-            guard let file = await LocalPhotoLibrary.shared.originalData(for: id) else {
+            guard !Task.isCancelled else {
+                TemporaryMediaStore.remove(urls)
+                return []
+            }
+            guard let file = await LocalPhotoLibrary.shared.originalFile(for: id) else {
                 continue
             }
-            if let url = try? TemporaryMediaStore.createShareFile(
-                data: file.data,
-                suggestedFilename: file.filename) {
+            defer { try? FileManager.default.removeItem(at: file.url) }
+            guard !Task.isCancelled else {
+                TemporaryMediaStore.remove(urls)
+                return []
+            }
+            if let url = try? TemporaryMediaStore.adoptShareFile(
+                at: file.url, suggestedFilename: file.filename) {
                 urls.append(url)
             }
+        }
+        guard !Task.isCancelled else {
+            TemporaryMediaStore.remove(urls)
+            return []
         }
         return urls
     }

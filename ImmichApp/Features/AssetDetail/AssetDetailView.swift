@@ -1209,12 +1209,17 @@ struct AssetDetailView: View {
 
     private func shareFile() {
         let target = currentTarget
+        let accountGeneration = LocalSnapshot.generation
         viewer.prepare(target, kind: .share,
             operation: { await fileURL(for: target) },
-            discard: { try? FileManager.default.removeItem(at: $0) }) { file in
+            discard: { TemporaryMediaStore.remove($0) }) { file in
+                guard accountGeneration == LocalSnapshot.generation else {
+                    TemporaryMediaStore.remove(file)
+                    return
+                }
                 cleanupSharedFile()
                 downloadedFileURL = file
-                sharePreviewImage = target.asset.isVideo ? nil : UIImage(contentsOfFile: file.path)
+                sharePreviewImage = target.asset.isVideo ? nil : SharePreviewThumbnail.image(at: file)
                 isSharePresented = true
             }
     }
@@ -1250,17 +1255,39 @@ struct AssetDetailView: View {
     /// Memilih salinan lokal lebih dulu; server hanya disentuh kalau aset belum
     /// ada di perangkat. Ini membuat Share pada foto lokal benar-benar lokal.
     private func fileURL(for target: AssetViewerState.Target) async -> URL? {
-        guard viewer.isCurrent(target) else { return nil }
+        let accountGeneration = LocalSnapshot.generation
+        guard viewer.isCurrent(target), !Task.isCancelled else { return nil }
         if target.asset.isOnDevice {
             let localID = LocalPhotoLibrary.isLocal(target.asset.id)
                 ? LocalPhotoLibrary.localIdentifier(from: target.asset.id)
                 : SwiftDataManager.shared.localIdentifier(forServerAsset: target.asset.id)
             if let localID, let file = await LocalPhotoLibrary.shared.originalFile(
-                for: LocalPhotoLibrary.assetID(for: localID)) { return file.url }
+                for: LocalPhotoLibrary.assetID(for: localID)) {
+                defer { try? FileManager.default.removeItem(at: file.url) }
+                guard viewer.isCurrent(target), accountGeneration == LocalSnapshot.generation,
+                      !Task.isCancelled else { return nil }
+                do {
+                    return try TemporaryMediaStore.adoptShareFile(
+                        at: file.url, suggestedFilename: file.filename)
+                } catch {
+                    if viewer.isCurrent(target), accountGeneration == LocalSnapshot.generation,
+                       !Task.isCancelled {
+                        vm?.actionError = ErrorEvent(error.localizedDescription)
+                    }
+                    return nil
+                }
+            }
         }
-        guard viewer.isCurrent(target), let serverID = target.serverID, let vm else { return nil }
-        let filename = target.detail?.originalFileName ?? (target.asset.isVideo ? "video.mov" : "photo.jpg")
-        return await vm.downloadOriginalFile(serverID, filename: filename)
+        guard viewer.isCurrent(target), accountGeneration == LocalSnapshot.generation,
+              !Task.isCancelled, let serverID = target.serverID, let vm else { return nil }
+        let filename = target.detail?.originalFileName ?? serverID
+        guard let file = await vm.downloadOriginalFile(serverID, filename: filename) else { return nil }
+        guard viewer.isCurrent(target), accountGeneration == LocalSnapshot.generation,
+              !Task.isCancelled else {
+            TemporaryMediaStore.remove(file)
+            return nil
+        }
+        return file
     }
 
     private func createSharedLink(for serverID: String) {
@@ -1293,13 +1320,15 @@ struct AssetDetailView: View {
     private func downloadToDevice() {
         let target = currentTarget
         guard target.asset.origin == .server, let serverID = target.serverID, let vm else { return }
-        let filename = target.detail?.originalFileName ?? (target.asset.isVideo ? "video.mov" : "photo.jpg")
+        let filename = target.detail?.originalFileName ?? serverID
         let accountGeneration = LocalSnapshot.generation
         viewer.download(target, operation: {
             guard let file = await vm.downloadOriginalFile(serverID, filename: filename) else { return false }
-            defer { try? FileManager.default.removeItem(at: file) }
+            defer { TemporaryMediaStore.remove(file) }
+            guard accountGeneration == LocalSnapshot.generation, !Task.isCancelled else { return false }
             guard let localID = await LocalPhotoLibrary.shared.saveDownloadedFile(file, isVideo: target.asset.isVideo) else {
-                if viewer.isCurrent(target) { vm.actionError = ErrorEvent(String(localized: "Could not save to Photos.")) }
+                if viewer.isCurrent(target), accountGeneration == LocalSnapshot.generation,
+                   !Task.isCancelled { vm.actionError = ErrorEvent(String(localized: "Could not save to Photos.")) }
                 return false
             }
             guard accountGeneration == LocalSnapshot.generation, !Task.isCancelled else { return false }
@@ -1307,7 +1336,8 @@ struct AssetDetailView: View {
                 try SwiftDataManager.shared.linkDeviceAsset(localIdentifier: localID, to: serverID)
                 return true
             } catch {
-                if viewer.isCurrent(target) { vm.actionError = ErrorEvent(error.localizedDescription) }
+                if viewer.isCurrent(target), accountGeneration == LocalSnapshot.generation,
+                   !Task.isCancelled { vm.actionError = ErrorEvent(error.localizedDescription) }
                 return false
             }
         })
@@ -1316,21 +1346,25 @@ struct AssetDetailView: View {
     private func setAsProfilePhoto() {
         let target = currentTarget
         guard !target.asset.isVideo, !isSettingProfilePhoto, let vm else { return }
+        let accountGeneration = LocalSnapshot.generation
         isSettingProfilePhoto = true
         Task {
             defer { isSettingProfilePhoto = false }
             guard let file = await fileURL(for: target) else {
-                if viewer.isCurrent(target) { vm.actionError = ErrorEvent(String(localized: "Could not prepare the profile photo.")) }
+                if viewer.isCurrent(target), accountGeneration == LocalSnapshot.generation,
+                   !Task.isCancelled { vm.actionError = ErrorEvent(String(localized: "Could not prepare the profile photo.")) }
                 return
             }
-            defer { try? FileManager.default.removeItem(at: file) }
-            guard viewer.isCurrent(target) else { return }
+            defer { TemporaryMediaStore.remove(file) }
+            guard viewer.isCurrent(target), accountGeneration == LocalSnapshot.generation else { return }
             guard let jpeg = await Self.profileJPEG(from: file) else {
-                if viewer.isCurrent(target) { vm.actionError = ErrorEvent(String(localized: "Could not prepare the profile photo.")) }
+                if viewer.isCurrent(target), accountGeneration == LocalSnapshot.generation,
+                   !Task.isCancelled { vm.actionError = ErrorEvent(String(localized: "Could not prepare the profile photo.")) }
                 return
             }
-            guard viewer.isCurrent(target) else { return }
+            guard viewer.isCurrent(target), accountGeneration == LocalSnapshot.generation else { return }
             guard await vm.setProfileImage(jpeg, filename: "profile.jpg") else { return }
+            guard accountGeneration == LocalSnapshot.generation else { return }
             await session.refreshUser()
         }
     }
@@ -1410,7 +1444,7 @@ struct AssetDetailView: View {
     }
 
     private func cleanupSharedFile() {
-        if let downloadedFileURL { try? FileManager.default.removeItem(at: downloadedFileURL) }
+        if let downloadedFileURL { TemporaryMediaStore.remove(downloadedFileURL) }
         downloadedFileURL = nil
         sharePreviewImage = nil
     }

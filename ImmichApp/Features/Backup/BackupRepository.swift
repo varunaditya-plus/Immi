@@ -10,19 +10,36 @@ class BackupRepository {
 
     /// SHA1 file secara bertahap—video ratusan MB tidak dimuat utuh ke RAM.
     func checksum(forFile url: URL) async throws -> String {
-        try await Task.detached(priority: .utility) {
+        try Task.checkCancellation()
+        let worker = Task.detached(priority: .utility) {
+            try Task.checkCancellation()
             let handle = try FileHandle(forReadingFrom: url)
             defer { try? handle.close() }
 
             var hasher = Insecure.SHA1()
-            while let chunk = try handle.read(upToCount: 1024 * 1024), !chunk.isEmpty {
-                try Task.checkCancellation()
-                hasher.update(data: chunk)
+            while true {
+                let hasMore = try autoreleasepool {
+                    try Task.checkCancellation()
+                    guard let chunk = try handle.read(upToCount: 1024 * 1024), !chunk.isEmpty else {
+                        return false
+                    }
+                    hasher.update(data: chunk)
+                    return true
+                }
+                if !hasMore { break }
             }
+            try Task.checkCancellation()
             return hasher.finalize()
                 .map { String(format: "%02x", $0) }
                 .joined()
-        }.value
+        }
+        return try await withTaskCancellationHandler {
+            let checksum = try await worker.value
+            try Task.checkCancellation()
+            return checksum
+        } onCancel: {
+            worker.cancel()
+        }
     }
 
     /// POST /assets/bulk-upload-check menerima {assets: [{id, checksum}]} dan

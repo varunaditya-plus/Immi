@@ -128,23 +128,31 @@ final class AssetDetailViewModelTests: XCTestCase {
         XCTAssertNotNil(viewModel.actionError)
     }
 
-    func testDownloadOriginalSuccess() async {
-        let expected = Data([0xFF, 0xD8, 0xFF, 0xE0])
-        mockRepo.mockDownloadData = expected
+    func testDownloadOriginalFileSuccessPreservesTheFileAndFilename() async throws {
+        let file = FileManager.default.temporaryDirectory
+            .appendingPathComponent("asset-detail-\(UUID().uuidString).heic")
+        let expected = Data([0x00, 0x01, 0x02, 0x03])
+        try expected.write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        mockRepo.mockDownloadFile = file
 
-        let data = await viewModel.downloadOriginal("asset-123")
+        let downloaded = await viewModel.downloadOriginalFile("asset-123", filename: "portrait.heic")
 
-        XCTAssertEqual(data, expected)
+        XCTAssertEqual(downloaded, file)
+        XCTAssertEqual(mockRepo.downloadRequests.map(\.id), ["asset-123"])
+        XCTAssertEqual(mockRepo.downloadRequests.map(\.filename), ["portrait.heic"])
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(downloaded)), expected)
         XCTAssertNil(viewModel.actionError)
     }
 
-    func testDownloadOriginalFailureReturnsNil() async {
+    func testDownloadOriginalFileFailureReturnsNilAndShowsFeedback() async {
         mockRepo.shouldFail = true
 
-        let data = await viewModel.downloadOriginal("asset-123")
+        let file = await viewModel.downloadOriginalFile("asset-123", filename: "portrait.heic")
 
-        XCTAssertNil(data)
-        XCTAssertNotNil(viewModel.actionError)
+        XCTAssertNil(file)
+        XCTAssertEqual(mockRepo.downloadRequests.map(\.id), ["asset-123"])
+        XCTAssertEqual(viewModel.actionError?.message, APIError.unknown.errorDescription)
     }
 
     func testRetry() async {
@@ -173,7 +181,8 @@ final class AssetDetailViewModelTests: XCTestCase {
 class MockAssetDetailRepository: AssetDetailRepository {
     var mockAsset: AssetResponseDTO?
     var shouldFail = false
-    var mockDownloadData = Data()
+    var mockDownloadFile: URL?
+    var downloadRequests: [(id: String, filename: String)] = []
     var deletedIds: [String] = []
     var lastVisibility: String?
     private(set) var favoriteRequests: [(id: String, value: Bool)] = []
@@ -213,10 +222,9 @@ class MockAssetDetailRepository: AssetDetailRepository {
         deletedIds.append(id)
     }
 
-    override func downloadOriginal(_ id: String) async throws -> Data {
-        if shouldFail {
-            throw APIError.unknown
-        }
-        return mockDownloadData
+    override func downloadOriginalFile(_ id: String, filename: String) async throws -> URL {
+        downloadRequests.append((id, filename))
+        guard !shouldFail, let mockDownloadFile else { throw APIError.unknown }
+        return mockDownloadFile
     }
 }

@@ -14,20 +14,35 @@ enum TemporaryMediaStore {
             .appendingPathComponent(shareDirectoryName, isDirectory: true)
     }
 
-    /// Menulis satu berkas dengan nama unik agar dua share bersamaan tidak
-    /// saling menimpa, meskipun nama originalnya sama.
-    static func createShareFile(data: Data, suggestedFilename: String) throws -> URL {
+    /// Consumes an exported/downloaded temporary file, including on failure.
+    /// A move keeps large originals out of memory and avoids another full copy.
+    static func adoptShareFile(at source: URL, suggestedFilename: String) throws -> URL {
+        guard source.isFileURL else { throw CocoaError(.fileReadUnsupportedScheme) }
         let fileManager = FileManager.default
+        if Task.isCancelled {
+            try? fileManager.removeItem(at: source)
+            throw CancellationError()
+        }
+        let root = shareDirectory.standardizedFileURL.path + "/"
+        if source.standardizedFileURL.path.hasPrefix(root) { return source }
+        defer { try? fileManager.removeItem(at: source) }
         try fileManager.createDirectory(
             at: shareDirectory,
             withIntermediateDirectories: true)
 
-        let safeName = URL(fileURLWithPath: suggestedFilename).lastPathComponent
-        let filename = safeName.isEmpty ? "media" : safeName
+        let safeName = URL(fileURLWithPath:
+            suggestedFilename.replacingOccurrences(of: "\\", with: "/")).lastPathComponent
+        let filename = safeName.isEmpty || safeName == "." || safeName == ".." ? "media" : safeName
         let url = shareDirectory
             .appendingPathComponent(UUID().uuidString + "-" + filename)
-        try data.write(to: url, options: .atomic)
-        return url
+        do {
+            try fileManager.moveItem(at: source, to: url)
+            try Task.checkCancellation()
+            return url
+        } catch {
+            try? fileManager.removeItem(at: url)
+            throw error
+        }
     }
 
     /// Hanya menghapus URL yang memang dibuat store ini. `ShareSheet` juga

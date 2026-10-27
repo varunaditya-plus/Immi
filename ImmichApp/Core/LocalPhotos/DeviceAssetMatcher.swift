@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 import Observation
 
@@ -41,6 +40,7 @@ final class DeviceAssetMatcher {
     private let repo: BackupRepository
     private let dataManager: SwiftDataManager
     private let accountGeneration = LocalSnapshot.generation
+    private let originalFile: (String) async -> URL?
     private var task: Task<Void, Never>?
     /// Penomor putaran pencocokan.
     ///
@@ -57,9 +57,16 @@ final class DeviceAssetMatcher {
     /// seluruh pustaka.
     private static let batchSize = 200
 
-    init(repo: BackupRepository, dataManager: SwiftDataManager) {
+    init(
+        repo: BackupRepository,
+        dataManager: SwiftDataManager,
+        originalFile: @escaping (String) async -> URL? = {
+            await LocalPhotoLibrary.shared.originalFile(for: $0)?.url
+        }
+    ) {
         self.repo = repo
         self.dataManager = dataManager
+        self.originalFile = originalFile
     }
 
     /// - Parameter onMatched: dipanggil setiap kelompok yang menghasilkan
@@ -103,8 +110,9 @@ final class DeviceAssetMatcher {
                 // Yang belum punya checksum dihitung dulu, DI LUAR main actor.
                 let missing = slice.filter { cached[$0.id] == nil }.map(\.id)
                 if !missing.isEmpty {
-                    let computed = await Self.computeChecksums(missing)
-                    guard accountGeneration == LocalSnapshot.generation else { return }
+                    let computed = await computeChecksums(missing)
+                    guard !Task.isCancelled, runID == self.generation,
+                          accountGeneration == LocalSnapshot.generation else { return }
                     try? dataManager.storeChecksums(computed)
                     for entry in computed { cached[entry.localIdentifier] = entry.checksum }
                 }
@@ -119,7 +127,8 @@ final class DeviceAssetMatcher {
                 // ini akan dicocokkan lagi pada pembukaan berikutnya, dan
                 // checksum yang sudah dihitung tidak hilang.
                 guard let matches = try? await repo.duplicateMatches(candidates) else { continue }
-                guard accountGeneration == LocalSnapshot.generation else { return }
+                guard !Task.isCancelled, runID == self.generation,
+                      accountGeneration == LocalSnapshot.generation else { return }
                 guard !matches.isEmpty else { continue }
 
                 for match in matches {
@@ -172,7 +181,7 @@ final class DeviceAssetMatcher {
             let missing = slice.filter { cached[$0.id] == nil }.map(\.id)
 
             if !missing.isEmpty {
-                let computed = await Self.computeChecksums(missing)
+                let computed = await computeChecksums(missing)
                 try checkAccount()
                 try dataManager.storeChecksums(computed)
                 for entry in computed { cached[entry.localIdentifier] = entry.checksum }
@@ -218,7 +227,7 @@ final class DeviceAssetMatcher {
             try Task.checkCancellation()
             try checkAccount()
             let slice = pending[group..<min(group + Self.batchSize, pending.count)]
-            let computed = await Self.computeChecksums(slice.map(\.id))
+            let computed = await computeChecksums(slice.map(\.id))
             try checkAccount()
             try dataManager.storeChecksums(computed)
             for entry in computed { cached[entry.localIdentifier] = entry.checksum }
@@ -229,35 +238,28 @@ final class DeviceAssetMatcher {
     }
 
     private func checkAccount() throws {
+        try Task.checkCancellation()
         guard accountGeneration == LocalSnapshot.generation else { throw CancellationError() }
     }
 
-    /// Membaca byte lalu menghitung SHA1, satu per satu.
-    ///
-    /// Berurutan, bukan berbarengan: yang membatasi di sini pembacaan berkas,
-    /// dan menembakkan puluhan permintaan sekaligus ke PhotoKit justru membuat
-    /// semuanya mengantre lebih lama sambil menahan puluhan megabyte di memori.
-    private static func computeChecksums(
+    /// Export and hash one file at a time, without buffering original videos.
+    func computeChecksums(
         _ ids: [String]
     ) async -> [(localIdentifier: String, checksum: String)] {
         var result: [(localIdentifier: String, checksum: String)] = []
         for id in ids {
-            if Task.isCancelled { return result }
-            guard let file = await LocalPhotoLibrary.shared.originalData(
-                for: LocalPhotoLibrary.assetID(for: id))
+            if Task.isCancelled || accountGeneration != LocalSnapshot.generation { return result }
+            guard let file = await originalFile(LocalPhotoLibrary.assetID(for: id))
             else { continue }
-            // Hashing DI LUAR main actor.
-            //
-            // `BackupRepository.checksum` terikat pemanggilnya, dan pemanggilnya
-            // di sini main actor — SHA1 atas puluhan megabyte di sana berarti
-            // antarmuka membeku persis saat linimasa baru tergambar.
-            let data = file.data
-            let checksum = await Task.detached(priority: .utility) {
-                Insecure.SHA1.hash(data: data)
-                    .map { String(format: "%02x", $0) }
-                    .joined()
-            }.value
-            result.append((id, checksum))
+            do {
+                defer { try? FileManager.default.removeItem(at: file) }
+                try checkAccount()
+                let checksum = try await repo.checksum(forFile: file)
+                try checkAccount()
+                result.append((id, checksum))
+            } catch {
+                if Task.isCancelled || error is CancellationError { return result }
+            }
         }
         return result
     }

@@ -1,4 +1,5 @@
 import Foundation
+import UniformTypeIdentifiers
 
 /// Satu operasi editor yang dipahami endpoint Immich `/assets/{id}/edits`.
 struct AssetEditCommand: Encodable, Sendable {
@@ -184,20 +185,71 @@ class AssetDetailRepository {
         }
     }
 
-    func downloadOriginal(_ id: String) async throws -> Data {
-        try await api.rawData(.init(path: "/assets/\(id)/original"))
+    func shareFile(_ id: String) async throws -> URL {
+        try await originalFile(id, fallbackFilename: id, edited: false)
+    }
+
+    @MainActor
+    func shareFiles(_ ids: [String]) async -> [URL] {
+        let context = api.session.snapshot
+        let snapshotGeneration = LocalSnapshot.generation
+        var urls: [URL] = []
+        for id in ids {
+            do {
+                try Task.checkCancellation()
+                try api.checkCurrent(context)
+                guard snapshotGeneration == LocalSnapshot.generation else { throw CancellationError() }
+                let url = try await shareFile(id)
+                urls.append(url)
+                try Task.checkCancellation()
+                try api.checkCurrent(context)
+                guard snapshotGeneration == LocalSnapshot.generation else { throw CancellationError() }
+            } catch {
+                if Task.isCancelled || error is CancellationError
+                    || (try? api.checkCurrent(context)) == nil
+                    || snapshotGeneration != LocalSnapshot.generation {
+                    TemporaryMediaStore.remove(urls)
+                    return []
+                }
+            }
+        }
+        return urls
     }
 
     /// Original/hasil edit diunduh sebagai file agar video tidak masuk RAM.
     func downloadOriginalFile(_ id: String, filename: String) async throws -> URL {
-        let temporary = try await api.rawFile(.init(
+        try await originalFile(id, fallbackFilename: filename, edited: true)
+    }
+
+    @MainActor
+    private func originalFile(_ id: String, fallbackFilename: String, edited: Bool) async throws -> URL {
+        let context = api.session.snapshot
+        let snapshotGeneration = LocalSnapshot.generation
+        let download = try await api.rawFile(.init(
             path: "/assets/\(id)/original",
-            query: [.init(name: "edited", value: "true")]))
-        let safeName = URL(fileURLWithPath: filename).lastPathComponent
-        let destination = FileManager.default.temporaryDirectory
-            .appendingPathComponent("asset-\(UUID().uuidString)-\(safeName)")
-        try FileManager.default.moveItem(at: temporary, to: destination)
-        return destination
+            query: edited ? [.init(name: "edited", value: "true")] : []))
+        defer { try? FileManager.default.removeItem(at: download.url) }
+        try Task.checkCancellation()
+        try api.checkCurrent(context)
+        guard snapshotGeneration == LocalSnapshot.generation else { throw CancellationError() }
+        let name = filename(for: download.response, fallback: fallbackFilename)
+        return try TemporaryMediaStore.adoptShareFile(at: download.url, suggestedFilename: name)
+    }
+
+    private func filename(for response: HTTPURLResponse, fallback: String) -> String {
+        if let disposition = response.value(forHTTPHeaderField: "Content-Disposition"),
+           disposition.range(of: "filename\\*?\\s*=", options: [.regularExpression, .caseInsensitive]) != nil,
+           let suggested = response.suggestedFilename {
+            return suggested
+        }
+        guard let mimeType = response.mimeType, mimeType != "application/octet-stream",
+              let type = UTType(mimeType: mimeType), let ext = type.preferredFilenameExtension
+        else { return fallback }
+        let file = URL(fileURLWithPath: fallback)
+        if let existing = UTType(filenameExtension: file.pathExtension), existing.conforms(to: type) {
+            return fallback
+        }
+        return file.deletingPathExtension().lastPathComponent + "." + ext
     }
 
     @MainActor

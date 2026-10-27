@@ -337,24 +337,13 @@ final class AssetDetailViewModel {
         }
     }
 
-    /// Unduh file asli lewat request terautentikasi (URL polos akan kena 401).
-    func downloadOriginal(_ id: String) async -> Data? {
-        let selected = selection
-        do {
-            let data = try await repo.downloadOriginal(id)
-            return snapshotGeneration == LocalSnapshot.generation && !Task.isCancelled ? data : nil
-        } catch {
-            reportActionError(Self.describe(error), id: id, selected: selected)
-            return nil
-        }
-    }
-
     func downloadOriginalFile(_ id: String, filename: String) async -> URL? {
+        guard snapshotGeneration == LocalSnapshot.generation, !Task.isCancelled else { return nil }
         let selected = selection
         do {
             let file = try await repo.downloadOriginalFile(id, filename: filename)
             guard snapshotGeneration == LocalSnapshot.generation, !Task.isCancelled else {
-                try? FileManager.default.removeItem(at: file)
+                TemporaryMediaStore.remove(file)
                 return nil
             }
             return file

@@ -7,6 +7,7 @@ final class MemoriesViewModel {
     var stories: [MemoryStory] = []
     var phase: LoadingPhase<Void> = .idle
 
+    private let snapshotGeneration = LocalSnapshot.generation
     private let repo: MemoriesRepository
     private let assetRepo: AssetDetailRepository
 
@@ -34,11 +35,14 @@ final class MemoriesViewModel {
     /// Unduh berkas asli ke lokasi sementara untuk dibagikan lewat share sheet
     /// (URL server polos akan kena 401).
     func shareURL(for asset: AssetLite) async -> URL? {
+        guard snapshotGeneration == LocalSnapshot.generation, !Task.isCancelled else { return nil }
         do {
-            let data = try await assetRepo.downloadOriginal(asset.id)
-            return try TemporaryMediaStore.createShareFile(
-                data: data,
-                suggestedFilename: "\(asset.id).\(asset.isVideo ? "mov" : "jpg")")
+            let url = try await assetRepo.shareFile(asset.id)
+            guard snapshotGeneration == LocalSnapshot.generation, !Task.isCancelled else {
+                TemporaryMediaStore.remove(url)
+                return nil
+            }
+            return url
         } catch {
             return nil
         }

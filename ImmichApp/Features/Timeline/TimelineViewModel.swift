@@ -816,15 +816,12 @@ final class TimelineViewModel {
     /// Unduh beberapa file asli sekaligus untuk share sheet. Yang gagal dilewati,
     /// bukan membatalkan seluruh operasi.
     func shareURLs(for ids: [String]) async -> [URL] {
-        guard let assetRepo else { return [] }
-        var urls: [URL] = []
-        for id in ids {
-            guard let data = try? await assetRepo.downloadOriginal(id) else { continue }
-            if let url = try? TemporaryMediaStore.createShareFile(
-                data: data,
-                suggestedFilename: "\(id).jpg") {
-                urls.append(url)
-            }
+        guard let assetRepo, accountGeneration == LocalSnapshot.generation,
+              !Task.isCancelled else { return [] }
+        let urls = await assetRepo.shareFiles(ids)
+        guard accountGeneration == LocalSnapshot.generation, !Task.isCancelled else {
+            TemporaryMediaStore.remove(urls)
+            return []
         }
         return urls
     }
@@ -855,14 +852,17 @@ final class TimelineViewModel {
     /// Unduh file asli ke lokasi sementara untuk dibagikan lewat share sheet
     /// (URL server polos akan kena 401).
     func shareURL(for asset: AssetLite) async -> URL? {
-        guard let assetRepo else { return nil }
+        guard let assetRepo, accountGeneration == LocalSnapshot.generation,
+              !Task.isCancelled else { return nil }
         do {
-            let data = try await assetRepo.downloadOriginal(asset.id)
-            let filename = "\(asset.id).\(asset.isVideo ? "mov" : "jpg")"
-            return try TemporaryMediaStore.createShareFile(
-                data: data,
-                suggestedFilename: filename)
+            let url = try await assetRepo.shareFile(asset.id)
+            guard accountGeneration == LocalSnapshot.generation, !Task.isCancelled else {
+                TemporaryMediaStore.remove(url)
+                return nil
+            }
+            return url
         } catch {
+            guard accountGeneration == LocalSnapshot.generation, !Task.isCancelled else { return nil }
             actionError = Self.describe(error)
             return nil
         }

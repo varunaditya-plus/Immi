@@ -3,38 +3,6 @@ import Observation
 import Photos
 import UIKit
 
-/// Penampung byte yang aman dipakai dari beberapa antrean sekaligus.
-///
-/// Sengaja sekecil ini: satu kunci, satu buffer, satu bendera. Yang dijaga hanya
-/// perakitan potongan berkas dari `PHAssetResourceManager` — bukan sebuah
-/// abstraksi umum.
-private final class DataAccumulator: @unchecked Sendable {
-    private let lock = NSLock()
-    private var buffer = Data()
-    private var completed = false
-
-    func append(_ chunk: Data) {
-        lock.lock()
-        defer { lock.unlock() }
-        buffer.append(chunk)
-    }
-
-    var value: Data {
-        lock.lock()
-        defer { lock.unlock() }
-        return buffer
-    }
-
-    /// - Returns: true HANYA untuk pemanggil pertama.
-    func claimCompletion() -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !completed else { return false }
-        completed = true
-        return true
-    }
-}
-
 /// `PHImageManager` dapat memanggil result handler lebih dari sekali (preview
 /// terdegradasi lalu hasil final). Continuation Swift hanya boleh diselesaikan
 /// sekali, jadi seluruh jalan keluar melewati gerbang ini.
@@ -890,97 +858,6 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
             return localIdentifier
         } catch {
             return nil
-        }
-    }
-
-    /// Byte asli, untuk diunggah maupun dibagikan.
-    ///
-    /// Lewat `PHAssetResourceManager`, BUKAN `PHImageManager`.
-    ///
-    /// Yang terakhir hanya mengerti gambar — video tidak punya "image data" dan
-    /// akan pulang dengan tangan kosong. Resource manager membaca berkas
-    /// aslinya apa adanya, foto maupun video, berikut nama berkas yang benar.
-    /// Ia mengirimkan datanya BERPOTONG-POTONG, jadi buffernya dirakit sendiri.
-    /// `nonisolated`, dan itu bukan penghalusan.
-    ///
-    /// Sebelumnya seluruh fungsi ini terikat main actor, dan akibatnya ada dua.
-    /// Yang pertama terlihat di konsol: `PHAssetResource.assetResources(for:)`
-    /// dijalankan di main queue, dan PhotoKit sendiri yang memperingatkan bahwa
-    /// itu menurunkan kinerja — ia menarik metadata aset secara sinkron di sana.
-    /// Yang kedua jauh lebih parah: membaca SELURUH byte setiap berkas juga
-    /// terjadi di main actor, dan pencocokan checksum melakukan hal yang sama
-    /// untuk seluruh pustaka pada saat yang bersamaan. Dua pekerjaan besar
-    /// mengantre di satu-satunya utas yang juga harus menggambar antarmuka —
-    /// itulah unggahan yang tidak bergerak selama belasan menit.
-    ///
-    /// Fungsi `nonisolated async` berjalan di kolam eksekutor umum, bukan di
-    /// aktor pemanggilnya. Tidak ada state instance yang disentuh di sini, jadi
-    /// tidak ada yang perlu dilindungi.
-    nonisolated func originalData(for id: String) async -> (data: Data, filename: String)? {
-        // `Task.detached`, bukan mengandalkan `nonisolated` saja.
-        //
-        // Target ini menyalakan `SWIFT_APPROACHABLE_CONCURRENCY`, dan dengan itu
-        // fungsi `nonisolated async` MEWARISI eksekutor pemanggilnya alih-alih
-        // pindah ke kolam umum. Pemanggilnya sering main actor — jadi
-        // `PHAssetResource.assetResources(for:)`, yang menarik metadata aset
-        // secara sinkron, tetap berjalan di main queue persis seperti sebelum
-        // fungsi ini dijadikan nonisolated. Itulah peringatan "Fetching on
-        // demand on the main queue" yang masih muncul di konsol.
-        //
-        // `requestData` di bawah tidak kena karena ia menyerahkan diri lewat
-        // continuation; yang perlu dipindahkan hanya pencarian resource-nya.
-        guard let resource = await Task.detached(priority: .utility, operation: {
-            guard let asset = Self.fetchAsset(id) else { return PHAssetResource?.none }
-            return Self.primaryResource(for: asset)
-        }).value else { return nil }
-
-        // DUA percobaan, dan yang pertama tidak menyentuh jaringan sama sekali.
-        //
-        // `isNetworkAccessAllowed = true` membuat PhotoKit menghubungi daemon
-        // iCloud untuk SETIAP berkas — termasuk yang salinan penuhnya sudah ada
-        // di perangkat. Kalau daemon itu sedang bermasalah (`com.apple.accounts
-        // Code=7` di konsol), permintaannya tidak ditolak cepat; ia menggantung
-        // belasan menit lalu menyerah. Satu foto 3 KB yang sebenarnya sudah ada
-        // di disk pun ikut menunggu.
-        //
-        // Jalur pertama menjawab dalam milidetik untuk semua yang ada di
-        // perangkat — dan itu mayoritasnya. Jaringan hanya dipakai untuk yang
-        // memang benar-benar tidak ada di sini.
-        if let local = await Self.requestData(resource, allowsNetwork: false) {
-            return (local, resource.originalFilename)
-        }
-        guard let remote = await Self.requestData(resource, allowsNetwork: true) else {
-            return nil
-        }
-        return (remote, resource.originalFilename)
-    }
-
-    private nonisolated static func requestData(
-        _ resource: PHAssetResource, allowsNetwork: Bool
-    ) async -> Data? {
-        let options = PHAssetResourceRequestOptions()
-        options.isNetworkAccessAllowed = allowsNetwork
-
-        return await withCheckedContinuation { continuation in
-            // Penampung berkunci, bukan `var` lokal yang ditangkap closure.
-            //
-            // `dataReceivedHandler` dipanggil PhotoKit dari antreannya sendiri,
-            // berkali-kali, sementara `completionHandler` membacanya dari
-            // antrean yang belum tentu sama. Menumbuhkan sebuah `Data` dari dua
-            // arah tanpa penyelarasan adalah balapan data — yang gagalnya tidak
-            // sopan: bukan kesalahan yang terbaca, melainkan byte yang hilang
-            // atau proses yang jatuh.
-            let buffer = DataAccumulator()
-            PHAssetResourceManager.default().requestData(
-                for: resource,
-                options: options,
-                dataReceivedHandler: { buffer.append($0) },
-                completionHandler: { error in
-                    // Penjaga sekali-jalan: continuation yang dilanjutkan dua
-                    // kali menjatuhkan proses, bukan sekadar keliru.
-                    guard buffer.claimCompletion() else { return }
-                    continuation.resume(returning: error == nil ? buffer.value : nil)
-                })
         }
     }
 

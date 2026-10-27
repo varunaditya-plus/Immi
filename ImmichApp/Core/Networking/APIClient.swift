@@ -70,21 +70,36 @@ class APIClient {
     ///
     /// Jalur ini dipakai untuk original photo/video. `data(for:)` menahan
     /// seluruh video di RAM sebelum satu byte pun dapat disimpan ke Photos.
+    struct DownloadedFile {
+        let url: URL
+        let response: HTTPURLResponse
+    }
+
     @MainActor
-    func rawFile(_ endpoint: Endpoint) async throws -> URL {
+    func rawFile(_ endpoint: Endpoint) async throws -> DownloadedFile {
+        try Task.checkCancellation()
         let (request, context) = try makeRequest(endpoint)
         do {
             let (temporaryURL, response) = try await urlSession.download(for: request)
             defer { try? FileManager.default.removeItem(at: temporaryURL) }
+            try Task.checkCancellation()
             guard let http = response as? HTTPURLResponse else { throw APIError.unknown }
-            let errorData = (200..<300).contains(http.statusCode)
-                ? Data() : ((try? Data(contentsOf: temporaryURL)) ?? Data())
+            let errorData: Data
+            if (200..<300).contains(http.statusCode) {
+                errorData = Data()
+            } else {
+                let handle = try FileHandle(forReadingFrom: temporaryURL)
+                defer { try? handle.close() }
+                errorData = (try? handle.read(upToCount: 64 * 1024)) ?? Data()
+            }
             try await validate(http, errorData, context: context, endpoint: endpoint)
+            try Task.checkCancellation()
+            try checkCurrent(context)
 
             let destination = FileManager.default.temporaryDirectory
                 .appendingPathComponent("download-\(UUID().uuidString)")
             try FileManager.default.moveItem(at: temporaryURL, to: destination)
-            return destination
+            return DownloadedFile(url: destination, response: http)
         } catch let error as URLError where Self.meansOffline(error.code) {
             throw APIError.notConnected
         }

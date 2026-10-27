@@ -207,7 +207,7 @@ final class ShareExtensionModel: ObservableObject {
                     continuation.resume(returning: SharePreviewItem(
                         uploadItem: item,
                         fileURL: destination,
-                        thumbnail: UIImage(contentsOfFile: destination.path)))
+                        thumbnail: SharePreviewThumbnail.image(at: destination)))
                 } catch {
                     continuation.resume(throwing: error)
                 }
