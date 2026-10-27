@@ -8,6 +8,7 @@ final class SharedUploadService {
     static let shared = SharedUploadService()
 
     private var task: Task<Void, Never>?
+    private var generation = UUID()
 
     private init() {}
 
@@ -23,9 +24,12 @@ final class SharedUploadService {
             owner: SharedUploadOwner(server: apiURL.absoluteString, userID: userID),
             authHeaders: session.authHeaders)
 
+        let generation = generation
         task = Task { [weak self] in
             guard let self else { return }
-            defer { self.task = nil }
+            defer {
+                if self.generation == generation { self.task = nil }
+            }
             do {
                 let batches = try await SharedUploadStore.shared.batches(for: credential.owner)
                 let client = SharedUploadClient(credential: credential)
@@ -41,6 +45,7 @@ final class SharedUploadService {
     }
 
     func cancel() {
+        generation = UUID()
         task?.cancel()
         task = nil
     }

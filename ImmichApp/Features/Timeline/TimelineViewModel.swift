@@ -69,6 +69,7 @@ final class TimelineViewModel {
     /// dan tidak ada yang membacanya kembali.
     private var loadedAlbums: Set<String>?
 
+    private let accountGeneration = LocalSnapshot.generation
     private let dataManager: SwiftDataManager?
     private let assetRepo: AssetDetailRepository?
     private let albumRepo: AlbumRepository?
@@ -122,6 +123,7 @@ final class TimelineViewModel {
     /// petak matinya tetap terlihat sampai layar disusun ulang.
     func purgeUnreadable(_ ids: Set<String>) {
         guard !ids.isEmpty else { return }
+        guard accountGeneration == LocalSnapshot.generation else { return }
         try? dataManager?.purgeAssets(Array(ids))
 
         // Pemuat thumbnail yang sama dipakai grid album, favorit, orang, arsip,
@@ -244,6 +246,7 @@ final class TimelineViewModel {
         // yang boleh menahan antarmuka — dan tidak ada satu pun bagiannya yang
         // butuh main thread.
         let built = await Self.build(rows, calendar: calendar)
+        guard accountGeneration == LocalSnapshot.generation else { return }
 
         signature = newSignature
         content = built.content
@@ -553,6 +556,7 @@ final class TimelineViewModel {
         let newValue = !asset.isFavorite
         do {
             try await assetRepo.toggleFavorite(asset.id, to: newValue)
+            guard accountGeneration == LocalSnapshot.generation else { return false }
             setFavorite(asset.id, to: newValue)
             return true
         } catch {
@@ -604,6 +608,7 @@ final class TimelineViewModel {
         guard let assetRepo else { return }
         do {
             try await assetRepo.toggleArchive(asset.id, to: true)
+            guard accountGeneration == LocalSnapshot.generation else { return }
             removeAsset(asset.id)
             // Cache lokal ikut ditambal, bukan cuma gridnya.
             //
@@ -622,6 +627,7 @@ final class TimelineViewModel {
         // hanya di PhotoKit, jadi penghapusannya harus lewat Photos.
         if asset.origin == .device {
             guard await LocalPhotoLibrary.shared.delete([asset.id]) else { return false }
+            guard accountGeneration == LocalSnapshot.generation else { return false }
             removeAsset(asset.id)
             return true
         }
@@ -637,6 +643,7 @@ final class TimelineViewModel {
             // Petak `.both` yang baru selesai diunggah masih dapat memakai id
             // `device:…`. Endpoint DELETE /assets hanya menerima UUID server.
             try await assetRepo.delete(target.serverID)
+            guard accountGeneration == LocalSnapshot.generation else { return false }
             removeAsset(target.displayID)
             // Dihapus berarti BUANG dari cache, bukan disembunyikan.
             try? dataManager?.purgeAssets([target.serverID])
@@ -657,6 +664,7 @@ final class TimelineViewModel {
         do {
             for id in ids {
                 try await assetRepo.toggleFavorite(id, to: true)
+                guard accountGeneration == LocalSnapshot.generation else { return false }
                 setFavorite(id, to: true)
             }
             return true
@@ -673,6 +681,7 @@ final class TimelineViewModel {
         do {
             for id in ids {
                 try await assetRepo.toggleArchive(id, to: true)
+                guard accountGeneration == LocalSnapshot.generation else { return false }
             }
             removeAssets(Set(ids))
             try? dataManager?.setTimelineVisibility(ids, inTimeline: false)
@@ -690,6 +699,7 @@ final class TimelineViewModel {
         do {
             for id in ids {
                 try await assetRepo.setVisibility(id, to: .locked)
+                guard accountGeneration == LocalSnapshot.generation else { return false }
             }
             removeAssets(Set(ids))
             try? dataManager?.setTimelineVisibility(ids, inTimeline: false)
@@ -731,8 +741,10 @@ final class TimelineViewModel {
             failedCount += localOnly.count
         }
 
+        guard accountGeneration == LocalSnapshot.generation else { return false }
         if !serverTargets.isEmpty {
             let result = await deleteServerTargets(serverTargets, using: assetRepo)
+            guard accountGeneration == LocalSnapshot.generation else { return false }
             removedDisplayIDs.formUnion(result.succeeded.map(\.displayID))
             removedServerIDs.formUnion(result.succeeded.map(\.serverID))
             failedCount += result.failedCount

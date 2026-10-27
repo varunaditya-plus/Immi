@@ -46,6 +46,11 @@ struct BackupQueueOwner: Codable, Equatable, Sendable {
     let userID: String
 }
 
+struct BackupUploadOwnership: Codable, Equatable, Sendable {
+    let owner: BackupQueueOwner
+    let generation: UUID
+}
+
 struct BackupActiveTask: Equatable, Sendable {
     let taskIdentifier: Int
     let context: BackupUploadTaskContext
@@ -164,6 +169,7 @@ final class BackupQueueStore {
     private struct Ledger: Codable {
         var version = 1
         var owner: BackupQueueOwner?
+        var generation: UUID?
         var completed = 0
         var items: [BackupQueueItem] = []
         // Optional keeps queues written by older app versions decodable. An
@@ -214,6 +220,10 @@ final class BackupQueueStore {
     }
 
     var owner: BackupQueueOwner? { ledger.owner }
+    var ownership: BackupUploadOwnership? {
+        guard let owner = ledger.owner, let generation = ledger.generation else { return nil }
+        return BackupUploadOwnership(owner: owner, generation: generation)
+    }
     var items: [BackupQueueItem] { ledger.items }
     var failedIDs: [String] {
         ledger.items.filter { $0.state == .failed }.map(\.id)
@@ -223,14 +233,15 @@ final class BackupQueueStore {
     /// header sesi baru.
     @discardableResult
     func bind(to owner: BackupQueueOwner) throws -> Bool {
-        guard ledger.owner != owner else { return false }
-        if ledger.owner == nil {
+        guard ledger.owner != owner || ledger.generation == nil else { return false }
+        if ledger.owner == owner || (ledger.owner == nil && ledger.items.isEmpty && ledger.completed == 0) {
             ledger.owner = owner
+            ledger.generation = UUID()
             try persist()
             return false
         }
-        let replacedExistingOwner = ledger.owner != nil
-        ledger = Ledger(owner: owner)
+        let replacedExistingOwner = ledger.owner != nil || !ledger.items.isEmpty
+        ledger = Ledger(owner: owner, generation: UUID())
         try persist()
         return replacedExistingOwner
     }
@@ -295,6 +306,19 @@ final class BackupQueueStore {
             item.nextAttemptAt = nil
             item.lastError = nil
             item.taskIdentifier = nil
+            item.updatedAt = now
+        }
+    }
+
+    func markQueued(_ id: String, now: Date = .now) throws {
+        guard let state = item(id: id)?.state, state != .failed, state != .cancelling else {
+            throw BackupQueueStoreError.invalidTransition
+        }
+        try update(id) { item in
+            item.state = .queued
+            item.taskIdentifier = nil
+            item.nextAttemptAt = nil
+            item.lastError = nil
             item.updatedAt = now
         }
     }
@@ -502,6 +526,7 @@ final class BackupQueueStore {
         now: Date = .now,
         staleAfter: TimeInterval = 10 * 60
     ) throws {
+        let activeTasks = activeTasks.filter { accepts($0.context) }
         let activeByID = activeTasks.reduce(into: [String: BackupActiveTask]()) {
             $0[$1.context.localIdentifier] = $1
         }
@@ -567,6 +592,11 @@ final class BackupQueueStore {
 
     func item(id: String) -> BackupQueueItem? {
         ledger.items.first { $0.id == id }
+    }
+
+    private func accepts(_ context: BackupUploadTaskContext) -> Bool {
+        guard let ownership else { return false }
+        return context.ownership == ownership
     }
 
     func clear() throws {

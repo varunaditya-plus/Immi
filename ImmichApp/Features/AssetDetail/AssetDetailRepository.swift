@@ -120,13 +120,16 @@ class AssetDetailRepository {
     /// - Parameter force: `false` memindahkan ke tong sampah, `true` menghapus
     ///   permanen. Layar tong sampah memakai `true` — di sana "hapus" memang
     ///   tidak punya tempat lain untuk dituju.
+    @MainActor
     func delete(_ ids: [String], force: Bool = false) async throws {
+        let context = api.session.snapshot
         struct Body: Encodable { let ids: [String]; let force: Bool }
         try await api.sendVoid(.json("/assets", method: .delete, body: Body(ids: ids, force: force)))
+        try api.checkCurrent(context)
         // Mapping backup tetap diperlukan agar foto lokal tidak di-upload ulang.
         // Penanda terpisah ini mencegah mapping tersebut membuat foto yang baru
         // dihapus muncul kembali sebagai petak lokal setelah app restart.
-        await DeletedServerAssetRegistry.shared.record(ids, permanently: force)
+        DeletedServerAssetRegistry.shared.record(ids, permanently: force)
     }
 
     func downloadOriginal(_ id: String) async throws -> Data {

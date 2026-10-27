@@ -3,12 +3,23 @@ import Foundation
 class APIClient {
     let session: SessionManager
     private let urlSession: URLSession
+    private let accountGeneration: UUID
+    private let authHeaders: [String: String]?
 
     private static let foregroundSession = URLSession(configuration: NetworkResponseCache.configuration())
 
-    init(session: SessionManager, urlSession: URLSession? = nil) {
+    @MainActor
+    init(session: SessionManager, urlSession: URLSession? = nil, authHeaders: [String: String]? = nil) {
         self.session = session
         self.urlSession = urlSession ?? Self.foregroundSession
+        self.accountGeneration = session.accountGeneration
+        self.authHeaders = authHeaders
+    }
+
+    @MainActor
+    func checkCurrent(_ context: SessionRequestContext) throws {
+        guard accountGeneration == session.accountGeneration else { throw CancellationError() }
+        try session.checkCurrent(context)
     }
 
     /// Session khusus byte gambar.
@@ -27,21 +38,31 @@ class APIClient {
         return config
     }()
 
+    @MainActor
     func send<T: Decodable>(_ endpoint: Endpoint) async throws -> T {
-        let (data, http) = try await perform(endpoint)
-        try validate(http, data)
-        do { return try JSONDecoder.immich.decode(T.self, from: data) }
+        let (data, http, context) = try await perform(endpoint)
+        try await validate(http, data, context: context, endpoint: endpoint)
+        let value: T
+        do { value = try await Self.decode(data) }
         catch { throw APIError.decoding(error) }
+        try checkCurrent(context)
+        return value
     }
 
+    private nonisolated static func decode<T: Decodable>(_ data: Data) async throws -> T {
+        try JSONDecoder.immich.decode(T.self, from: data)
+    }
+
+    @MainActor
     func sendVoid(_ endpoint: Endpoint) async throws {
-        let (data, http) = try await perform(endpoint)
-        try validate(http, data)
+        let (data, http, context) = try await perform(endpoint)
+        try await validate(http, data, context: context, endpoint: endpoint)
     }
 
+    @MainActor
     func rawData(_ endpoint: Endpoint) async throws -> Data {
-        let (data, http) = try await perform(endpoint)
-        try validate(http, data)
+        let (data, http, context) = try await perform(endpoint)
+        try await validate(http, data, context: context, endpoint: endpoint)
         return data
     }
 
@@ -49,15 +70,16 @@ class APIClient {
     ///
     /// Jalur ini dipakai untuk original photo/video. `data(for:)` menahan
     /// seluruh video di RAM sebelum satu byte pun dapat disimpan ke Photos.
+    @MainActor
     func rawFile(_ endpoint: Endpoint) async throws -> URL {
-        let request = try await makeRequest(endpoint)
+        let (request, context) = try makeRequest(endpoint)
         do {
             let (temporaryURL, response) = try await urlSession.download(for: request)
+            defer { try? FileManager.default.removeItem(at: temporaryURL) }
             guard let http = response as? HTTPURLResponse else { throw APIError.unknown }
-            if !(200..<300).contains(http.statusCode) {
-                let errorData = (try? Data(contentsOf: temporaryURL)) ?? Data()
-                try validate(http, errorData)
-            }
+            let errorData = (200..<300).contains(http.statusCode)
+                ? Data() : ((try? Data(contentsOf: temporaryURL)) ?? Data())
+            try await validate(http, errorData, context: context, endpoint: endpoint)
 
             let destination = FileManager.default.temporaryDirectory
                 .appendingPathComponent("download-\(UUID().uuidString)")
@@ -69,8 +91,9 @@ class APIClient {
     }
 
     /// Respons JSON Lines (mis. /sync/stream): satu objek JSON per baris.
+    @MainActor
     func streamLines(_ endpoint: Endpoint) async throws -> AsyncLineSequence<URLSession.AsyncBytes> {
-        let req = try await makeRequest(endpoint)
+        let (req, context) = try makeRequest(endpoint)
         let result: (URLSession.AsyncBytes, URLResponse)
         do {
             result = try await urlSession.bytes(for: req)
@@ -79,11 +102,8 @@ class APIClient {
         }
         let (bytes, resp) = result
         guard let http = resp as? HTTPURLResponse else { throw APIError.unknown }
-        switch http.statusCode {
-        case 200..<300: return bytes.lines
-        case 401:       throw APIError.unauthorized
-        default:        throw APIError.server(status: http.statusCode, message: nil)
-        }
+        try await validate(http, Data(), context: context, endpoint: endpoint)
+        return bytes.lines
     }
 
     /// "Tidak sampai ke server" — LEBIH LUAS dari sekadar tidak ada internet.
@@ -105,24 +125,24 @@ class APIClient {
         }
     }
 
-    private func perform(_ endpoint: Endpoint) async throws -> (Data, HTTPURLResponse) {
-        let req = try await makeRequest(endpoint)
+    @MainActor
+    private func perform(_ endpoint: Endpoint) async throws -> (Data, HTTPURLResponse, SessionRequestContext) {
+        let (req, context) = try makeRequest(endpoint)
         do {
             let (data, resp) = try await urlSession.data(for: req)
             guard let http = resp as? HTTPURLResponse else { throw APIError.unknown }
-            return (data, http)
+            return (data, http, context)
         } catch let e as URLError where Self.meansOffline(e.code) {
             throw APIError.notConnected
         }
     }
 
-    private func makeRequest(_ endpoint: Endpoint) async throws -> URLRequest {
-        // Konteksnya dibaca dari cuplikan yang tidak terikat main actor.
-        //
-        // `session.requestContext` adalah properti @MainActor: membacanya berarti
-        // setiap permintaan — termasuk ratusan thumbnail saat menggulir —
-        // menunggu giliran di main thread, bersaing dengan penggambaran.
-        let (baseURL, authHeaders) = await session.snapshot
+    @MainActor
+    private func makeRequest(_ endpoint: Endpoint) throws -> (URLRequest, SessionRequestContext) {
+        let context = session.snapshot
+        try checkCurrent(context)
+        let baseURL = context.baseURL
+        let headers = authHeaders ?? (endpoint.requiresAuthentication ? context.authHeaders : [:])
         guard let baseURL else { throw APIError.invalidURL }
         var comps = URLComponents(url: baseURL.appendingPathComponent(endpoint.path),
                                   resolvingAgainstBaseURL: false)
@@ -136,15 +156,24 @@ class APIClient {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
         req.setValue("application/json", forHTTPHeaderField: "Accept")
-        for (k, v) in authHeaders { req.setValue(v, forHTTPHeaderField: k) }
+        for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
         for (k, v) in endpoint.extraHeaders { req.setValue(v, forHTTPHeaderField: k) }
-        return req
+        return (req, context)
     }
 
-    private func validate(_ http: HTTPURLResponse, _ data: Data) throws {
+    @MainActor
+    private func validate(
+        _ http: HTTPURLResponse, _ data: Data,
+        context: SessionRequestContext, endpoint: Endpoint
+    ) async throws {
+        try checkCurrent(context)
         switch http.statusCode {
         case 200..<300: return
-        case 401:       throw APIError.unauthorized
+        case 401:
+            if authHeaders == nil, endpoint.requiresAuthentication {
+                await session.expireIfCurrent(context)
+            }
+            throw APIError.unauthorized
         default:
             let msg = (try? JSONDecoder().decode(ServerErrorDTO.self, from: data))?.message
             throw APIError.server(status: http.statusCode, message: msg)

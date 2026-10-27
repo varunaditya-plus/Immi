@@ -4,6 +4,8 @@ import Observation
 @MainActor
 @Observable
 final class LibraryViewModel {
+    private let snapshotGeneration = LocalSnapshot.generation
+
     var memories: [MemoryStory] = []
     var albums: [AlbumResponseDTO] = []
     var favorites: [AssetLite] = []
@@ -54,6 +56,7 @@ final class LibraryViewModel {
     /// satu per satu hanya menambah jeda tanpa alasan. Kegagalan salah satu
     /// juga tidak menjatuhkan yang lain — barisnya sekadar tampil kosong.
     func load() async {
+        guard snapshotGeneration == LocalSnapshot.generation else { return }
         // POTRET LOKAL DULU — sebelum satu permintaan pun dikirim.
         //
         // Ini yang membuat Library terasa mulus dan tidak lagi kosong saat
@@ -75,6 +78,7 @@ final class LibraryViewModel {
         // atas ke bawah, terlihat seperti animasi yang tidak pernah diminta.
         let (loadedMemories, loadedAlbums, loadedFavorites, loadedPeople) =
             await (memories, albums, favorites, people)
+        guard snapshotGeneration == LocalSnapshot.generation else { return }
 
         // Kenangan TIDAK dipotret: isinya "hari ini, tahun-tahun sebelumnya",
         // jadi potret kemarin bukan sekadar basi — ia salah tanggal.
@@ -123,8 +127,8 @@ final class LibraryViewModel {
         to keyPath: ReferenceWritableKeyPath<LibraryViewModel, [T]>,
         key: String
     ) {
-        guard let fetched else { return }
-        if LocalSnapshot.save(fetched, for: key) || self[keyPath: keyPath].isEmpty {
+        guard let fetched, snapshotGeneration == LocalSnapshot.generation else { return }
+        if LocalSnapshot.save(fetched, for: key, expectedGeneration: snapshotGeneration) || self[keyPath: keyPath].isEmpty {
             self[keyPath: keyPath] = fetched
         }
     }
@@ -163,9 +167,10 @@ final class LibraryViewModel {
     /// dikirim kembali lewat metode ini supaya kartu Library tidak menunggu
     /// refresh jaringan berikutnya.
     func applyAlbumUpdate(_ updated: AlbumResponseDTO) {
+        guard snapshotGeneration == LocalSnapshot.generation else { return }
         guard let index = albums.firstIndex(where: { $0.id == updated.id }) else { return }
         albums[index] = updated
-        LocalSnapshot.save(albums, for: LocalSnapshot.Key.libraryAlbums)
+        LocalSnapshot.save(albums, for: LocalSnapshot.Key.libraryAlbums, expectedGeneration: snapshotGeneration)
     }
 
     func addUsers(_ userIDs: [String], to albumId: String) async {
@@ -183,7 +188,7 @@ final class LibraryViewModel {
         do {
             try await albumRepo.delete(id)
             albums.removeAll { $0.id == id }
-            LocalSnapshot.save(albums, for: LocalSnapshot.Key.libraryAlbums)
+            LocalSnapshot.save(albums, for: LocalSnapshot.Key.libraryAlbums, expectedGeneration: snapshotGeneration)
         } catch {
             actionError = (error as? APIError)?.errorDescription
                 ?? String(localized: "Failed to delete album")
@@ -195,6 +200,7 @@ final class LibraryViewModel {
     /// lagi dengan `/albums` di belakang layar.
     @discardableResult
     func applyAlbumContents(_ assets: [AssetLite], to id: String) -> Bool {
+        guard snapshotGeneration == LocalSnapshot.generation else { return false }
         guard let index = albums.firstIndex(where: { $0.id == id }) else { return false }
 
         var updated = albums[index]
@@ -216,7 +222,7 @@ final class LibraryViewModel {
         patched[index] = updated
         albums = patched
         AlbumCoverStore.shared.invalidate(id)
-        LocalSnapshot.save(albums, for: LocalSnapshot.Key.libraryAlbums)
+        LocalSnapshot.save(albums, for: LocalSnapshot.Key.libraryAlbums, expectedGeneration: snapshotGeneration)
         return true
     }
 
@@ -239,7 +245,7 @@ final class LibraryViewModel {
                 apply(await fetchFavorites(), to: \.favorites, key: LocalSnapshot.Key.libraryFavorites)
             } else {
                 favorites.removeAll { $0.id == asset.id }
-                LocalSnapshot.save(favorites, for: LocalSnapshot.Key.libraryFavorites)
+                LocalSnapshot.save(favorites, for: LocalSnapshot.Key.libraryFavorites, expectedGeneration: snapshotGeneration)
             }
         } catch {
             actionError = (error as? APIError)?.errorDescription
@@ -251,7 +257,7 @@ final class LibraryViewModel {
         do {
             try await assetRepo.toggleArchive(asset.id, to: true)
             favorites.removeAll { $0.id == asset.id }
-            LocalSnapshot.save(favorites, for: LocalSnapshot.Key.libraryFavorites)
+            LocalSnapshot.save(favorites, for: LocalSnapshot.Key.libraryFavorites, expectedGeneration: snapshotGeneration)
         } catch {
             actionError = (error as? APIError)?.errorDescription
                 ?? String(localized: "Failed to archive photo")
@@ -262,7 +268,7 @@ final class LibraryViewModel {
         do {
             try await assetRepo.delete(asset.id)
             favorites.removeAll { $0.id == asset.id }
-            LocalSnapshot.save(favorites, for: LocalSnapshot.Key.libraryFavorites)
+            LocalSnapshot.save(favorites, for: LocalSnapshot.Key.libraryFavorites, expectedGeneration: snapshotGeneration)
             return true
         } catch {
             actionError = (error as? APIError)?.errorDescription

@@ -40,6 +40,7 @@ final class DeviceAssetMatcher {
 
     private let repo: BackupRepository
     private let dataManager: SwiftDataManager
+    private let accountGeneration = LocalSnapshot.generation
     private var task: Task<Void, Never>?
     /// Penomor putaran pencocokan.
     ///
@@ -65,7 +66,7 @@ final class DeviceAssetMatcher {
     ///   pasangan baru, supaya linimasa bisa menyusut sambil berjalan alih-alih
     ///   melompat sekaligus di akhir.
     func match(_ photos: [LocalPhoto], onMatched: @escaping @MainActor () -> Void) {
-        guard task == nil else { return }
+        guard task == nil, accountGeneration == LocalSnapshot.generation else { return }
 
         // Jaringan BERBAYAR menunda seluruhnya.
         //
@@ -96,13 +97,14 @@ final class DeviceAssetMatcher {
             var cached = dataManager.storedChecksums()
 
             for group in stride(from: 0, to: pending.count, by: Self.batchSize) {
-                if Task.isCancelled { return }
+                if Task.isCancelled || accountGeneration != LocalSnapshot.generation { return }
                 let slice = Array(pending[group..<min(group + Self.batchSize, pending.count)])
 
                 // Yang belum punya checksum dihitung dulu, DI LUAR main actor.
                 let missing = slice.filter { cached[$0.id] == nil }.map(\.id)
                 if !missing.isEmpty {
                     let computed = await Self.computeChecksums(missing)
+                    guard accountGeneration == LocalSnapshot.generation else { return }
                     try? dataManager.storeChecksums(computed)
                     for entry in computed { cached[entry.localIdentifier] = entry.checksum }
                 }
@@ -117,6 +119,7 @@ final class DeviceAssetMatcher {
                 // ini akan dicocokkan lagi pada pembukaan berikutnya, dan
                 // checksum yang sudah dihitung tidak hilang.
                 guard let matches = try? await repo.duplicateMatches(candidates) else { continue }
+                guard accountGeneration == LocalSnapshot.generation else { return }
                 guard !matches.isEmpty else { continue }
 
                 for match in matches {
@@ -147,7 +150,9 @@ final class DeviceAssetMatcher {
     /// ditampilkan sebagai berhasil atau gagal, jadi versi ini baru kembali
     /// setelah semua batch selesai.
     func matchNow(_ photos: [LocalPhoto]) async throws -> Int {
+        try checkAccount()
         await NetworkMonitor.shared.waitUntilReady()
+        try checkAccount()
         guard NetworkMonitor.shared.isOnline else { throw DeviceAssetSyncError.offline }
         guard !NetworkMonitor.shared.isExpensive else {
             throw DeviceAssetSyncError.meteredNetwork
@@ -162,11 +167,13 @@ final class DeviceAssetMatcher {
 
         for group in stride(from: 0, to: pending.count, by: Self.batchSize) {
             try Task.checkCancellation()
+            try checkAccount()
             let slice = Array(pending[group..<min(group + Self.batchSize, pending.count)])
             let missing = slice.filter { cached[$0.id] == nil }.map(\.id)
 
             if !missing.isEmpty {
                 let computed = await Self.computeChecksums(missing)
+                try checkAccount()
                 try dataManager.storeChecksums(computed)
                 for entry in computed { cached[entry.localIdentifier] = entry.checksum }
             }
@@ -178,6 +185,7 @@ final class DeviceAssetMatcher {
             guard !candidates.isEmpty else { continue }
 
             let matches = try await repo.duplicateMatches(candidates)
+            try checkAccount()
             for match in matches {
                 try dataManager.linkDeviceAsset(
                     localIdentifier: match.localID,
@@ -194,7 +202,9 @@ final class DeviceAssetMatcher {
     /// ke server. Dipisahkan dari `matchNow` karena Immich menampilkannya sebagai
     /// job diagnostik tersendiri.
     func hashNow(_ photos: [LocalPhoto]) async throws -> Int {
+        try checkAccount()
         await NetworkMonitor.shared.waitUntilReady()
+        try checkAccount()
         guard !NetworkMonitor.shared.isExpensive else {
             throw DeviceAssetSyncError.meteredNetwork
         }
@@ -206,14 +216,20 @@ final class DeviceAssetMatcher {
         var hashed = 0
         for group in stride(from: 0, to: pending.count, by: Self.batchSize) {
             try Task.checkCancellation()
+            try checkAccount()
             let slice = pending[group..<min(group + Self.batchSize, pending.count)]
             let computed = await Self.computeChecksums(slice.map(\.id))
+            try checkAccount()
             try dataManager.storeChecksums(computed)
             for entry in computed { cached[entry.localIdentifier] = entry.checksum }
             hashed += computed.count
             await Task.yield()
         }
         return hashed
+    }
+
+    private func checkAccount() throws {
+        guard accountGeneration == LocalSnapshot.generation else { throw CancellationError() }
     }
 
     /// Membaca byte lalu menghitung SHA1, satu per satu.

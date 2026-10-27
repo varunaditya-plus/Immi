@@ -4,6 +4,8 @@ import Observation
 @MainActor
 @Observable
 final class AlbumListViewModel {
+    private let snapshotGeneration = LocalSnapshot.generation
+
     var albums: [AlbumResponseDTO] = []
     /// Kegagalan aksi sheet — sunting, tambah pengguna. Sengaja TERPISAH dari
     /// `phase`: itu milik daftar album, dan mengubahnya berarti seluruh daftar
@@ -24,6 +26,7 @@ final class AlbumListViewModel {
     /// kunjungan saat offline berakhir di "Failed to Load" — padahal daftar
     /// albumnya sudah pernah ada di layar ini beberapa detik sebelumnya.
     func loadAlbums() async {
+        guard snapshotGeneration == LocalSnapshot.generation else { return }
         if albums.isEmpty {
             // ADA potret dan potret yang BERISI adalah dua hal berbeda —
             // pengguna baru yang belum punya album menyimpan potret `[]`, dan
@@ -39,7 +42,8 @@ final class AlbumListViewModel {
 
         do {
             let fetched = try await repo.all()
-            if LocalSnapshot.save(fetched, for: LocalSnapshot.Key.albumsList) || albums.isEmpty {
+            guard snapshotGeneration == LocalSnapshot.generation else { return }
+            if LocalSnapshot.save(fetched, for: LocalSnapshot.Key.albumsList, expectedGeneration: snapshotGeneration) || albums.isEmpty {
                 albums = fetched
             }
             phase = .loaded(())
@@ -61,7 +65,7 @@ final class AlbumListViewModel {
     /// Tanpa ini, album yang dihapus muncul lagi — dengan nama lamanya — saat
     /// layar dibuka offline, dan cache-nya terasa rusak alih-alih membantu.
     private func persist() {
-        LocalSnapshot.save(albums, for: LocalSnapshot.Key.albumsList)
+        LocalSnapshot.save(albums, for: LocalSnapshot.Key.albumsList, expectedGeneration: snapshotGeneration)
     }
 
     /// - Returns: pesan kesalahan; nil berarti berhasil.
@@ -146,7 +150,7 @@ final class AlbumListViewModel {
             // Potret ISI album itu juga dibuang, bukan cuma barisnya dari
             // daftar. Tanpa ini berkasnya tertinggal selamanya — tidak pernah
             // dibaca, tidak pernah dibersihkan.
-            LocalSnapshot.remove(LocalSnapshot.Key.album(id))
+            LocalSnapshot.remove(LocalSnapshot.Key.album(id), expectedGeneration: snapshotGeneration)
         } catch {
             // Handle error silently for now
         }

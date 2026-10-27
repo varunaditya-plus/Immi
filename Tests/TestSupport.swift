@@ -8,9 +8,7 @@ import XCTest
 @MainActor
 class MockSessionManager: SessionManager {
     /// When set, replaces the real auth headers (used to verify header attachment).
-    var testAuthHeaders: [String: String]? {
-        didSet { refreshSnapshot() }
-    }
+    var testAuthHeaders: [String: String]?
 
     var shouldSucceedPing = false
     var shouldSucceedLogin = false
@@ -39,9 +37,8 @@ class MockSessionManager: SessionManager {
     /// `SessionManager.init` memulihkan sesi tersimpan secara sinkron; tanpa ini
     /// sisa sesi dari kali terakhir aplikasi dijalankan bisa membuat test lulus
     /// atau gagal tanpa ada hubungannya dengan yang sedang diuji.
-    override init() {
-        super.init()
-        isLoggedIn = false
+    init() {
+        super.init(restoresSession: false)
     }
 
     override var authHeaders: [String: String] {

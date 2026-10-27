@@ -166,15 +166,17 @@ final class BackgroundUploadQueueTests: XCTestCase {
         XCTAssertEqual(queue.readyItems(now: Date(timeIntervalSince1970: 1_000)).map(\.id), ["local-a"])
     }
 
-    func testBackgroundTaskWithoutQueueRecordIsAdoptedAfterUpgrade() throws {
+    func testOwnedBackgroundTaskWithoutQueueRecordIsAdoptedAfterRelaunch() throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
         let queue = BackupQueueStore(fileURL: fixture.queueURL)
+        try queue.bind(to: BackupQueueOwner(server: "https://immich.test/api", userID: "user-1"))
         let context = BackupUploadTaskContext(
             phase: .livePhotoMotion,
             localIdentifier: "legacy-live",
             checksum: "motion-sha1",
-            bodyPath: "/tmp/legacy.multipart")
+            bodyPath: "/tmp/legacy.multipart",
+            ownership: try XCTUnwrap(queue.ownership))
 
         try queue.reconcile(activeTasks: [
             BackupActiveTask(taskIdentifier: 7, context: context, isSuspended: true),

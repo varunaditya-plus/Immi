@@ -1282,6 +1282,7 @@ struct AssetDetailView: View {
               !isDownloadingToDevice
         else { return }
 
+        let accountGeneration = LocalSnapshot.generation
         isDownloadingToDevice = true
         let filename = vm.detail?.originalFileName
             ?? (currentAsset.isVideo ? "video.mov" : "photo.jpg")
@@ -1298,6 +1299,7 @@ struct AssetDetailView: View {
                 vm.actionError = ErrorEvent(String(localized: "Could not save to Photos."))
                 return
             }
+            guard accountGeneration == LocalSnapshot.generation else { return }
             try? SwiftDataManager.shared.linkDeviceAsset(
                 localIdentifier: localID, to: serverID)
             updateCurrentOrigin(.both)

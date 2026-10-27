@@ -25,6 +25,7 @@ final class PhotoThumbnailLoader {
     var isSuspended = false
 
     private let session: SessionManager
+    private let accountGeneration = LocalSnapshot.generation
 
     init(session: SessionManager) {
         self.session = session
@@ -36,7 +37,8 @@ final class PhotoThumbnailLoader {
 
     /// Cache hit, tanpa `await`. Dipakai sel untuk memasang gambar seketika.
     func cachedImage(for assetId: String) -> UIImage? {
-        ImageMemoryCache.shared.image(
+        guard accountGeneration == LocalSnapshot.generation else { return nil }
+        return ImageMemoryCache.shared.image(
             for: ImageCache.memoryKey(cacheKey(for: assetId), Self.maxPixelSize))
     }
 
@@ -46,7 +48,7 @@ final class PhotoThumbnailLoader {
     }
 
     func image(for assetId: String) async -> UIImage? {
-        guard !isSuspended else { return nil }
+        guard !isSuspended, accountGeneration == LocalSnapshot.generation else { return nil }
 
         // FOTO PERANGKAT punya jalurnya sendiri, dan tidak boleh melewati
         // `UnreadableAssets`.
@@ -58,6 +60,7 @@ final class PhotoThumbnailLoader {
         if LocalPhotoLibrary.isLocal(assetId) {
             let image = await LocalPhotoLibrary.shared.thumbnail(
                 for: assetId, size: Self.deviceTargetSize)
+            guard accountGeneration == LocalSnapshot.generation else { return nil }
             if let image {
                 // Dititipkan ke cache MEMORI saja, bukan ke disk: byte-nya sudah
                 // ada di perangkat, dan menyalinnya ke cache aplikasi hanya
@@ -82,9 +85,11 @@ final class PhotoThumbnailLoader {
                 fetch: { try await api.rawData(endpoint) })
             // Keberhasilan ikut dicatat: itulah yang membedakan "aset ini
             // hilang" dari "sambungannya sedang rusak".
+            guard accountGeneration == LocalSnapshot.generation else { return nil }
             UnreadableAssets.shared.noteSuccess()
             return image
         } catch {
+            guard accountGeneration == LocalSnapshot.generation else { return nil }
             // `try?` diganti do/catch justru untuk baris ini.
             //
             // Petak yang gagal karena asetnya sudah tidak bisa dibaca tidak boleh
@@ -99,7 +104,8 @@ final class PhotoThumbnailLoader {
     /// tapi hasilnya dibuang: yang dituju cuma mengisi cache sebelum selnya
     /// benar-benar sampai di layar.
     func prefetch(_ assetIds: [String]) {
-        guard !isSuspended else { return }
+        guard !isSuspended, accountGeneration == LocalSnapshot.generation else { return }
+        let generation = accountGeneration
 
         // PhotoKit punya mekanisme prefetch-nya sendiri; yang lokal diserahkan
         // ke sana dan tidak ikut ke `ImageCache`.
@@ -123,7 +129,10 @@ final class PhotoThumbnailLoader {
                 // sini: yang melaporkan kegagalan di jalur ini juga prefetch,
                 // dan laporan itu dibuang kalau tidak ada satu pun keberhasilan
                 // yang tercatat belakangan.
-                await MainActor.run { UnreadableAssets.shared.noteSuccess() }
+                await MainActor.run {
+                    guard generation == LocalSnapshot.generation else { return }
+                    UnreadableAssets.shared.noteSuccess()
+                }
                 return data
             },
             // Aset yang sudah tidak bisa dibaca ketahuan DI SINI, selagi selnya
@@ -132,6 +141,7 @@ final class PhotoThumbnailLoader {
             onFailure: { key, error in
                 let assetId = String(key.dropLast("-thumbnail".count))
                 Task { @MainActor in
+                    guard generation == LocalSnapshot.generation else { return }
                     UnreadableAssets.shared.report(assetId, error: error)
                 }
             })

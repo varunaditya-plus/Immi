@@ -4,6 +4,8 @@ import Observation
 @MainActor
 @Observable
 final class DuplicatesViewModel {
+    private let accountGeneration = LocalSnapshot.generation
+
     var groups: [DuplicateGroupDTO] = []
     var phase: LoadingPhase<Void> = .idle
     var actionError: String?
@@ -55,6 +57,7 @@ final class DuplicatesViewModel {
                     duplicateId: group.id,
                     keepAssetIds: kept.sorted(),
                     trashAssetIds: trashed.sorted()))
+                guard accountGeneration == LocalSnapshot.generation else { return }
                 // Server memindahkan aset ke Trash di luar AssetDetailRepository,
                 // jadi registry lokal harus diberi tahu agar backup tidak segera
                 // mengunggah salinan perangkatnya lagi.

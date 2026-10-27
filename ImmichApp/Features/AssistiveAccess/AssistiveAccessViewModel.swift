@@ -4,6 +4,8 @@ import Observation
 @MainActor
 @Observable
 final class AssistiveAccessViewModel {
+    private let snapshotGeneration = LocalSnapshot.generation
+
     private(set) var photos: [AssetLite] = []
     private(set) var favorites: [AssetLite] = []
     private(set) var album: [AssetLite] = []
@@ -32,6 +34,7 @@ final class AssistiveAccessViewModel {
     /// Cache lokal dipasang lebih dulu. Network refresh berjalan bersamaan dan
     /// kegagalannya tidak membuang foto yang masih sah untuk dilihat offline.
     func load(showsFavorites: Bool, albumID: String) async {
+        guard snapshotGeneration == LocalSnapshot.generation else { return }
         restorePhotos()
         if showsFavorites {
             let cached = LocalSnapshot.load(
@@ -60,17 +63,18 @@ final class AssistiveAccessViewModel {
 
         let (_, favoriteResult, albumResult) = await (
             sync, refreshedFavorites, refreshedAlbum)
+        guard snapshotGeneration == LocalSnapshot.generation else { return }
 
         restorePhotos()
         if let favoriteResult {
             let ordered = chronological(favoriteResult)
             favorites = ordered
-            LocalSnapshot.save(ordered, for: LocalSnapshot.Key.favorites)
+            LocalSnapshot.save(ordered, for: LocalSnapshot.Key.favorites, expectedGeneration: snapshotGeneration)
         }
         if let albumResult {
             let ordered = chronological(albumResult)
             album = ordered
-            LocalSnapshot.save(ordered, for: LocalSnapshot.Key.album(albumID))
+            LocalSnapshot.save(ordered, for: LocalSnapshot.Key.album(albumID), expectedGeneration: snapshotGeneration)
         }
     }
 

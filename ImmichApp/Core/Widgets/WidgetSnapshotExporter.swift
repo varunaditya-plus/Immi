@@ -12,6 +12,7 @@ enum WidgetSnapshotExporter {
     static let favoritesID = "__favorites__"
     static let selectedAlbumsKey = "widget.album.selectedIDs"
     private static let photosPerAlbum = 8
+    private static var accountGeneration = UUID()
 
     private struct Snapshot: Encodable {
         let generatedAt: Date
@@ -36,6 +37,9 @@ enum WidgetSnapshotExporter {
     /// Penyegaran mandiri saat aplikasi dibuka. Widget tidak bergantung pada
     /// pengguna pernah masuk ke tab Library pada sesi ini.
     static func refresh(session: SessionManager) async {
+        guard session.isLoggedIn else { return }
+        let context = session.snapshot
+        let expectedGeneration = accountGeneration
         let api = APIClient(session: session)
         async let fetchedAlbums = try? AlbumRepository(api: api).all()
         async let fetchedMemories = try? MemoriesRepository(api: api).getMemories()
@@ -47,6 +51,8 @@ enum WidgetSnapshotExporter {
         let (allAlbums, allMemories, favoritesResponse) = await (
             fetchedAlbums, fetchedMemories, fetchedFavorites)
 
+        guard expectedGeneration == accountGeneration,
+              (try? session.checkCurrent(context)) != nil else { return }
         let albums = (allAlbums ?? LocalSnapshot.load(
             [AlbumResponseDTO].self,
             for: LocalSnapshot.Key.libraryAlbums) ?? [])
@@ -74,6 +80,8 @@ enum WidgetSnapshotExporter {
                     .map(\.id))
         }
 
+        guard expectedGeneration == accountGeneration,
+              (try? session.checkCurrent(context)) != nil else { return }
         let favoriteAssetIDs = favoritesResponse?.assets.items.map(\.id) ?? []
         let favoriteCount = favoritesResponse?.assets.total ?? favoriteAssetIDs.count
 
@@ -94,6 +102,9 @@ enum WidgetSnapshotExporter {
         memories: [MemoryStory],
         session: SessionManager
     ) async {
+        guard session.isLoggedIn else { return }
+        let context = session.snapshot
+        let expectedGeneration = accountGeneration
         guard let container = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: appGroup)
         else { return }
@@ -137,6 +148,11 @@ enum WidgetSnapshotExporter {
             }
 
             for await (name, data) in group {
+                guard expectedGeneration == accountGeneration,
+                      (try? session.checkCurrent(context)) != nil else {
+                    group.cancelAll()
+                    return
+                }
                 guard let data else { continue }
                 let url = images.appendingPathComponent(name)
                 if (try? data.write(to: url, options: .atomic)) != nil {
@@ -144,6 +160,9 @@ enum WidgetSnapshotExporter {
                 }
             }
         }
+
+        guard expectedGeneration == accountGeneration,
+              (try? session.checkCurrent(context)) != nil else { return }
 
         // Saat offline jangan mengganti widget bergambar yang masih valid
         // dengan snapshot baru yang seluruh gambarnya kosong.
@@ -220,6 +239,7 @@ enum WidgetSnapshotExporter {
     }
 
     static func clear() {
+        accountGeneration = UUID()
         guard let container = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: appGroup)
         else { return }

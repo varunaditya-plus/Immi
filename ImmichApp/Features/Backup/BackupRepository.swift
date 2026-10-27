@@ -109,7 +109,9 @@ class BackupRepository {
         modifiedAt: Date,
         additionalFields: [String: String] = [:]
     ) async throws -> PreparedUpload {
-        let (baseURL, authHeaders) = await api.session.requestContext
+        let context = await api.session.snapshot
+        let baseURL = context.baseURL
+        let authHeaders = context.authHeaders
         guard let baseURL else { throw APIError.invalidURL }
 
         let boundary = "Boundary-\(UUID().uuidString)"

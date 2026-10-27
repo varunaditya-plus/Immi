@@ -41,6 +41,14 @@ struct OnboardingView: View {
                 title: "SelfPhotos",
                 subtitle: "Connect to your Immich server.")
 
+            if let message = vm.sessionErrorMessage {
+                Text(message)
+                    .font(.callout)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+                    .accessibilityIdentifier("sessionErrorMessage")
+            }
+
             field("Server") {
                 TextField("http://your-server-ip:port", text: $vm.serverText)
                     .textInputAutocapitalization(.never)

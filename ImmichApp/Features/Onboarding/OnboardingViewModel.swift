@@ -32,9 +32,6 @@ final class OnboardingViewModel {
     init(session: SessionManager) {
         self.session = session
         serverText = UserDefaults.standard.string(forKey: Self.lastServerKey) ?? ""
-        if let issue = session.compatibilityIssue {
-            phase = .failed(issue.localizedDescription)
-        }
     }
 
     /// Alamat server terakhir yang BERHASIL dipakai.
@@ -45,6 +42,10 @@ final class OnboardingViewModel {
 
     static func clearStoredServer() {
         UserDefaults.standard.removeObject(forKey: lastServerKey)
+    }
+
+    var sessionErrorMessage: String? {
+        session.compatibilityIssue?.localizedDescription ?? session.authenticationError
     }
 
     var canConnect: Bool {

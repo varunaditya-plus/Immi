@@ -4,6 +4,8 @@ import Observation
 @MainActor
 @Observable
 final class PeopleListViewModel {
+    private let snapshotGeneration = LocalSnapshot.generation
+
     var people: [PersonDTO] = []
     var phase: LoadingPhase<Void> = .idle
 
@@ -15,6 +17,7 @@ final class PeopleListViewModel {
 
     /// Potret lokal dulu, jaringan menyusul — lihat `LocalSnapshot`.
     func loadPeople() async {
+        guard snapshotGeneration == LocalSnapshot.generation else { return }
         if people.isEmpty {
             if let cached = LocalSnapshot.load(
                 [PersonDTO].self, for: LocalSnapshot.Key.peopleList) {
@@ -27,7 +30,8 @@ final class PeopleListViewModel {
 
         do {
             let fetched = try await repo.all()
-            if LocalSnapshot.save(fetched, for: LocalSnapshot.Key.peopleList) || people.isEmpty {
+            guard snapshotGeneration == LocalSnapshot.generation else { return }
+            if LocalSnapshot.save(fetched, for: LocalSnapshot.Key.peopleList, expectedGeneration: snapshotGeneration) || people.isEmpty {
                 people = fetched
             }
             phase = .loaded(())
@@ -57,7 +61,7 @@ final class PeopleListViewModel {
     }
 
     private func persist() {
-        LocalSnapshot.save(people, for: LocalSnapshot.Key.peopleList)
+        LocalSnapshot.save(people, for: LocalSnapshot.Key.peopleList, expectedGeneration: snapshotGeneration)
     }
 
     func retry() async {

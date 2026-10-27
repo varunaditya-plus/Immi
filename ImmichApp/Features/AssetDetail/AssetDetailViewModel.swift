@@ -4,6 +4,8 @@ import Observation
 @MainActor
 @Observable
 final class AssetDetailViewModel {
+    private let snapshotGeneration = LocalSnapshot.generation
+
     var detail: AssetResponseDTO?
     var phase: LoadingPhase<Void> = .idle
     var showInfoPanel = false
@@ -69,6 +71,7 @@ final class AssetDetailViewModel {
     /// dilakukan pengguna. Yang bersuara hanya kegagalan yang MEREKA picu
     /// sendiri: favorit, bagikan, arsip, hapus.
     func load(_ id: String) async {
+        guard snapshotGeneration == LocalSnapshot.generation else { return }
         // Foto perangkat tidak punya detail di server, dan menanyakannya bukan
         // sekadar sia-sia: jawabannya 404, dan itu membuat petaknya dibuang dari
         // linimasa. Panel info-nya memang kosong — yang diketahui tentang foto
@@ -93,10 +96,12 @@ final class AssetDetailViewModel {
 
         do {
             let fetched = try await repo.fetchAsset(id)
+            guard snapshotGeneration == LocalSnapshot.generation else { return }
             detail = fetched
-            LocalSnapshot.save(fetched, for: key)
+            LocalSnapshot.save(fetched, for: key, expectedGeneration: snapshotGeneration)
             phase = .loaded(())
         } catch {
+            guard snapshotGeneration == LocalSnapshot.generation else { return }
             let message = (error as? APIError)?.errorDescription
                 ?? String(localized: "Failed to load asset")
             phase = .failed(message)
@@ -105,7 +110,7 @@ final class AssetDetailViewModel {
             // pesan ini muncul lagi setiap kali ditekan.
             UnreadableAssets.shared.report(id, error: error)
             if (error as? APIError)?.meansAssetIsUnreadable == true {
-                LocalSnapshot.remove(key)
+                LocalSnapshot.remove(key, expectedGeneration: snapshotGeneration)
             }
         }
     }
@@ -192,7 +197,7 @@ final class AssetDetailViewModel {
             try await repo.delete(id)
             // Fotonya sudah tidak ada; potret detailnya tidak boleh menunggu
             // seseorang membukanya lagi untuk dibersihkan.
-            LocalSnapshot.remove(LocalSnapshot.Key.assetDetail(id))
+            LocalSnapshot.remove(LocalSnapshot.Key.assetDetail(id), expectedGeneration: snapshotGeneration)
             return true
         } catch {
             actionError = ErrorEvent(Self.describe(error))
@@ -266,7 +271,7 @@ final class AssetDetailViewModel {
     /// sekali.
     private func persistDetail() {
         guard let detail else { return }
-        LocalSnapshot.save(detail, for: LocalSnapshot.Key.assetDetail(detail.id))
+        LocalSnapshot.save(detail, for: LocalSnapshot.Key.assetDetail(detail.id), expectedGeneration: snapshotGeneration)
     }
 
     private static func describe(_ error: Error) -> String {

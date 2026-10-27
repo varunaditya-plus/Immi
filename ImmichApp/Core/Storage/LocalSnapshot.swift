@@ -22,7 +22,9 @@ import Foundation
 /// sana, dan itu sengaja — hilangnya cuma membuat petaknya kembali jadi
 /// thumbhash buram. Kehilangan potret ini berarti kembali ke layar kosong, dan
 /// itu persis keadaan yang sedang diperbaiki.
+@MainActor
 enum LocalSnapshot {
+    private(set) static var generation = UUID()
     // MARK: - Kunci
 
     enum Key {
@@ -57,7 +59,10 @@ enum LocalSnapshot {
     /// memasangnya ulang hanya menyuruh SwiftUI membangun ulang daftar yang
     /// tidak berubah — dan di grid, itu terlihat sebagai kedipan.
     @discardableResult
-    static func save<T: Encodable>(_ value: T, for key: String) -> Bool {
+    static func save<T: Encodable>(
+        _ value: T, for key: String, expectedGeneration: UUID? = nil
+    ) -> Bool {
+        if let expectedGeneration, expectedGeneration != generation { return false }
         // Gagal mengodekan dilaporkan sebagai BERUBAH, bukan sebagai sama.
         //
         // Nilai balik ini dipakai pemanggil untuk memutuskan apakah data segar
@@ -76,13 +81,15 @@ enum LocalSnapshot {
     }
 
     /// Membuang satu potret — untuk hal yang memang sudah tidak ada lagi.
-    static func remove(_ key: String) {
+    static func remove(_ key: String, expectedGeneration: UUID? = nil) {
+        if let expectedGeneration, expectedGeneration != generation { return }
         try? FileManager.default.removeItem(at: url(for: key))
     }
 
     /// Dipanggil saat keluar akun: potret milik server lain bukan sekadar basi,
     /// ia menampilkan foto orang lain.
     static func clearAll() {
+        generation = UUID()
         try? FileManager.default.removeItem(at: directory)
     }
 

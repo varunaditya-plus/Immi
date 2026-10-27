@@ -8,9 +8,13 @@ struct Endpoint {
     var query: [URLQueryItem] = []
     var body: Data? = nil
     var extraHeaders: [String: String] = [:]
+    var requiresAuthentication: Bool = true
 
-    static func json<T: Encodable>(_ path: String, method: HTTPMethod, body: T) -> Endpoint {
+    static func json<T: Encodable>(
+        _ path: String, method: HTTPMethod, body: T, requiresAuthentication: Bool = true
+    ) -> Endpoint {
         let data = try? JSONEncoder.immich.encode(body)
-        return Endpoint(path: path, method: method, body: data)
+        return Endpoint(path: path, method: method, body: data,
+                        requiresAuthentication: requiresAuthentication)
     }
 }

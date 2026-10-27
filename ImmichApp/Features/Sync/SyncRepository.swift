@@ -28,9 +28,12 @@ class SyncRepository {
     /// dan dilepas, jadi memorinya rata berapa pun besar perpustakaannya.
     @MainActor
     private func sync(reset: Bool, isRetryAfterReset: Bool = false) async throws {
+        let context = api.session.snapshot
+        try api.checkCurrent(context)
         if reset { try dataManager.clearAllCache() }
 
-        let outcome = try await streamAndApply(reset: reset)
+        let outcome = try await streamAndApply(reset: reset, context: context)
+        try api.checkCurrent(context)
 
         if outcome.serverRequestedReset {
             guard !isRetryAfterReset else {
@@ -45,6 +48,7 @@ class SyncRepository {
                                          body: SyncAckSetDTO(acks: Array(outcome.latestAcks.values))))
         }
 
+        try api.checkCurrent(context)
         let state = dataManager.getSyncState()
         let now = Date()
         if reset || state.lastFullSyncAt == nil { state.lastFullSyncAt = now }
@@ -69,7 +73,7 @@ class SyncRepository {
     private static let chunkSize = 500
 
     @MainActor
-    private func streamAndApply(reset: Bool) async throws -> StreamOutcome {
+    private func streamAndApply(reset: Bool, context: SessionRequestContext) async throws -> StreamOutcome {
         // Immich v3 mempertahankan nama request AssetsV1 di enum, tetapi
         // handler server-nya sengaja selalu membalas 400 karena sudah
         // deprecated. Aplikasi sebelumnya tetap memintanya, lalu background
@@ -83,6 +87,7 @@ class SyncRepository {
             serverMajor = try await api.session.serverVersion().major
         }
 
+        try api.checkCurrent(context)
         let requestType = serverMajor >= 3 ? "AssetsV2" : "AssetsV1"
         var request = SyncStreamRequestDTO(types: [requestType])
         if reset { request.reset = true }
@@ -94,6 +99,7 @@ class SyncRepository {
         let lines = try await api.streamLines(.json("/sync/stream", method: .post, body: request))
 
         for try await line in lines {
+            try api.checkCurrent(context)
             guard !line.isEmpty, let data = line.data(using: .utf8) else { continue }
             let envelope = try JSONDecoder.immich.decode(SyncLineEnvelopeDTO.self, from: data)
 
@@ -142,11 +148,11 @@ class SyncRepository {
             }
 
             if upserts.count >= Self.chunkSize || deletes.count >= Self.chunkSize {
-                try await flush(&upserts, &deletes, isFullReset: reset)
+                try await flush(&upserts, &deletes, isFullReset: reset, context: context)
             }
         }
 
-        try await flush(&upserts, &deletes, isFullReset: reset)
+        try await flush(&upserts, &deletes, isFullReset: reset, context: context)
         return outcome
     }
 
@@ -154,8 +160,10 @@ class SyncRepository {
     private func flush(
         _ upserts: inout [CachedAsset],
         _ deletes: inout [String],
-        isFullReset: Bool
+        isFullReset: Bool,
+        context: SessionRequestContext
     ) async throws {
+        try api.checkCurrent(context)
         guard !upserts.isEmpty || !deletes.isEmpty else { return }
 
         try dataManager.applySyncBatch(

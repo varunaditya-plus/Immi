@@ -5,7 +5,7 @@ import Foundation
 /// Terpisah dari `AssetDetailRepository` karena artinya berbeda: di sana
 /// "delete" berarti MEMINDAHKAN ke tong sampah, sedangkan di sini penghapusannya
 /// permanen dan tidak bisa dibatalkan.
-final class TrashRepository {
+class TrashRepository {
     private let api: APIClient
 
     init(api: APIClient) {

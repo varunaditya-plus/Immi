@@ -203,6 +203,8 @@ struct AlbumDetailView: View {
 @MainActor
 @Observable
 final class AlbumDetailViewModel {
+    private let snapshotGeneration = LocalSnapshot.generation
+
     var assets: [AssetLite] = []
     var phase: LoadingPhase<Void> = .idle
 
@@ -253,6 +255,7 @@ final class AlbumDetailViewModel {
         let newValue = !asset.isFavorite
         do {
             try await assetRepo.toggleFavorite(asset.id, to: newValue)
+            guard snapshotGeneration == LocalSnapshot.generation else { return }
             if let index = assets.firstIndex(where: { $0.id == asset.id }) {
                 assets[index].isFavorite = newValue
                 persist()
@@ -273,6 +276,7 @@ final class AlbumDetailViewModel {
         do {
             for id in ids {
                 try await assetRepo.toggleFavorite(id, to: value)
+                guard snapshotGeneration == LocalSnapshot.generation else { return }
                 if let index = assets.firstIndex(where: { $0.id == id }) {
                     assets[index].isFavorite = value
                 }
@@ -292,6 +296,7 @@ final class AlbumDetailViewModel {
         do {
             for id in ids {
                 try await assetRepo.setVisibility(id, to: archived ? .archive : .timeline)
+                guard snapshotGeneration == LocalSnapshot.generation else { return }
             }
             // Linimasa dirender dari cache lokal — lihat AssetGridViewModel.
             try? SwiftDataManager.shared.setTimelineVisibility(ids, inTimeline: !archived)
@@ -306,6 +311,7 @@ final class AlbumDetailViewModel {
         guard !ids.isEmpty else { return }
         do {
             try await assetRepo.delete(ids)
+            guard snapshotGeneration == LocalSnapshot.generation else { return }
             let removed = Set(ids)
             assets.removeAll { removed.contains($0.id) }
             persist()
@@ -321,6 +327,7 @@ final class AlbumDetailViewModel {
         do {
             for id in ids {
                 try await assetRepo.setVisibility(id, to: .locked)
+                guard snapshotGeneration == LocalSnapshot.generation else { return }
             }
             let moved = Set(ids)
             assets.removeAll { moved.contains($0.id) }
@@ -351,7 +358,7 @@ final class AlbumDetailViewModel {
     /// tidak, foto yang sudah dikeluarkan muncul lagi saat album dibuka offline.
     private func persist() {
         guard let albumId else { return }
-        LocalSnapshot.save(assets, for: LocalSnapshot.Key.album(albumId))
+        LocalSnapshot.save(assets, for: LocalSnapshot.Key.album(albumId), expectedGeneration: snapshotGeneration)
     }
 
     /// Yang gagal diunduh dilewati, bukan membatalkan seluruh operasi.
@@ -376,6 +383,7 @@ final class AlbumDetailViewModel {
         guard !ids.isEmpty else { return }
         do {
             try await albumRepo.removeAssets(ids, from: albumId)
+            guard snapshotGeneration == LocalSnapshot.generation else { return }
             let removed = Set(ids)
             assets.removeAll { removed.contains($0.id) }
             persist()
@@ -401,10 +409,11 @@ final class AlbumDetailViewModel {
     func deleteAlbum(_ id: String) async -> Bool {
         do {
             try await albumRepo.delete(id)
+            guard snapshotGeneration == LocalSnapshot.generation else { return false }
             // Potretnya ikut dibuang. Album yang sudah tidak ada tidak boleh
             // meninggalkan berkas yang akan terus dibaca kalau id-nya kebetulan
             // dipakai lagi.
-            LocalSnapshot.remove(LocalSnapshot.Key.album(id))
+            LocalSnapshot.remove(LocalSnapshot.Key.album(id), expectedGeneration: snapshotGeneration)
             return true
         } catch {
             phase = .failed((error as? APIError)?.errorDescription
@@ -421,6 +430,7 @@ final class AlbumDetailViewModel {
         _ albumId: String,
         expectedAssetCount: Int? = nil
     ) async {
+        guard snapshotGeneration == LocalSnapshot.generation else { return }
         self.albumId = albumId
         if let expectedAssetCount {
             self.expectedAssetCount = expectedAssetCount
@@ -441,7 +451,8 @@ final class AlbumDetailViewModel {
             let fetched = try await timelineRepo.albumAssets(
                 albumId,
                 expectedCount: self.expectedAssetCount)
-            if LocalSnapshot.save(fetched, for: key) || assets.isEmpty {
+            guard snapshotGeneration == LocalSnapshot.generation else { return }
+            if LocalSnapshot.save(fetched, for: key, expectedGeneration: snapshotGeneration) || assets.isEmpty {
                 assets = fetched
             }
             phase = .loaded(())

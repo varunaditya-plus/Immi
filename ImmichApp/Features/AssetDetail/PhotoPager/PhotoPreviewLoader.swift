@@ -17,6 +17,7 @@ final class PhotoPreviewLoader {
     static let maxPixelSize = 2048
 
     private let session: SessionManager
+    private let accountGeneration = LocalSnapshot.generation
 
     init(session: SessionManager) {
         self.session = session
@@ -33,6 +34,7 @@ final class PhotoPreviewLoader {
     /// pasti sudah ada. Menampilkannya seketika inilah yang membuat aplikasi
     /// resmi terasa tanpa loading.
     func cachedImage(for assetId: String) -> UIImage? {
+        guard accountGeneration == LocalSnapshot.generation else { return nil }
         if let preview = ImageMemoryCache.shared.image(
             for: ImageCache.memoryKey(cacheKey(for: assetId), Self.maxPixelSize)) {
             return preview
@@ -49,6 +51,7 @@ final class PhotoPreviewLoader {
     }
 
     func image(for assetId: String) async -> UIImage? {
+        guard accountGeneration == LocalSnapshot.generation else { return nil }
         // Aset PERANGKAT tidak punya alamat di server.
         //
         // Memintanya ke sana berakhir 400/404, dan itu dibaca `UnreadableAssets`
@@ -56,9 +59,10 @@ final class PhotoPreviewLoader {
         // dari linimasa. Foto yang masih ada di perangkat hilang dari grid
         // hanya karena dibuka.
         if LocalPhotoLibrary.isLocal(assetId) {
-            return await LocalPhotoLibrary.shared.preview(
+            let image = await LocalPhotoLibrary.shared.preview(
                 for: assetId,
                 size: CGSize(width: Self.maxPixelSize, height: Self.maxPixelSize))
+            return accountGeneration == LocalSnapshot.generation ? image : nil
         }
 
         let api = session.imageAPI
@@ -76,9 +80,11 @@ final class PhotoPreviewLoader {
                 key: cacheKey(for: assetId),
                 maxPixelSize: Self.maxPixelSize,
                 fetch: { try await api.rawData(endpoint) })
+            guard accountGeneration == LocalSnapshot.generation else { return nil }
             UnreadableAssets.shared.noteSuccess()
             return image
         } catch {
+            guard accountGeneration == LocalSnapshot.generation else { return nil }
             // Aset yang ditolak server dibuang dari linimasa — lihat
             // `UnreadableAssets`.
             UnreadableAssets.shared.report(assetId, error: error)
@@ -120,7 +126,10 @@ final class PhotoPreviewLoader {
     /// headernya harus ikut dititipkan ke `AVURLAsset`, bukan dipasang di
     /// `URLRequest` seperti permintaan lain.
     func videoSource(for assetId: String) -> (url: URL, headers: [String: String])? {
-        let (baseURL, headers) = session.snapshot
+        guard accountGeneration == LocalSnapshot.generation else { return nil }
+        let context = session.snapshot
+        let baseURL = context.baseURL
+        let headers = context.authHeaders
         guard let baseURL else { return nil }
         return (baseURL.appendingPathComponent("/assets/\(assetId)/video/playback"), headers)
     }
@@ -190,6 +199,7 @@ final class PhotoPreviewLoader {
 
     /// Menghangatkan halaman tetangga sebelum diusap ke sana.
     func prefetch(_ assetIds: [String]) {
+        guard accountGeneration == LocalSnapshot.generation else { return }
         // Id perangkat tidak punya alamat di server; menembakkannya ke sana
         // hanya menghasilkan 404 untuk setiap tetangga halaman.
         let serverIDs = assetIds.filter { !LocalPhotoLibrary.isLocal($0) }

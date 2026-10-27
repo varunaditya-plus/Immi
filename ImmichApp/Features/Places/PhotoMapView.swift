@@ -3,6 +3,8 @@ import SwiftUI
 
 /// Peta layar penuh berisi seluruh foto yang punya koordinat.
 struct PhotoMapView: View {
+    @State private var snapshotGeneration = LocalSnapshot.generation
+
     @Environment(SessionManager.self) private var session
     @State private var markers: [MapMarkerDTO]
     @State private var isLoading: Bool
@@ -96,6 +98,7 @@ struct PhotoMapView: View {
 
     /// Peta sudah berpenghuni dari potret; ini penyegarannya, diam-diam.
     private func load() async {
+        guard snapshotGeneration == LocalSnapshot.generation else { return }
         // Dibersihkan di AWAL, bukan hanya saat berhasil: dipanggil ulang dari
         // tombol Retry, layar errornya harus berganti jadi spinner supaya
         // ketukannya terasa dijawab.
@@ -105,10 +108,11 @@ struct PhotoMapView: View {
         let repo = PlacesRepository(api: APIClient(session: session))
         do {
             let fetched = try await repo.markers()
+            guard snapshotGeneration == LocalSnapshot.generation else { return }
             // Hanya dipasang ulang kalau isinya memang berbeda — memasang
             // penanda yang sama persis membuat seluruh pin digambar ulang, dan
             // tiap pin memuat thumbnail sendiri.
-            if LocalSnapshot.save(fetched, for: LocalSnapshot.Key.places) || markers.isEmpty {
+            if LocalSnapshot.save(fetched, for: LocalSnapshot.Key.places, expectedGeneration: snapshotGeneration) || markers.isEmpty {
                 markers = fetched
             }
         } catch {

@@ -157,6 +157,7 @@ final class LocalPhotoLibrary: NSObject {
     /// sementara foto lain masuk), jadi jumlah array bukan sinyal yang cukup
     /// untuk menyegarkan asal aset dan menu yang bergantung padanya.
     private(set) var revision = 0
+    private var accountGeneration = UUID()
 
     /// `localIdentifier` foto → nama album perangkat asalnya.
     ///
@@ -457,6 +458,7 @@ final class LocalPhotoLibrary: NSObject {
     }
 
     func load() async {
+        let generation = accountGeneration
         // DIPECAH, bukan `isAuthorized || await requestAccess()`.
         //
         // Sisi kanan `||` adalah autoclosure, dan autoclosure itu tidak
@@ -474,6 +476,7 @@ final class LocalPhotoLibrary: NSObject {
         // Pustaka puluhan ribu foto berarti puluhan ribu iterasi, dan tidak satu
         // pun bagiannya butuh main thread — sama seperti pengelompokan linimasa
         // yang sudah lebih dulu dipindahkan keluar.
+        guard generation == accountGeneration else { return }
         let albumIDs = selectedAlbumIDs
         // Tidak ada yang dipilih berarti tidak ada yang perlu dibaca.
         guard !albumIDs.isEmpty else {
@@ -484,6 +487,7 @@ final class LocalPhotoLibrary: NSObject {
         let result = await Task.detached(priority: .userInitiated) {
             Self.fetchPhotos(inAlbums: albumIDs)
         }.value
+        guard generation == accountGeneration else { return }
         photos = result.photos
         albumTitles = result.albumTitles
     }
@@ -716,6 +720,7 @@ final class LocalPhotoLibrary: NSObject {
 
     /// Melupakan seluruh state PhotoKit milik sesi tanpa menghapus foto asli.
     func resetForLogout() {
+        accountGeneration = UUID()
         imageManager.stopCachingImagesForAllAssets()
         photos = []
         albumTitles = [:]

@@ -511,11 +511,14 @@ actor ImageCache {
 
     // MARK: - Pemeliharaan
 
-    func clear() {
+    func clear() async {
         generation &+= 1
         // Permintaan akun lama tidak boleh mengisi cache kembali beberapa saat
         // setelah direktori logout dibersihkan.
-        inFlight.values.forEach { $0.cancel() }
+        let pending = Array(inFlight.values)
+        pending.forEach { $0.cancel() }
+        // Finish detached disk writes before replacing the account's cache directory.
+        for task in pending { _ = try? await task.value }
         inFlight.removeAll()
         ImageMemoryCache.shared.removeAll()
         try? FileManager.default.removeItem(at: diskCacheURL)

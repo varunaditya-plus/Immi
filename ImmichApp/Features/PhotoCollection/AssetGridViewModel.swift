@@ -9,11 +9,14 @@ import Observation
 @MainActor
 @Observable
 final class AssetGridViewModel {
+    private let snapshotGeneration = LocalSnapshot.generation
+
     var assets: [AssetLite] = []
     var phase: LoadingPhase<Void> = .idle
 
     private let assetRepo: AssetDetailRepository
     private let albumRepo: AlbumRepository
+    private let dataManager: SwiftDataManager
     private let loader: () async throws -> [AssetLite]
     /// Nama potret lokal layar ini; nil berarti tidak disimpan.
     private let snapshotKey: String?
@@ -22,11 +25,13 @@ final class AssetGridViewModel {
         assetRepo: AssetDetailRepository,
         albumRepo: AlbumRepository,
         snapshotKey: String? = nil,
+        dataManager: SwiftDataManager? = nil,
         loader: @escaping () async throws -> [AssetLite]
     ) {
         self.assetRepo = assetRepo
         self.albumRepo = albumRepo
         self.snapshotKey = snapshotKey
+        self.dataManager = dataManager ?? .shared
         self.loader = loader
     }
 
@@ -40,6 +45,7 @@ final class AssetGridViewModel {
     /// - Penyegarannya tidak berkedip: isi yang sama persis dengan yang sudah
     ///   tergambar tidak dipasang ulang sama sekali.
     func load() async {
+        guard snapshotGeneration == LocalSnapshot.generation else { return }
         if assets.isEmpty {
             // ADA potret dan potret yang BERISI adalah dua hal berbeda.
             //
@@ -57,10 +63,11 @@ final class AssetGridViewModel {
 
         do {
             let fetched = try await loader()
+            guard snapshotGeneration == LocalSnapshot.generation else { return }
             if let snapshotKey {
                 // Hanya dipasang ulang kalau isinya memang berbeda — lihat
                 // alasannya di `LocalSnapshot.save`.
-                if LocalSnapshot.save(fetched, for: snapshotKey) || assets.isEmpty {
+                if LocalSnapshot.save(fetched, for: snapshotKey, expectedGeneration: snapshotGeneration) || assets.isEmpty {
                     assets = fetched
                 }
             } else {
@@ -87,6 +94,7 @@ final class AssetGridViewModel {
         let newValue = !asset.isFavorite
         do {
             try await assetRepo.toggleFavorite(asset.id, to: newValue)
+            guard snapshotGeneration == LocalSnapshot.generation else { return }
             if let index = assets.firstIndex(where: { $0.id == asset.id }) {
                 assets[index].isFavorite = newValue
             }
@@ -103,6 +111,7 @@ final class AssetGridViewModel {
         guard !ids.isEmpty else { return }
         for id in ids {
             try? await assetRepo.toggleFavorite(id, to: false)
+            guard snapshotGeneration == LocalSnapshot.generation else { return }
         }
         let removed = Set(ids)
         assets.removeAll { removed.contains($0.id) }
@@ -115,6 +124,7 @@ final class AssetGridViewModel {
         guard !ids.isEmpty else { return }
         do {
             try await assetRepo.delete(ids, force: permanently)
+            guard snapshotGeneration == LocalSnapshot.generation else { return }
             let removed = Set(ids)
             assets.removeAll { removed.contains($0.id) }
             persist()
@@ -140,6 +150,7 @@ final class AssetGridViewModel {
         do {
             for id in ids {
                 try await assetRepo.toggleFavorite(id, to: value)
+                guard snapshotGeneration == LocalSnapshot.generation else { return false }
                 if let index = assets.firstIndex(where: { $0.id == id }) {
                     assets[index].isFavorite = value
                 }
@@ -162,6 +173,7 @@ final class AssetGridViewModel {
         do {
             for id in ids {
                 try await assetRepo.setVisibility(id, to: archived ? .archive : .timeline)
+                guard snapshotGeneration == LocalSnapshot.generation else { return false }
             }
             let moved = Set(ids)
             assets.removeAll { moved.contains($0.id) }
@@ -170,7 +182,7 @@ final class AssetGridViewModel {
             // mengembalikan foto dari arsip tidak terlihat di tab Photos sampai
             // sync berikutnya — dan kembali ke sana untuk memeriksa adalah hal
             // pertama yang dilakukan siapa pun setelah menekannya.
-            try? SwiftDataManager.shared.setTimelineVisibility(ids, inTimeline: !archived)
+            try? dataManager.setTimelineVisibility(ids, inTimeline: !archived)
             return true
         } catch {
             phase = .failed((error as? APIError)?.errorDescription
@@ -187,12 +199,13 @@ final class AssetGridViewModel {
         do {
             for id in ids {
                 try await assetRepo.setVisibility(id, to: .locked)
+                guard snapshotGeneration == LocalSnapshot.generation else { return false }
             }
             let moved = Set(ids)
             assets.removeAll { moved.contains($0.id) }
             persist()
             // Terkunci berarti keluar dari linimasa — lihat `setArchived`.
-            try? SwiftDataManager.shared.setTimelineVisibility(ids, inTimeline: false)
+            try? dataManager.setTimelineVisibility(ids, inTimeline: false)
             return true
         } catch {
             phase = .failed((error as? APIError)?.errorDescription
@@ -208,7 +221,7 @@ final class AssetGridViewModel {
     /// terasa rusak alih-alih membantu.
     private func persist() {
         guard let snapshotKey else { return }
-        LocalSnapshot.save(assets, for: snapshotKey)
+        LocalSnapshot.save(assets, for: snapshotKey, expectedGeneration: snapshotGeneration)
     }
 
     /// - Returns: pesan untuk pengguna; nil berarti semuanya masuk tanpa cerita.
@@ -240,13 +253,14 @@ final class AssetGridViewModel {
         let restoredAssets = assets.filter { ids.contains($0.id) }
         do {
             try await repo.restore(ids)
+            guard snapshotGeneration == LocalSnapshot.generation else { return }
             DeletedServerAssetRegistry.shared.restore(ids)
             let restored = Set(ids)
             assets.removeAll { restored.contains($0.id) }
             persist()
             // Aset yang dibuang sudah tidak ada di cache linimasa, jadi ini
             // menulisnya kembali — bukan sekadar menandai.
-            try? SwiftDataManager.shared.restoreToTimeline(restoredAssets)
+            try? dataManager.restoreToTimeline(restoredAssets)
         } catch {
             phase = .failed((error as? APIError)?.errorDescription
                 ?? String(localized: "Failed to restore photos"))
@@ -256,6 +270,7 @@ final class AssetGridViewModel {
     func restoreAll(using repo: TrashRepository) async {
         do {
             try await repo.restoreAll()
+            guard snapshotGeneration == LocalSnapshot.generation else { return }
             DeletedServerAssetRegistry.shared.restoreAllFromTrash()
             assets.removeAll()
             persist()
@@ -268,6 +283,7 @@ final class AssetGridViewModel {
     func emptyTrash(using repo: TrashRepository) async {
         do {
             try await repo.empty()
+            guard snapshotGeneration == LocalSnapshot.generation else { return }
             DeletedServerAssetRegistry.shared.emptyTrash()
             assets.removeAll()
             persist()

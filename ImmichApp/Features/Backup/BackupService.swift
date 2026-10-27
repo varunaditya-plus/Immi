@@ -43,7 +43,11 @@ private struct BackupPersistenceError: LocalizedError {
 @MainActor
 @Observable
 final class BackupService {
-    static let shared = BackupService()
+    static let shared: BackupService = {
+        let service = BackupService(dataManager: .shared, queue: .shared)
+        service.observeLibraryAndNetwork()
+        return service
+    }()
 
     /// Pencadangan dinyalakan pengguna.
     var isEnabled: Bool {
@@ -138,8 +142,8 @@ final class BackupService {
     private var repo: BackupRepository?
     private var albumRepo: AlbumRepository?
     private weak var session: SessionManager?
-    private let dataManager = SwiftDataManager.shared
-    private let queue = BackupQueueStore.shared
+    private let dataManager: SwiftDataManager
+    private let queue: BackupQueueStore
     private var task: Task<Void, Never>?
     private var refillRequested = false
     private var allowsManualQueueRefill = false {
@@ -177,19 +181,40 @@ final class BackupService {
     /// berhenti membawa token lama sampai pengguna masuk kembali.
     private var hasAuthenticatedSession = true
 
-    private init() {
+    init(dataManager: SwiftDataManager, queue: BackupQueueStore) {
+        self.dataManager = dataManager
+        self.queue = queue
         isEnabled = UserDefaults.standard.bool(forKey: Self.enabledKey)
         cellularPhotos = UserDefaults.standard.bool(forKey: Self.cellularPhotosKey)
         cellularVideos = UserDefaults.standard.bool(forKey: Self.cellularVideosKey)
         syncAlbums = UserDefaults.standard.bool(forKey: Self.syncAlbumsKey)
         allowsManualQueueRefill = UserDefaults.standard.bool(forKey: Self.manualQueueRefillKey)
+        applyQueueSnapshot(notify: false)
+    }
+
+    private func observeLibraryAndNetwork() {
         LocalPhotoLibrary.shared.onLibraryChange = { [weak self] in
             self?.handleLibraryChange()
         }
         NetworkMonitor.shared.onPathChange = { [weak self] online, expensive in
             self?.handleNetworkChange(isOnline: online, isExpensive: expensive)
         }
-        applyQueueSnapshot(notify: false)
+    }
+
+    var uploadOwnership: BackupUploadOwnership? {
+        guard acceptsUploadResults, hasAuthenticatedSession,
+              let session, session.isLoggedIn,
+              let ownership = queue.ownership,
+              session.backupQueueOwner == ownership.owner else { return nil }
+        return ownership
+    }
+
+    func acceptsUpload(_ context: BackupUploadTaskContext, taskIdentifier: Int) -> Bool {
+        guard let ownership = uploadOwnership, context.ownership == ownership else { return false }
+        if let currentTask = queue.item(id: context.localIdentifier)?.taskIdentifier {
+            return currentTask == taskIdentifier
+        }
+        return true
     }
 
     /// Disuntik sekali dari akar aplikasi.
@@ -198,7 +223,11 @@ final class BackupService {
     /// tidak bisa menerima apa pun lewat environment — karena itu singleton, dan
     /// karena itu sesinya dipasang belakangan.
     func configure(session: SessionManager) {
-        guard repo == nil else { return }
+        guard session.isLoggedIn, session.backupQueueOwner != nil else { return }
+        if repo != nil {
+            guard self.session !== session else { return }
+            if self.session?.backupQueueOwner != session.backupQueueOwner { stop() }
+        }
         attach(session)
         guard isEnabled, acceptsUploadResults else { return }
         BackupScheduler.schedule()
@@ -220,10 +249,12 @@ final class BackupService {
     func ensureConfigured() async {
         guard repo == nil else { return }
         let session = SessionManager()
-        await session.restore()
+        let context = session.snapshot
+        await session.restore(configureBackup: false)
         // Tugas latar dapat membangunkan proses setelah logout. Jangan membuat
         // repository tanpa sesi lalu mencoba mengantre unggahan anonim.
-        guard session.isLoggedIn else { return }
+        guard repo == nil, session.isLoggedIn,
+              (try? session.checkCurrent(context)) != nil else { return }
         attach(session)
     }
 
@@ -253,23 +284,16 @@ final class BackupService {
     /// baru agar tidak pernah ada dua executor untuk satu aset.
     func restoreBackgroundLifecycle() async {
         BackupUploader.shared.reconnect()
+        await ensureConfigured()
+        guard let ownership = uploadOwnership else { return }
         do {
-            let activeTasks = await BackupUploader.shared.activeTasks()
-            try queue.reconcile(activeTasks: activeTasks)
-            await BackupUploader.shared.reclaimExcessStaging()
-            for item in queue.items where item.state == .cancelling {
-                await BackupUploader.shared.cancel(localIdentifier: item.id)
-            }
-            await BackupUploader.shared.resumeTasks(identifiers: Set(
-                activeTasks.filter {
-                    $0.isSuspended
-                        && queue.item(id: $0.context.localIdentifier)?.state != .cancelling
-                }.map(\.taskIdentifier)))
+            guard try await reconcileBackgroundTasks(ownership: ownership) else { return }
         } catch {
             lastError = error.localizedDescription
             acceptsUploadResults = false
         }
         await pruneUnavailableFailures()
+        guard !Task.isCancelled, uploadOwnership == ownership else { return }
         applyQueueSnapshot()
         if allowsManualQueueRefill {
             await ensureConfigured()
@@ -386,15 +410,17 @@ final class BackupService {
     /// yang disentuh: transfer aktif dan item yang masih menunggu iCloud tidak
     /// boleh dianggap hilang hanya karena berkas aslinya belum tersedia lokal.
     private func pruneUnavailableFailures() async {
-        guard LocalPhotoLibrary.hasReadAccess else { return }
+        guard LocalPhotoLibrary.hasReadAccess, let ownership = uploadOwnership else { return }
         let failedIDs = queue.failedIDs
         guard !failedIDs.isEmpty else { return }
 
         let existingIDs = await Task.detached(priority: .utility) {
             LocalPhotoLibrary.existingLocalIdentifiers(failedIDs)
         }.value
+        guard !Task.isCancelled, uploadOwnership == ownership else { return }
         let preservedIDs = Set(BackupTemporaryFiles.recordedContexts(
-            in: BackupTemporaryFiles.recoveryDirectory).map(\.localIdentifier))
+            in: BackupTemporaryFiles.recoveryDirectory)
+            .filter { $0.ownership == ownership }.map(\.localIdentifier))
         let unavailableIDs = Set(failedIDs).subtracting(existingIDs).subtracting(preservedIDs)
         guard !unavailableIDs.isEmpty else { return }
 
@@ -414,13 +440,14 @@ final class BackupService {
 
     /// Dipanggil saat aplikasi dibuka atau kembali aktif.
     func start() {
-        guard isEnabled, task == nil, repo != nil, hasAuthenticatedSession else { return }
+        guard isEnabled, task == nil, repo != nil, let ownership = uploadOwnership else { return }
         guard dataManager.isPersistentStoreAvailable else {
             lastError = BackupPersistenceError().localizedDescription
             return
         }
         task = Task { [weak self] in
             await self?.enqueueAutomaticBatch()
+            guard !Task.isCancelled, self?.uploadOwnership == ownership else { return }
             self?.task = nil
             self?.refreshCounts()
             self?.applyQueueSnapshot()
@@ -455,11 +482,13 @@ final class BackupService {
         refillRequested = false
         guard isEnabled || allowsManualQueueRefill,
               acceptsUploadResults, hasAuthenticatedSession, repo != nil,
+              let ownership = uploadOwnership,
               dataManager.isPersistentStoreAvailable,
               !queue.readyItems(limit: 1).isEmpty else { return }
         task = Task { [weak self] in
             await NetworkMonitor.shared.waitUntilReady()
             await self?.processReadyQueueItems()
+            guard !Task.isCancelled, self?.uploadOwnership == ownership else { return }
             self?.task = nil
             self?.refreshCounts()
             self?.applyQueueSnapshot()
@@ -471,27 +500,18 @@ final class BackupService {
     /// may export originals and hand their multipart bodies to URLSession.
     private func enqueueAutomaticBatch() async {
         await NetworkMonitor.shared.waitUntilReady()
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, let ownership = uploadOwnership else { return }
 
         do {
-            let activeTasks = await BackupUploader.shared.activeTasks()
-            try queue.reconcile(activeTasks: activeTasks)
-            await BackupUploader.shared.reclaimExcessStaging()
-            for item in queue.items where item.state == .cancelling {
-                await BackupUploader.shared.cancel(localIdentifier: item.id)
-            }
-            await BackupUploader.shared.resumeTasks(identifiers: Set(
-                activeTasks.filter {
-                    $0.isSuspended
-                        && queue.item(id: $0.context.localIdentifier)?.state != .cancelling
-                }.map(\.taskIdentifier)))
+            guard try await reconcileBackgroundTasks(ownership: ownership) else { return }
         } catch {
             lastError = error.localizedDescription
             acceptsUploadResults = false
             applyQueueSnapshot()
             return
         }
-        let active = await BackupUploader.shared.activeLocalIdentifiers()
+        let active = await BackupUploader.shared.activeLocalIdentifiers(ownership: ownership)
+        guard !Task.isCancelled, uploadOwnership == ownership else { return }
         let uploaded = dataManager.uploadedLocalIdentifiers()
         let pending = LocalPhotoLibrary.shared.photos
             .filter { !uploaded.contains($0.id) && !active.contains($0.id) }
@@ -509,6 +529,23 @@ final class BackupService {
         await processReadyQueueItems()
     }
 
+    private func reconcileBackgroundTasks(ownership: BackupUploadOwnership) async throws -> Bool {
+        let activeTasks = await BackupUploader.shared.activeTasks(ownership: ownership)
+        guard !Task.isCancelled, uploadOwnership == ownership else { return false }
+        try queue.reconcile(activeTasks: activeTasks)
+        await BackupUploader.shared.reclaimExcessStaging()
+        guard !Task.isCancelled, uploadOwnership == ownership else { return false }
+        for item in queue.items where item.state == .cancelling {
+            await BackupUploader.shared.cancel(localIdentifier: item.id)
+            guard !Task.isCancelled, uploadOwnership == ownership else { return false }
+        }
+        await BackupUploader.shared.resumeTasks(identifiers: Set(
+            activeTasks.filter {
+                $0.isSuspended && queue.item(id: $0.context.localIdentifier)?.state != .cancelling
+            }.map(\.taskIdentifier)))
+        return uploadOwnership == ownership
+    }
+
     /// Mengunggah foto tertentu SEKARANG, atas permintaan langsung.
     ///
     /// Terpisah dari `start()`, dan syaratnya lebih longgar: yang ini tidak
@@ -519,7 +556,7 @@ final class BackupService {
     ///
     /// - Parameter ids: id petak, boleh berawalan `device:` maupun tidak.
     func uploadNow(_ ids: [String]) async {
-        guard repo != nil, task == nil else { return }
+        guard repo != nil, task == nil, let ownership = uploadOwnership else { return }
         guard dataManager.isPersistentStoreAvailable else {
             lastError = BackupPersistenceError().localizedDescription
             return
@@ -543,6 +580,7 @@ final class BackupService {
         let work = Task { await processReadyQueueItems() }
         task = work
         await work.value
+        guard !work.isCancelled, uploadOwnership == ownership else { return }
         task = nil
         refreshCounts()
         resumeQueuedUploadsIfRequested()
@@ -691,18 +729,20 @@ final class BackupService {
 
     /// Dipanggil URLSession delegate selama badan multipart dikirim.
     func reportUploadProgress(
-        localIdentifier: String,
-        phase: BackupUploadPhase,
+        context: BackupUploadTaskContext,
+        taskIdentifier: Int,
         bytesSent: Int64,
         totalBytesExpected: Int64
     ) {
-        guard totalBytesExpected > 0,
-              let item = queue.item(id: localIdentifier),
-              item.state == .uploading
+        guard acceptsUpload(context, taskIdentifier: taskIdentifier),
+              totalBytesExpected > 0,
+              let item = queue.item(id: context.localIdentifier),
+              item.state == .uploading, item.taskIdentifier == taskIdentifier
         else { return }
 
+        let localIdentifier = context.localIdentifier
         let fraction = min(1, max(0, Double(bytesSent) / Double(totalBytesExpected)))
-        if phase == .livePhotoMotion {
+        if context.phase == .livePhotoMotion {
             uploadProgressByID[localIdentifier] = fraction * 0.5
         } else if item.motionAssetID != nil {
             uploadProgressByID[localIdentifier] = 0.5 + fraction * 0.5
@@ -744,7 +784,7 @@ final class BackupService {
     /// Prepare only a small window of originals. The rest of the queue remains
     /// metadata until a transfer completes and frees its temporary body.
     private func processReadyQueueItems() async {
-        guard let repo else { return }
+        guard let repo, let ownership = uploadOwnership else { return }
         albumIDsByName = [:]
 
         let ready = queue.readyItems(limit: Self.automaticBatchSize)
@@ -754,12 +794,18 @@ final class BackupService {
         }
         var photos: [LocalPhoto] = []
         for item in ready {
+            guard !Task.isCancelled, uploadOwnership == ownership else { return }
+            let photo: LocalPhoto?
             if let cached = LocalPhotoLibrary.shared.photos.first(where: { $0.id == item.id }) {
-                photos.append(cached)
-            } else if let restored = await LocalPhotoLibrary.shared.photoMetadata(for: item.id) {
-                photos.append(restored)
+                photo = cached
+            } else {
+                photo = await LocalPhotoLibrary.shared.photoMetadata(for: item.id)
+                guard !Task.isCancelled, uploadOwnership == ownership else { return }
+            }
+            if let photo {
+                photos.append(photo)
             } else if BackupTemporaryFiles.recordedContexts(in: BackupTemporaryFiles.recoveryDirectory)
-                .contains(where: { $0.localIdentifier == item.id }) {
+                .contains(where: { $0.localIdentifier == item.id && $0.ownership == ownership }) {
                 reportPreservedUpload(localIdentifier: item.id)
             } else {
                 // Tidak ada lagi sumber yang dapat di-retry. Menyimpannya
@@ -788,13 +834,13 @@ final class BackupService {
             // `finishUpload` tidak akan pernah dipanggil — `isUploading`
             // tersangkut menyala selamanya, dan "0 of N" menetap di pusat
             // pemberitahuan tanpa pernah ada pasangannya.
-            if enqueueDepth == 0 { finishRunIfSettled() }
+            if enqueueDepth == 0, uploadOwnership == ownership { finishRunIfSettled() }
         }
 
         for photo in photos {
-            if Task.isCancelled { return }
+            if Task.isCancelled || uploadOwnership != ownership { return }
             let staged = await BackupUploader.shared.stagingUsage()
-            guard !Task.isCancelled,
+            guard !Task.isCancelled, uploadOwnership == ownership,
                   BackupStagingPolicy.canPrepare(
                     activeCount: max(queue.snapshot.active, staged.activeTasks),
                     stagedBytes: staged.bytes)
@@ -837,7 +883,8 @@ final class BackupService {
                             motionAssetID: motionAssetID,
                             repository: repo,
                             allowsCellular: allowsCellular,
-                            mayReadFromICloud: mayReadFromICloud)
+                            mayReadFromICloud: mayReadFromICloud,
+                            ownership: ownership)
                     } else {
                         try queue.markPreparing(photo.id, phase: .livePhotoMotion)
                         applyQueueSnapshot()
@@ -845,9 +892,11 @@ final class BackupService {
                             photo,
                             repository: repo,
                             allowsCellular: allowsCellular,
-                            mayReadFromICloud: mayReadFromICloud)
+                            mayReadFromICloud: mayReadFromICloud,
+                            ownership: ownership)
                     }
                 } catch {
+                    guard !Task.isCancelled, uploadOwnership == ownership else { return }
                     pendingPhotos[photo.id] = nil
                     handlePreparationFailure(
                         localIdentifier: photo.id,
@@ -867,10 +916,14 @@ final class BackupService {
                 continue
             }
 
-            guard let file = await LocalPhotoLibrary.shared.originalFile(
+            let exported = await LocalPhotoLibrary.shared.originalFile(
                 for: LocalPhotoLibrary.assetID(for: photo.id),
                 allowsNetworkFallback: mayReadFromICloud)
-            else {
+            guard !Task.isCancelled, uploadOwnership == ownership else {
+                if let exported { try? FileManager.default.removeItem(at: exported.url) }
+                return
+            }
+            guard let file = exported else {
                 // Berkas iCloud yang sedang menunggu Wi‑Fi bukan kegagalan. Ia
                 // akan ditemukan lagi oleh BGTask berikutnya di jaringan sesuai.
                 let message = mayReadFromICloud
@@ -887,7 +940,7 @@ final class BackupService {
 
             do {
                 let checksum = try await repo.checksum(forFile: file.url)
-                if Task.isCancelled {
+                if Task.isCancelled || uploadOwnership != ownership {
                     try? FileManager.default.removeItem(at: file.url)
                     return
                 }
@@ -903,7 +956,7 @@ final class BackupService {
                     createdAt: photo.createdAt,
                     modifiedAt: photo.modifiedAt)
                 try? FileManager.default.removeItem(at: file.url)
-                if Task.isCancelled {
+                if Task.isCancelled || uploadOwnership != ownership {
                     try? FileManager.default.removeItem(at: prepared.bodyFile)
                     return
                 }
@@ -919,7 +972,8 @@ final class BackupService {
                     prepared,
                     localIdentifier: photo.id,
                     checksum: checksum,
-                    allowsCellular: allowsCellular)
+                    allowsCellular: allowsCellular,
+                    ownership: ownership)
                 do {
                     try queue.markUploading(
                         photo.id,
@@ -935,6 +989,7 @@ final class BackupService {
                 }
             } catch {
                 try? FileManager.default.removeItem(at: file.url)
+                guard !Task.isCancelled, uploadOwnership == ownership else { return }
                 pendingPhotos[photo.id] = nil
                 handlePreparationFailure(
                     localIdentifier: photo.id,
@@ -974,7 +1029,8 @@ final class BackupService {
         _ photo: LocalPhoto,
         repository: BackupRepository,
         allowsCellular: Bool,
-        mayReadFromICloud: Bool
+        mayReadFromICloud: Bool,
+        ownership: BackupUploadOwnership
     ) async throws {
         guard let motion = await LocalPhotoLibrary.shared.livePhotoMotionFile(
             for: LocalPhotoLibrary.assetID(for: photo.id),
@@ -984,6 +1040,7 @@ final class BackupService {
         do {
             let checksum = try await repository.checksum(forFile: motion.url)
             try Task.checkCancellation()
+            guard !Task.isCancelled, uploadOwnership == ownership else { throw CancellationError() }
             pendingPhotos[photo.id] = photo
 
             // Jika motion video sudah sampai ke server pada putaran sebelumnya
@@ -994,6 +1051,7 @@ final class BackupService {
             if let existing = try? await repository.duplicateMatches([
                 (id: correlationID, checksum: checksum),
             ]).first?.serverAssetID {
+                guard !Task.isCancelled, uploadOwnership == ownership else { throw CancellationError() }
                 try? FileManager.default.removeItem(at: motion.url)
                 try queue.markPreparing(
                     photo.id,
@@ -1005,7 +1063,8 @@ final class BackupService {
                     motionAssetID: existing,
                     repository: repository,
                     allowsCellular: allowsCellular,
-                    mayReadFromICloud: mayReadFromICloud)
+                    mayReadFromICloud: mayReadFromICloud,
+                    ownership: ownership)
                 return
             }
 
@@ -1025,12 +1084,14 @@ final class BackupService {
             }
             try? FileManager.default.removeItem(at: motion.url)
             try Task.checkCancellation()
+            guard !Task.isCancelled, uploadOwnership == ownership else { throw CancellationError() }
 
             let uploadTask = try BackupUploader.shared.makeUploadTask(
                 prepared,
                 localIdentifier: photo.id,
                 checksum: checksum,
                 allowsCellular: allowsCellular,
+                ownership: ownership,
                 phase: .livePhotoMotion)
             do {
                 try queue.markUploading(
@@ -1056,15 +1117,14 @@ final class BackupService {
     /// launch daftar PhotoKit dan repository belum tentu sudah tersedia, tetapi
     /// task description masih membawa local identifier yang dibutuhkan.
     func finishLivePhotoMotionUpload(
-        localIdentifier: String,
-        motionChecksum: String,
+        context: BackupUploadTaskContext,
+        taskIdentifier: Int,
         outcome: Result<String, Error>,
         remainingBackgroundTasks: Int
     ) async {
-        guard acceptsUploadResults else {
-            pendingPhotos[localIdentifier] = nil
-            return
-        }
+        guard acceptsUpload(context, taskIdentifier: taskIdentifier),
+              let ownership = context.ownership else { return }
+        let localIdentifier = context.localIdentifier
         if queue.item(id: localIdentifier)?.state == .cancelling {
             try? queue.markFailed(
                 localIdentifier,
@@ -1080,23 +1140,25 @@ final class BackupService {
         switch outcome {
         case .failure(let error):
             finishUpload(
-                localIdentifier: localIdentifier,
-                checksum: motionChecksum,
+                context: context,
+                taskIdentifier: taskIdentifier,
                 outcome: .failure(error),
                 remainingBackgroundTasks: remainingBackgroundTasks)
 
         case .success(let motionAssetID):
             await ensureConfigured()
+            guard acceptsUpload(context, taskIdentifier: taskIdentifier) else { return }
             guard let repo else {
                 finishUpload(
-                    localIdentifier: localIdentifier,
-                    checksum: motionChecksum,
+                    context: context,
+                    taskIdentifier: taskIdentifier,
                     outcome: .failure(LivePhotoBackupError.sessionUnavailable),
                     remainingBackgroundTasks: remainingBackgroundTasks)
                 return
             }
-            guard let photo = await LocalPhotoLibrary.shared.photoMetadata(
-                for: localIdentifier) else {
+            let restoredPhoto = await LocalPhotoLibrary.shared.photoMetadata(for: localIdentifier)
+            guard acceptsUpload(context, taskIdentifier: taskIdentifier) else { return }
+            guard let photo = restoredPhoto else {
                 try? queue.discard(localIdentifier)
                 pendingPhotos[localIdentifier] = nil
                 uploadProgressByID[localIdentifier] = nil
@@ -1108,8 +1170,8 @@ final class BackupService {
             }
             guard photo.isLivePhoto else {
                 finishUpload(
-                    localIdentifier: localIdentifier,
-                    checksum: motionChecksum,
+                    context: context,
+                    taskIdentifier: taskIdentifier,
                     outcome: .failure(LivePhotoBackupError.assetNoLongerLivePhoto),
                     remainingBackgroundTasks: remainingBackgroundTasks)
                 return
@@ -1129,8 +1191,10 @@ final class BackupService {
                     motionAssetID: motionAssetID,
                     repository: repo,
                     allowsCellular: allowsCellular,
-                    mayReadFromICloud: mayReadFromICloud)
+                    mayReadFromICloud: mayReadFromICloud,
+                    ownership: ownership)
             } catch {
+                guard !Task.isCancelled, uploadOwnership == ownership else { return }
                 pendingPhotos[localIdentifier] = nil
                 handlePreparationFailure(
                     localIdentifier: localIdentifier,
@@ -1148,7 +1212,8 @@ final class BackupService {
         motionAssetID: String,
         repository: BackupRepository,
         allowsCellular: Bool,
-        mayReadFromICloud: Bool
+        mayReadFromICloud: Bool,
+        ownership: BackupUploadOwnership
     ) async throws {
         guard let still = await LocalPhotoLibrary.shared.originalFile(
             for: LocalPhotoLibrary.assetID(for: photo.id),
@@ -1158,6 +1223,7 @@ final class BackupService {
         do {
             let checksum = try await repository.checksum(forFile: still.url)
             try Task.checkCancellation()
+            guard !Task.isCancelled, uploadOwnership == ownership else { throw CancellationError() }
             let prepared = try await repository.makeUploadRequest(
                 fileURL: still.url,
                 filename: still.filename,
@@ -1172,12 +1238,14 @@ final class BackupService {
             }
             try? FileManager.default.removeItem(at: still.url)
             try Task.checkCancellation()
+            guard !Task.isCancelled, uploadOwnership == ownership else { throw CancellationError() }
 
             let uploadTask = try BackupUploader.shared.makeUploadTask(
                 prepared,
                 localIdentifier: photo.id,
                 checksum: checksum,
                 allowsCellular: allowsCellular,
+                ownership: ownership,
                 phase: .primaryAsset)
             do {
                 try queue.markUploading(
@@ -1206,15 +1274,13 @@ final class BackupService {
     /// dari sesi sebelumnya. `pendingPhotos` memang kosong di keadaan itu, dan
     /// yang hilang cuma penempatan album; catatannya sendiri tetap tertulis.
     func finishUpload(
-        localIdentifier: String,
-        checksum: String,
+        context: BackupUploadTaskContext,
+        taskIdentifier: Int,
         outcome: Result<String, Error>,
         remainingBackgroundTasks: Int
     ) {
-        guard acceptsUploadResults else {
-            pendingPhotos[localIdentifier] = nil
-            return
-        }
+        guard acceptsUpload(context, taskIdentifier: taskIdentifier) else { return }
+        let localIdentifier = context.localIdentifier
         if dataManager.getBackupRecord(localIdentifier: localIdentifier) != nil {
             try? queue.discard(localIdentifier)
             pendingPhotos[localIdentifier] = nil
@@ -1234,17 +1300,9 @@ final class BackupService {
             }
             return
         }
-        // Task dari versi lama mungkin selesai tepat setelah aplikasi di-update.
-        // Adopsi dulu supaya hasilnya tetap masuk sumber kebenaran yang sama.
+        // A matching owned task may survive an interrupted queue write.
         if queue.item(id: localIdentifier) == nil {
             try? queue.enqueue([localIdentifier])
-        }
-        if !hasAuthenticatedSession {
-            let message = String(localized: "Your Immich session expired. Sign in again to resume backup.")
-            try? queue.markAllWaitingForAuthentication(error: message)
-            pendingPhotos[localIdentifier] = nil
-            applyQueueSnapshot()
-            return
         }
         switch outcome {
         case .success(let assetID):
@@ -1254,7 +1312,7 @@ final class BackupService {
                 }
                 try dataManager.upsertBackupRecord(
                     assetID: assetID,
-                    checksum: checksum,
+                    checksum: context.checksum,
                     localIdentifier: localIdentifier)
                 try queue.markCompleted(localIdentifier)
             } catch {
@@ -1266,8 +1324,9 @@ final class BackupService {
                     retryAt: retryDate(for: localIdentifier))
             }
 
-            if syncAlbums, let photo = pendingPhotos[localIdentifier] {
-                Task { await placeInAlbum(assetID, from: photo) }
+            if syncAlbums, let photo = pendingPhotos[localIdentifier],
+               let ownership = context.ownership {
+                Task { await placeInAlbum(assetID, from: photo, ownership: ownership) }
             }
 
         case .failure(let error):
@@ -1286,7 +1345,15 @@ final class BackupService {
                     error: error.localizedDescription,
                     retryAt: retryDate(for: localIdentifier))
             case .authenticationRequired:
-                handleAuthenticationRequired()
+                if let fingerprint = context.credentialFingerprint,
+                   fingerprint == BackupUploadTaskContext.credentialFingerprint(for: session?.authHeaders ?? [:]) {
+                    handleAuthenticationRequired()
+                } else {
+                    // The account is unchanged, but this task used an older
+                    // token. Retry with current credentials without expiring them.
+                    try? queue.markQueued(localIdentifier)
+                    lastError = nil
+                }
             case .permanent:
                 markFailedIfAssetStillExists(
                     localIdentifier,
@@ -1360,10 +1427,13 @@ final class BackupService {
     }
 
     private func handleAuthenticationRequired() {
+        let ownership = uploadOwnership
+        let currentSession = session
+        let authHeaders = currentSession?.authHeaders
         pauseForAuthentication()
-        Task { [weak session] in
-            await session?.expireForBackgroundUpload()
-            await BackupUploader.shared.cancelAll()
+        Task {
+            await currentSession?.expireForBackgroundUpload()
+            await BackupUploader.shared.cancelAll(ownership: ownership, authHeaders: authHeaders)
         }
     }
 
@@ -1457,22 +1527,30 @@ final class BackupService {
     /// server, dan itu yang penting. Gagal menaruhnya ke album adalah kerapian
     /// yang tertunda, bukan data yang hilang — percobaan berikutnya akan
     /// menemukannya lagi lewat "Organize into Albums".
-    private func placeInAlbum(_ assetID: String, from photo: LocalPhoto) async {
-        guard let name = LocalPhotoLibrary.shared.albumTitles[photo.id] else { return }
-        guard let albumID = await albumID(named: name) else { return }
+    private func placeInAlbum(
+        _ assetID: String, from photo: LocalPhoto, ownership: BackupUploadOwnership
+    ) async {
+        guard !Task.isCancelled, uploadOwnership == ownership,
+              let name = LocalPhotoLibrary.shared.albumTitles[photo.id] else { return }
+        guard let albumID = await albumID(named: name, ownership: ownership),
+              uploadOwnership == ownership else { return }
         _ = try? await albumRepo?.addAssets([assetID], to: albumID)
     }
 
     /// Id album server dengan nama ini, dibuatkan kalau belum ada.
-    private func albumID(named name: String) async -> String? {
+    private func albumID(named name: String, ownership: BackupUploadOwnership) async -> String? {
+        guard !Task.isCancelled, uploadOwnership == ownership else { return nil }
         if let cached = albumIDsByName[name] { return cached }
         guard let albumRepo else { return nil }
 
         if let existing = try? await albumRepo.all().first(where: { $0.albumName == name }) {
+            guard !Task.isCancelled, uploadOwnership == ownership else { return nil }
             albumIDsByName[name] = existing.id
             return existing.id
         }
-        guard let created = try? await albumRepo.create(name: name) else { return nil }
+        guard !Task.isCancelled, uploadOwnership == ownership,
+              let created = try? await albumRepo.create(name: name),
+              uploadOwnership == ownership else { return nil }
         albumIDsByName[name] = created.id
         return created.id
     }
@@ -1487,14 +1565,14 @@ final class BackupService {
         // Backup menggambar bilah kemajuan unggahan dengan angka putaran
         // sebelumnya — kemajuan palsu untuk pekerjaan yang berbeda. Tombolnya
         // sendiri sudah menunjukkan spinner-nya.
-        guard albumRepo != nil else { return }
+        guard albumRepo != nil, let ownership = uploadOwnership else { return }
         albumIDsByName = [:]
         let links = dataManager.serverAssetIDsByLocalIdentifier()
 
         for photo in LocalPhotoLibrary.shared.photos {
             if Task.isCancelled { return }
             guard let assetID = links[photo.id] else { continue }
-            await placeInAlbum(assetID, from: photo)
+            await placeInAlbum(assetID, from: photo, ownership: ownership)
         }
     }
 }
