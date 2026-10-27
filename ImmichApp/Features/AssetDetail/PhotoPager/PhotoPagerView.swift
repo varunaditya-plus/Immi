@@ -39,6 +39,7 @@ struct PhotoPagerView: UIViewControllerRepresentable {
     /// Menyerahkan controller-nya, supaya bar kontrol video bisa menyambung
     /// langsung tanpa melewati `@State`.
     var onControllerReady: ((PhotoPagerController) -> Void)? = nil
+    var visibilityPolicy = AssetVisibilityPolicy()
 
     let session: SessionManager
 
@@ -80,6 +81,7 @@ struct PhotoPagerView: UIViewControllerRepresentable {
     }
 
     private func bind(_ controller: PhotoPagerController) {
+        controller.visibilityPolicy = visibilityPolicy
         controller.onPageChanged = onPageChanged
         controller.onZoomChanged = onZoomChanged
         controller.onTap = onTap
@@ -89,6 +91,9 @@ struct PhotoPagerView: UIViewControllerRepresentable {
 
 @MainActor
 final class PhotoPagerController: UIViewController {
+    var visibilityPolicy = AssetVisibilityPolicy() {
+        didSet { loader.visibilityPolicy = visibilityPolicy }
+    }
     private let loader: PhotoPreviewLoader
 
     private var collectionView: UICollectionView!
@@ -190,6 +195,7 @@ final class PhotoPagerController: UIViewController {
     // MARK: - Data
 
     func apply(assets newAssets: [AssetLite], currentAssetID: String) {
+        let newAssets = visibilityPolicy.filter(newAssets)
         if !isSameContent(as: newAssets) {
             assets = newAssets
             assetIndex = [:]

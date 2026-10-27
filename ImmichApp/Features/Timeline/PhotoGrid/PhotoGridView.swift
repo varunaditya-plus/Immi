@@ -116,6 +116,7 @@ struct PhotoGridView: UIViewControllerRepresentable {
     /// Menyerahkan controller-nya ke pemanggil, untuk perintah yang datang dari
     /// luar (mis. "kembali ke foto terbaru" saat tab ditekan ulang).
     var onControllerReady: ((PhotoGridController) -> Void)? = nil
+    var visibilityPolicy = AssetVisibilityPolicy()
 
     let session: SessionManager
 
@@ -142,6 +143,7 @@ struct PhotoGridView: UIViewControllerRepresentable {
     }
 
     private func bind(_ controller: PhotoGridController) {
+        controller.visibilityPolicy = visibilityPolicy
         controller.onOpen = onOpen
         controller.makeDetail = detailScreen.map { build in
             { id in UIHostingController(rootView: build(id)) }
@@ -150,7 +152,7 @@ struct PhotoGridView: UIViewControllerRepresentable {
         controller.onVisibleSectionChanged = onVisibleSectionChanged
         controller.titleDockContentY = titleDockContentY
         controller.onTitleDockedChanged = onTitleDockedChanged
-        controller.menuActions = menuActions
+        controller.menuActions = { id in visibilityPolicy.allows(id: id) ? menuActions(id) : [] }
         controller.onReachEnd = onReachEnd
         controller.onInitialContentDisplayed = onInitialContentDisplayed
         controller.setInitialContentReady(initialContentReady)
@@ -246,6 +248,12 @@ final class JustifiedLayoutStore {
 
 @MainActor
 final class PhotoGridController: UIViewController {
+    var visibilityPolicy = AssetVisibilityPolicy() {
+        didSet {
+            loader.visibilityPolicy = visibilityPolicy
+            refreshPrivacyVisibility()
+        }
+    }
     private enum SectionID: Hashable {
         case hero
         case month(String)
@@ -603,6 +611,8 @@ final class PhotoGridController: UIViewController {
         configuration newConfiguration: PhotoGridConfiguration,
         hero newHero: AnyView?
     ) {
+        let newSections = visibilityPolicy.filterSections(newSections)
+        refreshPrivacyVisibility()
         // Sampulnya SwiftUI dan boleh berubah tiap frame (animasi zoom lambat di
         // dalamnya); yang penting hanya sel hosting-nya membaca nilai terbaru.
         hero = newHero
@@ -1258,6 +1268,7 @@ final class PhotoGridController: UIViewController {
     /// Membuka foto lewat presentasi UIKit, supaya transisinya bisa berangkat
     /// dari sel yang sebenarnya.
     private func presentDetail(for id: String) {
+        guard visibilityPolicy.allows(id: id) else { return }
         onOpen?(id)
         guard let makeDetail else { return }
 
@@ -1284,6 +1295,26 @@ final class PhotoGridController: UIViewController {
             presented: detail,
             source: self,
             assetID: { [weak transition] in transition?.assetID ?? id })
+    }
+
+    private func refreshPrivacyVisibility() {
+        guard isViewLoaded else { return }
+        for indexPath in collectionView.indexPathsForVisibleItems {
+            guard let id = dataSource?.itemIdentifier(for: indexPath),
+                  let asset = assetsByID[id],
+                  let cell = collectionView.cellForItem(at: indexPath) as? PhotoGridCell else { continue }
+            if !visibilityPolicy.allows(id: id) {
+                cell.prepareForReuse()
+                cell.contentView.isHidden = true
+            } else if cell.contentView.isHidden, id != hiddenZoomID {
+                cell.configure(with: asset, loader: loader)
+                cell.contentView.isHidden = false
+            }
+        }
+        if let id = zoomTransition?.assetID, !visibilityPolicy.allows(id: id) {
+            presentedViewController?.view.isHidden = true
+            presentedViewController?.dismiss(animated: false)
+        }
     }
 
     /// Dipanggil layar detail saat foto yang tampil berganti karena diusap.

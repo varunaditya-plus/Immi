@@ -4,6 +4,7 @@ import SwiftUI
 
 struct AssetDetailView: View {
     @State private var viewer: AssetViewerState
+    let visibilityPolicy: AssetVisibilityPolicy
     // true saat ditampilkan sebagai fullScreenCover (perlu tombol tutup sendiri).
     var isModal = false
     // Memberi tahu pemanggil foto mana yang sedang tampil, supaya
@@ -107,6 +108,7 @@ struct AssetDetailView: View {
     init(
         currentAsset: AssetLite,
         assets: [AssetLite],
+        visibilityPolicy: AssetVisibilityPolicy? = nil,
         isModal: Bool = false,
         onAssetChange: ((AssetLite) -> Void)? = nil,
         onAssetRemoved: ((String) -> Void)? = nil,
@@ -114,6 +116,7 @@ struct AssetDetailView: View {
         onFavoriteChanged: ((String, Bool) -> Void)? = nil
     ) {
         _viewer = State(initialValue: AssetViewerState(currentAsset: currentAsset, assets: assets))
+        self.visibilityPolicy = visibilityPolicy ?? AssetVisibilityPolicy()
         self.isModal = isModal
         self.onAssetChange = onAssetChange
         self.onAssetRemoved = onAssetRemoved
@@ -158,6 +161,41 @@ struct AssetDetailView: View {
     // type-check this expression in reasonable time"). Tiap lapis punya
     // anotasi `some View` eksplisit, jadi type-checking-nya selesai per bagian.
     var body: some View {
+        Group {
+            if visibilityPolicy.allows(id: currentAsset.id), !viewer.isEmpty {
+                detailContent
+            } else {
+                Color(.systemBackground)
+            }
+        }
+        .onChange(of: visibilityPolicy.state, initial: true) { _, _ in discardDisallowedPages() }
+    }
+
+    private func discardDisallowedPages() {
+        let removesCurrent = !visibilityPolicy.allows(id: currentAsset.id)
+        guard viewer.removeDisallowedPages(using: visibilityPolicy) else { return }
+        if removesCurrent {
+            pagerController?.stopAllPlayback()
+            vm?.invalidateSelection()
+            photoEditorTarget = nil
+            dateTarget = nil
+            locationTarget = nil
+            albumTarget = nil
+            sharedLink = nil
+            isSharePresented = false
+            showDeleteConfirm = false
+            showRemoveDeviceConfirm = false
+            cleanupSharedFile()
+        }
+        if viewer.isEmpty {
+            viewer.deactivate()
+            dismiss()
+        } else if removesCurrent {
+            loadCurrentMetadata()
+        }
+    }
+
+    private var detailContent: some View {
         pager
             .safeAreaInset(edge: .bottom, spacing: 0) { bottomAccessory }
             .navigationTitle(navigationTitleText)
@@ -452,6 +490,7 @@ struct AssetDetailView: View {
                     currentAssetID: currentAsset.id,
                     onSelect: { asset in currentAsset = asset },
                     onControllerReady: { filmstripController = $0 },
+                    visibilityPolicy: visibilityPolicy,
                     session: session)
                     .frame(height: 54)
             }
@@ -825,6 +864,7 @@ struct AssetDetailView: View {
                 // SwiftUI berarti membangun ulang body sebanyak itu juga.
                 onScrollProgress: { filmstripController?.track(page: $0) },
                 onControllerReady: { pagerController = $0 },
+                visibilityPolicy: visibilityPolicy,
                 session: session)
                 // Simpan hanya ketika panel benar-benar tertutup. Saat panel
                 // bergerak, perubahan safe area dari toolbar tidak boleh
@@ -1213,7 +1253,8 @@ struct AssetDetailView: View {
         viewer.prepare(target, kind: .share,
             operation: { await fileURL(for: target) },
             discard: { TemporaryMediaStore.remove($0) }) { file in
-                guard accountGeneration == LocalSnapshot.generation else {
+                guard accountGeneration == LocalSnapshot.generation,
+                      visibilityPolicy.allows(id: target.asset.id) else {
                     TemporaryMediaStore.remove(file)
                     return
                 }
@@ -1256,7 +1297,8 @@ struct AssetDetailView: View {
     /// ada di perangkat. Ini membuat Share pada foto lokal benar-benar lokal.
     private func fileURL(for target: AssetViewerState.Target) async -> URL? {
         let accountGeneration = LocalSnapshot.generation
-        guard viewer.isCurrent(target), !Task.isCancelled else { return nil }
+        guard viewer.isCurrent(target), !Task.isCancelled,
+              visibilityPolicy.allows(id: target.asset.id) else { return nil }
         if target.asset.isOnDevice {
             let localID = LocalPhotoLibrary.isLocal(target.asset.id)
                 ? LocalPhotoLibrary.localIdentifier(from: target.asset.id)
@@ -1265,6 +1307,7 @@ struct AssetDetailView: View {
                 for: LocalPhotoLibrary.assetID(for: localID)) {
                 defer { try? FileManager.default.removeItem(at: file.url) }
                 guard viewer.isCurrent(target), accountGeneration == LocalSnapshot.generation,
+                      visibilityPolicy.allows(id: target.asset.id),
                       !Task.isCancelled else { return nil }
                 do {
                     return try TemporaryMediaStore.adoptShareFile(
@@ -1279,10 +1322,12 @@ struct AssetDetailView: View {
             }
         }
         guard viewer.isCurrent(target), accountGeneration == LocalSnapshot.generation,
+              visibilityPolicy.allows(id: target.asset.id),
               !Task.isCancelled, let serverID = target.serverID, let vm else { return nil }
         let filename = target.detail?.originalFileName ?? serverID
         guard let file = await vm.downloadOriginalFile(serverID, filename: filename) else { return nil }
         guard viewer.isCurrent(target), accountGeneration == LocalSnapshot.generation,
+              visibilityPolicy.allows(id: target.asset.id),
               !Task.isCancelled else {
             TemporaryMediaStore.remove(file)
             return nil
@@ -1292,12 +1337,13 @@ struct AssetDetailView: View {
 
     private func createSharedLink(for serverID: String) {
         let target = currentTarget
-        guard target.serverID == serverID else { return }
+        guard target.serverID == serverID, visibilityPolicy.allows(id: target.asset.id) else { return }
         let repo = SharedLinkRepository(api: APIClient(session: session))
         let baseURL = session.baseURL
         viewer.prepare(target, kind: .sharedLink, operation: {
             do {
                 let link = try await repo.create(assetIds: [serverID])
+                guard visibilityPolicy.allows(id: target.asset.id) else { return nil }
                 guard let url = link.publicURL(base: baseURL) else { throw APIError.invalidURL }
                 return url
             } catch {

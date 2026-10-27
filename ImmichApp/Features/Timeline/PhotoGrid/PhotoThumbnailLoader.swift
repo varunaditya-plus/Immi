@@ -23,6 +23,7 @@ class PhotoThumbnailLoader {
     /// Yang sudah ada di memori TETAP terpasang; yang belum menampilkan
     /// thumbhash-nya, sama seperti saat digulir cepat dengan jari.
     var isSuspended = false
+    var visibilityPolicy = AssetVisibilityPolicy()
 
     private let session: SessionManager
     private let accountGeneration = LocalSnapshot.generation
@@ -37,7 +38,8 @@ class PhotoThumbnailLoader {
 
     /// Cache hit, tanpa `await`. Dipakai sel untuk memasang gambar seketika.
     func cachedImage(for assetId: String) -> UIImage? {
-        guard accountGeneration == LocalSnapshot.generation else { return nil }
+        guard accountGeneration == LocalSnapshot.generation,
+              visibilityPolicy.allows(id: assetId) else { return nil }
         return ImageMemoryCache.shared.image(
             for: ImageCache.memoryKey(cacheKey(for: assetId), Self.maxPixelSize))
     }
@@ -48,7 +50,8 @@ class PhotoThumbnailLoader {
     }
 
     func image(for assetId: String) async -> UIImage? {
-        guard !isSuspended, accountGeneration == LocalSnapshot.generation else { return nil }
+        guard !isSuspended, accountGeneration == LocalSnapshot.generation,
+              visibilityPolicy.allows(id: assetId) else { return nil }
 
         // FOTO PERANGKAT punya jalurnya sendiri, dan tidak boleh melewati
         // `UnreadableAssets`.
@@ -60,7 +63,8 @@ class PhotoThumbnailLoader {
         if LocalPhotoLibrary.isLocal(assetId) {
             let image = await LocalPhotoLibrary.shared.thumbnail(
                 for: assetId, size: Self.deviceTargetSize)
-            guard accountGeneration == LocalSnapshot.generation else { return nil }
+            guard accountGeneration == LocalSnapshot.generation,
+                  visibilityPolicy.allows(id: assetId) else { return nil }
             if let image {
                 // Dititipkan ke cache MEMORI saja, bukan ke disk: byte-nya sudah
                 // ada di perangkat, dan menyalinnya ke cache aplikasi hanya
@@ -85,7 +89,8 @@ class PhotoThumbnailLoader {
                 fetch: { try await api.rawData(endpoint) })
             // Keberhasilan ikut dicatat: itulah yang membedakan "aset ini
             // hilang" dari "sambungannya sedang rusak".
-            guard accountGeneration == LocalSnapshot.generation else { return nil }
+            guard accountGeneration == LocalSnapshot.generation,
+                  visibilityPolicy.allows(id: assetId) else { return nil }
             UnreadableAssets.shared.noteSuccess()
             return image
         } catch {

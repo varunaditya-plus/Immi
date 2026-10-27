@@ -24,11 +24,13 @@ struct PhotoFilmstripView: UIViewControllerRepresentable {
     /// nilai secepat itu lewat `@State` SwiftUI berarti membangun ulang body pada
     /// tiap frame — jadi kedua controller UIKit-nya disambungkan langsung.
     var onControllerReady: ((PhotoFilmstripController) -> Void)? = nil
+    var visibilityPolicy = AssetVisibilityPolicy()
     let session: SessionManager
 
     func makeUIViewController(context: Context) -> PhotoFilmstripController {
         let controller = PhotoFilmstripController(
             loader: PhotoThumbnailLoader(session: session))
+        controller.visibilityPolicy = visibilityPolicy
         controller.onSelect = onSelect
         controller.apply(assets: assets, currentAssetID: currentAssetID)
         if let onControllerReady {
@@ -40,6 +42,7 @@ struct PhotoFilmstripView: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: PhotoFilmstripController, context: Context) {
+        controller.visibilityPolicy = visibilityPolicy
         controller.onSelect = onSelect
         controller.apply(assets: assets, currentAssetID: currentAssetID)
     }
@@ -53,6 +56,9 @@ private let filmstripSectionInset: CGFloat = 6
 
 @MainActor
 final class PhotoFilmstripController: UIViewController {
+    var visibilityPolicy = AssetVisibilityPolicy() {
+        didSet { loader.visibilityPolicy = visibilityPolicy }
+    }
     private let loader: PhotoThumbnailLoader
 
     private var collectionView: UICollectionView!
@@ -129,6 +135,7 @@ final class PhotoFilmstripController: UIViewController {
     // MARK: - Data
 
     func apply(assets newAssets: [AssetLite], currentAssetID: String) {
+        let newAssets = visibilityPolicy.filter(newAssets)
         if !isSameContent(as: newAssets) {
             assets = newAssets
             assetIndex = [:]
@@ -366,6 +373,10 @@ final class PhotoFilmstripCell: UICollectionViewCell {
     }
 
     func configure(with asset: AssetLite, loader: PhotoThumbnailLoader) {
+        guard loader.visibilityPolicy.allows(id: asset.id) else {
+            prepareForReuse()
+            return
+        }
         loadTask?.cancel()
         loadTask = nil
         currentAssetID = asset.id
@@ -379,6 +390,7 @@ final class PhotoFilmstripCell: UICollectionViewCell {
         loadTask = Task { [weak self] in
             let image = await loader.image(for: asset.id)
             guard let self, !Task.isCancelled,
+                  loader.visibilityPolicy.allows(id: asset.id),
                   self.currentAssetID == asset.id
             else { return }
             self.loadTask = nil

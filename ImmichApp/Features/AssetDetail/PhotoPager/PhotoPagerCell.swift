@@ -342,6 +342,10 @@ final class PhotoPagerCell: UICollectionViewCell {
     // MARK: - Isi
 
     func configure(with asset: AssetLite, loader: PhotoPreviewLoader) {
+        guard loader.visibilityPolicy.allows(id: asset.id) else {
+            prepareForReuse()
+            return
+        }
         loadTask?.cancel()
         loadTask = nil
         if currentAssetID != nil, currentAssetID != asset.id {
@@ -412,6 +416,7 @@ final class PhotoPagerCell: UICollectionViewCell {
             let matchedID = await loader.matchingLocalLivePhoto(for: localHint)
             guard let self, !Task.isCancelled,
                   self.currentAssetID == assetID,
+                  loader.visibilityPolicy.allows(id: assetID),
                   self.livePhotoHint == localHint
             else { return }
             self.livePhotoDetectionTask = nil
@@ -465,7 +470,8 @@ final class PhotoPagerCell: UICollectionViewCell {
     private func startLoad(_ assetID: String, loader: PhotoPreviewLoader) {
         loadTask = Task { [weak self] in
             let image = await loader.image(for: assetID)
-            guard let self, !Task.isCancelled, self.currentAssetID == assetID
+            guard let self, !Task.isCancelled, self.currentAssetID == assetID,
+                  loader.visibilityPolicy.allows(id: assetID)
             else { return }
             self.loadTask = nil
             guard let image else { return }
@@ -741,6 +747,7 @@ final class PhotoPagerCell: UICollectionViewCell {
             self.videoLoadTask = nil
             guard !Task.isCancelled,
                   self.currentAssetID == id,
+                  loader.visibilityPolicy.allows(id: id),
                   let asset
             else {
                 asset?.cancelLoading()
@@ -1016,6 +1023,7 @@ final class PhotoPagerCell: UICollectionViewCell {
                 guard !Task.isCancelled,
                       self.isLivePhotoPressed,
                       self.currentAssetID == assetID,
+                      loader.visibilityPolicy.allows(id: assetID),
                       let livePhoto
                 else {
                     self.loadingIndicator.stopAnimating()
@@ -1041,6 +1049,7 @@ final class PhotoPagerCell: UICollectionViewCell {
             self.liveLoadTask = nil
             guard !Task.isCancelled,
                   self.isLivePhotoPressed,
+                  loader.visibilityPolicy.allows(id: assetID),
                   self.livePhotoVideoID == videoID,
                   let asset
             else {

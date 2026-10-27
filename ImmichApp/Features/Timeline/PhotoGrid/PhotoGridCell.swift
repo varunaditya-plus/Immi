@@ -131,6 +131,10 @@ final class PhotoGridCell: UICollectionViewCell {
     }
 
     func configure(with asset: AssetLite, loader: PhotoThumbnailLoader) {
+        guard loader.visibilityPolicy.allows(id: asset.id) else {
+            prepareForReuse()
+            return
+        }
         // Pemuatan lama DIBATALKAN dulu. Sel yang disusun ulang untuk aset yang
         // sama (mis. setelah terbang ke foto terbaru) akan menimpa `loadTask`
         // tanpa membatalkannya, dan karena `currentKey`-nya tidak berubah, task
@@ -165,7 +169,8 @@ final class PhotoGridCell: UICollectionViewCell {
 
         loadTask = Task { [weak self] in
             let image = await loader.image(for: asset.id)
-            guard let self, !Task.isCancelled, self.currentKey == key, let image
+            guard let self, !Task.isCancelled, self.currentKey == key, let image,
+                  loader.visibilityPolicy.allows(id: asset.id)
             else { return }
             self.imageView.image = image
         }

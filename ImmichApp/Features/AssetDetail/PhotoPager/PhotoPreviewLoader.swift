@@ -9,6 +9,7 @@ import UIKit
 /// parameter yang harus dibaca ulang setiap kali.
 @MainActor
 class PhotoPreviewLoader {
+    var visibilityPolicy = AssetVisibilityPolicy()
     /// Sisi terpanjang untuk layar detail.
     ///
     /// 2048px sudah melampaui resolusi layar mana pun, sementara membongkar

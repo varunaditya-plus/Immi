@@ -145,6 +145,14 @@ final class AssetViewerState {
         return true
     }
 
+    @discardableResult
+    func removeDisallowedPages(using policy: AssetVisibilityPolicy) -> Bool {
+        let allowed = Set(policy.filter(pages).map(\.id))
+        let removed = pages.filter { !allowed.contains($0.id) }
+        for asset in removed { removePage(asset.id) }
+        return !removed.isEmpty
+    }
+
     func setFavorite(_ value: Bool, for id: String) {
         guard let index = storage.assets.firstIndex(where: { $0.id == id }) else { return }
         storage.assets[index].isFavorite = value
