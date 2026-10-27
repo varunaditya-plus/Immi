@@ -12,7 +12,13 @@ private let storyPhotoDuration: Double = 5
 /// bukan `TabView` bersarang, yang gesturnya saling merebut dan membuat salah
 /// satu arah berhenti bekerja.
 struct MemoryStoryView: View {
-    let stories: [MemoryStory]
+    private let sourceStories: [MemoryStory]
+    @State private var snapshotGeneration = LocalSnapshot.generation
+    private var stories: [MemoryStory] {
+        guard snapshotGeneration == LocalSnapshot.generation else { return [] }
+        let policy = AssetVisibilityPolicy(scope: .timeline)
+        return sourceStories.compactMap { $0.filteringAssets(using: policy) }
+    }
     /// Kenangan yang dibuka lebih dulu; nil berarti mulai dari yang terbaru.
     var initialStoryID: String? = nil
     /// Menyiapkan berkas untuk dibagikan.
@@ -20,6 +26,13 @@ struct MemoryStoryView: View {
     /// Dititipkan pemanggil supaya viewer ini tidak perlu memegang repository
     /// sendiri — pemanggilnya sudah punya satu.
     var prepareShare: (AssetLite) async -> URL?
+
+    init(stories: [MemoryStory], initialStoryID: String? = nil,
+         prepareShare: @escaping (AssetLite) async -> URL?) {
+        sourceStories = stories
+        self.initialStoryID = initialStoryID
+        self.prepareShare = prepareShare
+    }
 
     @Environment(\.dismiss) private var dismiss
 
@@ -33,6 +46,7 @@ struct MemoryStoryView: View {
     /// Jari sedang menyentuh layar — story berhenti berjalan selama itu.
     @State private var isPressing = false
     @State private var shareItem: SharedLinkPresentation?
+    @State private var sharedAssetID: String?
     @State private var isPreparingShare = false
 
     var body: some View {
@@ -48,9 +62,20 @@ struct MemoryStoryView: View {
             .padding(.top, 6)
             .padding(.bottom, 4)
         }
-        .sheet(item: $shareItem) { ShareSheet(url: $0.url) }
+        .sheet(item: $shareItem, onDismiss: { sharedAssetID = nil }) { ShareSheet(url: $0.url) }
         .onAppear {
             currentStoryID = initialStoryID ?? stories.first?.id
+        }
+        .onChange(of: stories.map { $0.assets.map(\.id) }) { _, _ in
+            if let sharedAssetID, !AssetVisibilityPolicy(scope: .timeline).allows(id: sharedAssetID) {
+                shareItem = nil
+                self.sharedAssetID = nil
+            }
+            if stories.isEmpty {
+                dismiss()
+            } else if !stories.contains(where: { $0.id == currentStoryID }) {
+                currentStoryID = stories.first?.id
+            }
         }
     }
 
@@ -291,6 +316,12 @@ struct MemoryStoryView: View {
             let url = await prepareShare(asset)
             isPreparingShare = false
             guard let url else { return }
+            guard !Task.isCancelled, snapshotGeneration == LocalSnapshot.generation,
+                  AssetVisibilityPolicy(scope: .timeline).allows(id: asset.id) else {
+                TemporaryMediaStore.remove(url)
+                return
+            }
+            sharedAssetID = asset.id
             shareItem = SharedLinkPresentation(url: url)
         }
     }

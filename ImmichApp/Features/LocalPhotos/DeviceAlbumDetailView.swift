@@ -57,7 +57,8 @@ struct DeviceAlbumDetailView: View {
         // Jumlahnya diambil dari yang BENAR-BENAR terbaca, bukan dari `count`
         // milik album: keduanya berbeda kalau ada foto yang dihapus di antara
         // daftar album dibaca dan album ini dibuka.
-        photos.isEmpty ? nil : String(localized: "\(photos.count) items on this device")
+        let count = AssetVisibilityPolicy().filter(assets).count
+        return count == 0 ? nil : String(localized: "\(count) items on this device")
     }
 
     /// Urutan dibalik jadi MENURUN.
@@ -175,7 +176,7 @@ struct DeviceAlbumDetailView: View {
     private func shareURLs(for ids: [String]) async -> [URL] {
         var urls: [URL] = []
         for id in ids {
-            guard !Task.isCancelled else {
+            guard !Task.isCancelled, AssetVisibilityPolicy().allows(id: id) else {
                 TemporaryMediaStore.remove(urls)
                 return []
             }
@@ -183,7 +184,7 @@ struct DeviceAlbumDetailView: View {
                 continue
             }
             defer { try? FileManager.default.removeItem(at: file.url) }
-            guard !Task.isCancelled else {
+            guard !Task.isCancelled, AssetVisibilityPolicy().allows(id: id) else {
                 TemporaryMediaStore.remove(urls)
                 return []
             }

@@ -21,6 +21,15 @@ struct MapMarkerDTO: Codable, Identifiable, Hashable {
     let city: String?
     let state: String?
     let country: String?
+
+    @MainActor
+    static func visible(in markers: [MapMarkerDTO], policy: AssetVisibilityPolicy) -> [MapMarkerDTO] {
+        var seen = Set<String>()
+        return markers.filter { marker in
+            guard policy.allows(id: marker.id) else { return false }
+            return seen.insert(String(format: "%.2f,%.2f", marker.lat, marker.lon)).inserted
+        }
+    }
 }
 
 final class PlacesRepository {
@@ -41,7 +50,8 @@ final class PlacesRepository {
         guard let cities = groups.first(where: { $0.fieldName == "city" }) else {
             return []
         }
-        return cities.items.map { PlaceItem(name: $0.value, asset: AssetLite($0.data)) }
+        return cities.items.filter { $0.data.isTimelineVisible }
+            .map { PlaceItem(name: $0.value, asset: AssetLite($0.data)) }
     }
 
     func markers() async throws -> [MapMarkerDTO] {

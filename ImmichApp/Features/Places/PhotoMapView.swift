@@ -36,6 +36,12 @@ struct PhotoMapView: View {
                 AssetDetailView(currentAsset: asset, assets: [asset])
                     .navigationTransition(.zoom(sourceID: asset.id, in: sourceNamespace))
             }
+            .onChange(of: selected.map {
+                snapshotGeneration == LocalSnapshot.generation
+                    && AssetVisibilityPolicy(scope: .timeline).allows(id: $0.id)
+            } ?? true) { _, allowed in
+                if !allowed { selected = nil }
+            }
     }
 
     private var map: some View {
@@ -62,13 +68,8 @@ struct PhotoMapView: View {
     /// bertumpuk persis — hanya yang teratas yang pernah terlihat, sisanya
     /// membebani peta tanpa terlihat sama sekali.
     private var visibleMarkers: [MapMarkerDTO] {
-        var seen = Set<String>()
-        var result: [MapMarkerDTO] = []
-        for marker in markers {
-            let key = String(format: "%.2f,%.2f", marker.lat, marker.lon)
-            if seen.insert(key).inserted { result.append(marker) }
-        }
-        return result
+        guard snapshotGeneration == LocalSnapshot.generation else { return [] }
+        return MapMarkerDTO.visible(in: markers, policy: AssetVisibilityPolicy(scope: .timeline))
     }
 
     private func pin(for marker: MapMarkerDTO) -> some View {
@@ -89,9 +90,13 @@ struct PhotoMapView: View {
     }
 
     private func open(_ marker: MapMarkerDTO) {
+        guard AssetVisibilityPolicy(scope: .timeline).allows(id: marker.id) else { return }
         Task {
             let repo = AssetDetailRepository(api: APIClient(session: session))
             guard let dto = try? await repo.fetchAsset(marker.id) else { return }
+            guard !Task.isCancelled, snapshotGeneration == LocalSnapshot.generation,
+                  dto.isTimelineVisible,
+                  AssetVisibilityPolicy(scope: .timeline).allows(id: dto.id) else { return }
             selected = AssetLite(dto)
         }
     }

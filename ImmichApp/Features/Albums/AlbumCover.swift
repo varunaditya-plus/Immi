@@ -26,10 +26,12 @@ final class AlbumCoverStore {
     private struct Resolution {
         let assetCount: Int
         let assetID: String?
+        let excludedIDs: Set<String>
     }
 
     private struct Request {
         let assetCount: Int
+        let excludedIDs: Set<String>
         let task: Task<Result<String?, Error>, Never>
     }
 
@@ -55,14 +57,29 @@ final class AlbumCoverStore {
     @ObservationIgnored
     private var generation = 0
 
-    init() {}
+    private let dataManager: SwiftDataManager
+    private let removed: RemovedAssets
+
+    init(dataManager: SwiftDataManager? = nil, removed: RemovedAssets? = nil) {
+        self.dataManager = dataManager ?? .shared
+        self.removed = removed ?? .shared
+    }
+
+    var excludedIDs: Set<String> {
+        dataManager.privateAssetIDs.union(removed.ids)
+            .union(DeletedServerAssetRegistry.shared.suppressedIDs)
+    }
+
+    private var policy: AssetVisibilityPolicy {
+        AssetVisibilityPolicy(dataManager: dataManager, removed: removed)
+    }
 
     /// Sampul yang berlaku sekarang — dari server kalau ada, kalau tidak hasil
     /// yang sudah diselesaikan. Sinkron, karena inilah yang dibaca `body`.
     func coverID(for album: AlbumResponseDTO) -> String? {
-        if let id = album.albumThumbnailAssetId { return id }
+        if let id = album.albumThumbnailAssetId, policy.allows(id: id) { return id }
         guard let cached = resolved[album.id], cached.assetCount == album.assetCount else { return nil }
-        return cached.assetID
+        return cached.assetID.flatMap { policy.allows(id: $0) ? $0 : nil }
     }
 
     func resolveCover(for album: AlbumResponseDTO, session: SessionManager) async {
@@ -71,14 +88,18 @@ final class AlbumCoverStore {
 
     func resolveCover(for album: AlbumResponseDTO, repository: AlbumRepository) async {
         // Server sudah menyebutkan sampulnya; tidak ada yang perlu dicari.
-        guard album.albumThumbnailAssetId == nil else { return }
-        guard resolved[album.id]?.assetCount != album.assetCount else { return }
+        if let id = album.albumThumbnailAssetId, policy.allows(id: id) { return }
+        let exclusions = excludedIDs
+        if let cached = resolved[album.id], cached.assetCount == album.assetCount {
+            if let id = cached.assetID, policy.allows(id: id) { return }
+            if cached.assetID == nil, cached.excludedIDs == exclusions { return }
+        }
 
         // Kartu lain sudah menanyakannya. Cukup tunggu; hasilnya ditulis oleh
         // pemanggil pertama dan view ini tergambar ulang karena `resolved`
         // diamati.
         if let running = inFlight[album.id] {
-            if running.assetCount == album.assetCount {
+            if running.assetCount == album.assetCount, running.excludedIDs == exclusions {
                 _ = await running.task.value
                 return
             }
@@ -101,7 +122,7 @@ final class AlbumCoverStore {
                 return .failure(error)
             }
         }
-        inFlight[albumID] = Request(assetCount: album.assetCount, task: task)
+        inFlight[albumID] = Request(assetCount: album.assetCount, excludedIDs: exclusions, task: task)
         let outcome = await task.value
 
         // Sudah ganti akun selagi permintaan ini berjalan — hasilnya milik data
@@ -116,7 +137,7 @@ final class AlbumCoverStore {
         // meleset membuat album itu memakai kotak abu-abu sampai aplikasi
         // ditutup — padahal sampulnya ada, cuma gagal diambil sekali.
         guard case .success(let id) = outcome else { return }
-        remember(id, for: album)
+        remember(id.flatMap { policy.allows(id: $0) ? $0 : nil }, for: album)
     }
 
     /// Dipanggil saat logout: id album milik akun lama tidak boleh menempel di
@@ -136,7 +157,7 @@ final class AlbumCoverStore {
     }
 
     private func remember(_ assetID: String?, for album: AlbumResponseDTO) {
-        resolved[album.id] = Resolution(assetCount: album.assetCount, assetID: assetID)
+        resolved[album.id] = Resolution(assetCount: album.assetCount, assetID: assetID, excludedIDs: excludedIDs)
     }
 }
 
@@ -171,8 +192,17 @@ struct AlbumCoverImage: View {
         }
         // Count/cover menjadi bagian id task agar perubahan isi album memicu
         // penyelesaian ulang fallback walau id albumnya tetap sama.
-        .task(id: "\(album.id)|\(album.assetCount)|\(album.albumThumbnailAssetId ?? "")") {
+        .task(id: CoverRequestKey(albumID: album.id, count: album.assetCount,
+                                  coverID: album.albumThumbnailAssetId,
+                                  excludedIDs: AlbumCoverStore.shared.excludedIDs)) {
             await AlbumCoverStore.shared.resolveCover(for: album, session: session)
         }
     }
+}
+
+private struct CoverRequestKey: Hashable {
+    let albumID: String
+    let count: Int
+    let coverID: String?
+    let excludedIDs: Set<String>
 }

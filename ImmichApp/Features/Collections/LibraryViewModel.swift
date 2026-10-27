@@ -6,14 +6,25 @@ import Observation
 final class LibraryViewModel {
     private let snapshotGeneration = LocalSnapshot.generation
 
-    var memories: [MemoryStory] = []
+    private var loadedMemories: [MemoryStory] = []
+    var memories: [MemoryStory] {
+        get {
+            guard snapshotGeneration == LocalSnapshot.generation else { return [] }
+            let policy = AssetVisibilityPolicy(scope: .timeline, dataManager: dataManager)
+            return loadedMemories.compactMap { $0.filteringAssets(using: policy) }
+        }
+        set { loadedMemories = newValue }
+    }
     var albums: [AlbumResponseDTO] = []
     var recentAlbums: [AlbumResponseDTO] { Array(albums.prefix(Self.rowLimit)) }
     // AssetLite equality compares IDs; this storage also publishes metadata changes.
     private struct FavoriteStorage { var assets: [AssetLite] = [] }
     private var favoriteStorage = FavoriteStorage()
     var favorites: [AssetLite] {
-        get { favoriteStorage.assets }
+        get {
+            guard snapshotGeneration == LocalSnapshot.generation else { return [] }
+            return AssetVisibilityPolicy(scope: .timeline, dataManager: dataManager).filter(favoriteStorage.assets)
+        }
         set { favoriteStorage = FavoriteStorage(assets: newValue) }
     }
     private struct FavoriteResponse {
@@ -37,19 +48,22 @@ final class LibraryViewModel {
     private let peopleRepo: PeopleRepository
     private let searchRepo: SearchRepository
     private let assetRepo: AssetDetailRepository
+    private let dataManager: SwiftDataManager
 
     init(
         memoriesRepo: MemoriesRepository,
         albumRepo: AlbumRepository,
         peopleRepo: PeopleRepository,
         searchRepo: SearchRepository,
-        assetRepo: AssetDetailRepository
+        assetRepo: AssetDetailRepository,
+        dataManager: SwiftDataManager? = nil
     ) {
         self.memoriesRepo = memoriesRepo
         self.albumRepo = albumRepo
         self.peopleRepo = peopleRepo
         self.searchRepo = searchRepo
         self.assetRepo = assetRepo
+        self.dataManager = dataManager ?? .shared
     }
 
     /// Dipakai `task` layar, yang berjalan ulang SETIAP KALI tab dibuka lagi.
@@ -115,7 +129,7 @@ final class LibraryViewModel {
            let cached = LocalSnapshot.load([AlbumResponseDTO].self, for: LocalSnapshot.Key.libraryAlbums) {
             albums = cached
         }
-        if favorites.isEmpty,
+        if favoriteStorage.assets.isEmpty,
            let cached = LocalSnapshot.load([AssetLite].self, for: LocalSnapshot.Key.libraryFavorites) {
             favorites = cached
         }
@@ -257,7 +271,7 @@ final class LibraryViewModel {
               !Task.isCancelled, fetched.revision == favoriteRequest else { return }
         LocalSnapshot.save(fetched.assets, for: LocalSnapshot.Key.libraryFavorites,
             expectedGeneration: snapshotGeneration)
-        if !favorites.elementsEqual(fetched.assets, by: { $0.hasSameContent(as: $1) }) {
+        if !favoriteStorage.assets.elementsEqual(fetched.assets, by: { $0.hasSameContent(as: $1) }) {
             favorites = fetched.assets
         }
     }
@@ -265,8 +279,8 @@ final class LibraryViewModel {
     private func removeFavorite(_ id: String) {
         guard snapshotGeneration == LocalSnapshot.generation else { return }
         favoriteRequest = UUID()
-        favorites.removeAll { $0.id == id }
-        LocalSnapshot.save(favorites, for: LocalSnapshot.Key.libraryFavorites,
+        favoriteStorage = FavoriteStorage(assets: favoriteStorage.assets.filter { $0.id != id })
+        LocalSnapshot.save(favoriteStorage.assets, for: LocalSnapshot.Key.libraryFavorites,
             expectedGeneration: snapshotGeneration)
     }
 
@@ -333,10 +347,12 @@ final class LibraryViewModel {
     /// Unduh berkas asli ke lokasi sementara untuk dibagikan lewat share sheet
     /// (URL server polos akan kena 401).
     func shareURL(for asset: AssetLite) async -> URL? {
-        guard snapshotGeneration == LocalSnapshot.generation, !Task.isCancelled else { return nil }
+        guard snapshotGeneration == LocalSnapshot.generation, !Task.isCancelled,
+              AssetVisibilityPolicy(scope: .timeline, dataManager: dataManager).allows(id: asset.id) else { return nil }
         do {
             let url = try await assetRepo.shareFile(asset.id)
-            guard snapshotGeneration == LocalSnapshot.generation, !Task.isCancelled else {
+            guard snapshotGeneration == LocalSnapshot.generation, !Task.isCancelled,
+                  AssetVisibilityPolicy(scope: .timeline, dataManager: dataManager).allows(id: asset.id) else {
                 TemporaryMediaStore.remove(url)
                 return nil
             }
@@ -386,6 +402,7 @@ final class LibraryViewModel {
         favoriteRequest = revision
         let request = SearchRequestDTO(page: 1, isFavorite: true, size: Self.rowLimit)
         guard let response = try? await searchRepo.metadataSearch(request) else { return nil }
-        return FavoriteResponse(revision: revision, assets: response.assets.items.map(AssetLite.init))
+        return FavoriteResponse(revision: revision,
+            assets: response.assets.items.filter(\.isTimelineVisible).map(AssetLite.init))
     }
 }

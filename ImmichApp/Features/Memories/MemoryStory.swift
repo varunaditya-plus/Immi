@@ -17,6 +17,13 @@ struct MemoryStory: Identifiable {
 
     var cover: AssetLite? { assets.first }
 
+    @MainActor
+    func filteringAssets(using policy: AssetVisibilityPolicy) -> MemoryStory? {
+        let visible = policy.filter(assets)
+        guard !visible.isEmpty else { return nil }
+        return MemoryStory(id: id, title: title, subtitle: subtitle, assets: visible)
+    }
+
     /// Kenangan yang layak ditampilkan, terbaru dulu.
     ///
     /// Only timeline-visible photos may appear in an ordinary memory card.
