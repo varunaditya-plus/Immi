@@ -10,6 +10,7 @@ import Observation
 @Observable
 final class AssetGridViewModel {
     private let snapshotGeneration = LocalSnapshot.generation
+    private var loadRevision = UUID()
 
     // AssetLite equality compares IDs; this storage also publishes metadata changes.
     private struct AssetStorage { var assets: [AssetLite] = [] }
@@ -53,6 +54,9 @@ final class AssetGridViewModel {
     ///   tergambar tidak dipasang ulang sama sekali.
     func load() async {
         guard snapshotGeneration == LocalSnapshot.generation else { return }
+        let request = UUID()
+        loadRevision = request
+        let cacheRevision = dataManager.assetMutationRevision
         if assets.isEmpty {
             // ADA potret dan potret yang BERISI adalah dua hal berbeda.
             //
@@ -70,7 +74,8 @@ final class AssetGridViewModel {
 
         do {
             let fetched = try await loader()
-            guard snapshotGeneration == LocalSnapshot.generation else { return }
+            guard snapshotGeneration == LocalSnapshot.generation, loadRevision == request,
+                  dataManager.assetMutationRevision == cacheRevision else { return }
             if let snapshotKey {
                 LocalSnapshot.save(fetched, for: snapshotKey, expectedGeneration: snapshotGeneration)
             }
@@ -81,6 +86,8 @@ final class AssetGridViewModel {
             }
             phase = .loaded(())
         } catch {
+            guard snapshotGeneration == LocalSnapshot.generation, loadRevision == request,
+                  dataManager.assetMutationRevision == cacheRevision else { return }
             // Sudah ada jawaban yang SAH di layar — entah dari potret, entah
             // dari muatan sebelumnya — jadi kegagalannya diam.
             //
@@ -151,6 +158,7 @@ final class AssetGridViewModel {
         do {
             try await assetRepo.delete(ids, force: permanently)
             guard snapshotGeneration == LocalSnapshot.generation else { return }
+            loadRevision = UUID()
             let removed = Set(ids)
             assets.removeAll { removed.contains($0.id) }
             persist()
@@ -242,12 +250,14 @@ final class AssetGridViewModel {
     }
 
     private func cacheFavoriteIfNeeded(_ id: String, value: Bool) {
+        loadRevision = UUID()
         if let cached = dataManager.getCachedAsset(id: id), cached.isFavorite != value {
             try? dataManager.patchCachedAsset(id, isFavorite: value)
         }
     }
 
     private func cacheVisibilityIfNeeded(_ id: String, inTimeline: Bool) {
+        loadRevision = UUID()
         if dataManager.nonTimelineAssetIDs.contains(id) != !inTimeline
             || dataManager.getCachedAsset(id: id).map({ $0.isArchived != !inTimeline }) == true {
             try? dataManager.setTimelineVisibility([id], inTimeline: inTimeline)
@@ -293,6 +303,7 @@ final class AssetGridViewModel {
         do {
             try await repo.restore(requestedIDs)
             guard snapshotGeneration == LocalSnapshot.generation else { return }
+            loadRevision = UUID()
             let restoredAssets = restorable(candidates)
             let restoredIDs = restoredAssets.map(\.id)
             DeletedServerAssetRegistry.shared.restore(restoredIDs)
@@ -315,6 +326,7 @@ final class AssetGridViewModel {
         do {
             try await repo.restoreAll()
             guard snapshotGeneration == LocalSnapshot.generation else { return }
+            loadRevision = UUID()
             let restoredAssets = restorable(candidates)
             DeletedServerAssetRegistry.shared.restoreAllFromTrash()
             RemovedAssets.shared.restoreAllFromTrash()
@@ -333,6 +345,7 @@ final class AssetGridViewModel {
         do {
             try await repo.empty()
             guard snapshotGeneration == LocalSnapshot.generation else { return }
+            loadRevision = UUID()
             DeletedServerAssetRegistry.shared.emptyTrash()
             RemovedAssets.shared.remove(removedIDs)
             RemovedAssets.shared.emptyTrash()

@@ -217,6 +217,7 @@ struct AlbumDetailView: View {
 @Observable
 final class AlbumDetailViewModel {
     private let snapshotGeneration = LocalSnapshot.generation
+    private var loadRevision = UUID()
 
     // AssetLite equality compares IDs; this storage also publishes metadata changes.
     private struct AssetStorage { var assets: [AssetLite] = [] }
@@ -359,6 +360,7 @@ final class AlbumDetailViewModel {
         do {
             try await assetRepo.delete(ids)
             guard snapshotGeneration == LocalSnapshot.generation else { return }
+            loadRevision = UUID()
             let removed = Set(ids)
             assets.removeAll { removed.contains($0.id) }
             persist()
@@ -411,12 +413,14 @@ final class AlbumDetailViewModel {
     }
 
     private func cacheFavoriteIfNeeded(_ id: String, value: Bool) {
+        loadRevision = UUID()
         if let cached = dataManager.getCachedAsset(id: id), cached.isFavorite != value {
             try? dataManager.patchCachedAsset(id, isFavorite: value)
         }
     }
 
     private func cacheVisibilityIfNeeded(_ id: String, inTimeline: Bool) {
+        loadRevision = UUID()
         if dataManager.nonTimelineAssetIDs.contains(id) != !inTimeline
             || dataManager.getCachedAsset(id: id).map({ $0.isArchived != !inTimeline }) == true {
             try? dataManager.setTimelineVisibility([id], inTimeline: inTimeline)
@@ -444,6 +448,7 @@ final class AlbumDetailViewModel {
         do {
             try await albumRepo.removeAssets(ids, from: albumId)
             guard snapshotGeneration == LocalSnapshot.generation else { return }
+            loadRevision = UUID()
             let removed = Set(ids)
             assets.removeAll { removed.contains($0.id) }
             persist()
@@ -451,6 +456,7 @@ final class AlbumDetailViewModel {
             guard snapshotGeneration == LocalSnapshot.generation else { return }
             if let mutation = error as? AlbumMutationError {
                 let confirmed = mutation.succeededIDs.intersection(ids)
+                if !confirmed.isEmpty { loadRevision = UUID() }
                 assets.removeAll { confirmed.contains($0.id) }
                 persist()
             }
@@ -493,6 +499,7 @@ final class AlbumDetailViewModel {
         do {
             try await albumRepo.delete(id)
             guard snapshotGeneration == LocalSnapshot.generation else { return false }
+            loadRevision = UUID()
             // Potretnya ikut dibuang. Album yang sudah tidak ada tidak boleh
             // meninggalkan berkas yang akan terus dibaca kalau id-nya kebetulan
             // dipakai lagi.
@@ -515,6 +522,9 @@ final class AlbumDetailViewModel {
         expectedAssetCount: Int? = nil
     ) async -> Bool {
         guard snapshotGeneration == LocalSnapshot.generation else { return false }
+        let request = UUID()
+        loadRevision = request
+        let cacheRevision = dataManager.assetMutationRevision
         self.albumId = albumId
         if let expectedAssetCount {
             self.expectedAssetCount = expectedAssetCount
@@ -535,7 +545,8 @@ final class AlbumDetailViewModel {
             let fetched = try await timelineRepo.albumAssets(
                 albumId,
                 expectedCount: self.expectedAssetCount)
-            guard snapshotGeneration == LocalSnapshot.generation else { return false }
+            guard snapshotGeneration == LocalSnapshot.generation, loadRevision == request,
+                  dataManager.assetMutationRevision == cacheRevision else { return false }
             LocalSnapshot.save(fetched, for: key, expectedGeneration: snapshotGeneration)
             if !assets.elementsEqual(fetched, by: { $0.hasSameContent(as: $1) }) {
                 assets = fetched
@@ -543,7 +554,8 @@ final class AlbumDetailViewModel {
             phase = .loaded(())
             return true
         } catch {
-            guard snapshotGeneration == LocalSnapshot.generation else { return false }
+            guard snapshotGeneration == LocalSnapshot.generation, loadRevision == request,
+                  dataManager.assetMutationRevision == cacheRevision else { return false }
             // Sudah ada jawaban yang sah di layar — potret maupun muatan
             // sebelumnya — jadi kegagalannya diam. Album yang memang kosong pun
             // punya potret `[]` yang sah, jadi yang diperiksa `phase`, bukan
