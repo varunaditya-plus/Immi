@@ -45,6 +45,7 @@ final class SearchViewModel {
     private var generation = 0
     private var searchTask: Task<Void, Never>?
     private var activeRequest: SearchRequestDTO?
+    private var removedResultIDs = Set<String>()
 
     init(
         repo: SearchRepository,
@@ -90,6 +91,7 @@ final class SearchViewModel {
         searchTask = nil
         generation &+= 1
         activeRequest = nil
+        removedResultIDs.removeAll()
         results = []
         totalResults = 0
         currentPage = 1
@@ -118,7 +120,9 @@ final class SearchViewModel {
             guard startedAt == generation, snapshotGeneration == LocalSnapshot.generation else { return }
             try validate(response.assets, after: 1)
             var seen = Set<String>()
-            results = response.assets.items.filter { $0.isTimelineVisible && seen.insert($0.id).inserted }
+            results = response.assets.items.filter {
+                $0.isTimelineVisible && !removedResultIDs.contains($0.id) && seen.insert($0.id).inserted
+            }
                 .map(Self.makeAssetLite)
             totalResults = response.assets.nextPage == nil
                 ? results.count : max(response.assets.total, results.count)
@@ -154,7 +158,9 @@ final class SearchViewModel {
             guard startedAt == generation, snapshotGeneration == LocalSnapshot.generation else { return }
             try validate(response.assets, after: page)
             var seen = Set(loadedResults.map(\.id))
-            let newAssets = response.assets.items.filter { $0.isTimelineVisible && seen.insert($0.id).inserted }
+            let newAssets = response.assets.items.filter {
+                $0.isTimelineVisible && !removedResultIDs.contains($0.id) && seen.insert($0.id).inserted
+            }
                 .map(Self.makeAssetLite)
             loadedResults.append(contentsOf: newAssets)
             totalResults = response.assets.nextPage == nil
@@ -330,6 +336,7 @@ final class SearchViewModel {
     /// mengetuknya berujung "not found".
     func removeLocally(_ ids: [String]) {
         let gone = Set(ids)
+        removedResultIDs.formUnion(gone)
         let before = loadedResults.count
         loadedResults.removeAll { gone.contains($0.id) }
         // Totalnya ikut turun sebanyak yang benar-benar hilang dari daftar ini.

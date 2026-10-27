@@ -32,6 +32,64 @@ final class SearchPaginationTests: XCTestCase {
         assertLoaded(model)
     }
 
+    func testLatePageCannotRestoreRemovedRowsAndANewSearchCanIncludeThemAgain() async throws {
+        let removedID = "removed-\(UUID())"
+        let keptID = "kept-\(UUID())"
+        let addedID = "added-\(UUID())"
+        let (model, repository) = try await loadedModel(firstIDs: [removedID, keptID], firstTotal: 3)
+        let page = Task { await model.loadMore() }
+        _ = try await repository.probe.waitForRequest(1, testCase: self)
+
+        model.removeLocally([removedID])
+        model.patchFavorite(keptID, to: true)
+        XCTAssertEqual(model.results.map(\.id), [keptID])
+        XCTAssertEqual(model.totalResults, 2)
+        try await repository.probe.succeed(1, ids: [removedID, keptID, addedID], total: 3)
+        await page.value
+
+        XCTAssertEqual(model.results.map(\.id), [keptID, addedID])
+        XCTAssertEqual(model.results.first?.isFavorite, true, "An overlapping stale row must not overwrite the accepted favorite")
+        XCTAssertEqual(model.totalResults, 2)
+        XCTAssertNil(model.nextPage)
+        XCTAssertNil(model.paginationError)
+        assertLoaded(model)
+
+        model.searchText = "restored photos"
+        let current = Task { await model.search() }
+        _ = try await repository.probe.waitForRequest(2, testCase: self)
+        try await repository.probe.succeed(2, ids: [removedID], total: 1)
+        await current.value
+        XCTAssertEqual(model.results.map(\.id), [removedID], "Removals apply only to the previous search")
+        XCTAssertEqual(model.totalResults, 1)
+    }
+
+    func testRetryingAFailedPageStillRejectsRowsRemovedWhileItWasPending() async throws {
+        let removedID = "removed-\(UUID())"
+        let keptID = "kept-\(UUID())"
+        let addedID = "added-\(UUID())"
+        let (model, repository) = try await loadedModel(firstIDs: [removedID, keptID], firstTotal: 3)
+        let page = Task { await model.loadMore() }
+        _ = try await repository.probe.waitForRequest(1, testCase: self)
+        model.removeLocally([removedID])
+        try await repository.probe.fail(1, error: APIError.server(status: 503, message: "Page unavailable"))
+        await page.value
+        XCTAssertEqual(model.results.map(\.id), [keptID])
+        XCTAssertEqual(model.totalResults, 2)
+        XCTAssertEqual(model.paginationError, "Page unavailable")
+
+        let retry = Task { await model.retryLoadMore() }
+        let retried = try await repository.probe.waitForRequest(2, testCase: self)
+        XCTAssertEqual(retried.request.page, 2)
+        try await repository.probe.succeed(2, ids: [removedID, addedID], total: 3)
+        await retry.value
+
+        XCTAssertEqual(model.results.map(\.id), [keptID, addedID])
+        XCTAssertEqual(model.totalResults, 2)
+        XCTAssertNil(model.nextPage)
+        XCTAssertNil(model.paginationError)
+        assertLoaded(model)
+    }
+
     func testRepeatedReachEndEventsShareOnePendingPageRequest() async throws {
         let (model, repository) = try await loadedModel()
         let task = Task { await model.loadMore() }
