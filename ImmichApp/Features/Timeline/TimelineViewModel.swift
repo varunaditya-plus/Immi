@@ -598,6 +598,7 @@ final class TimelineViewModel {
             try await assetRepo.toggleArchive(asset.id, to: true)
             guard accountGeneration == LocalSnapshot.generation else { return }
             removeAsset(asset.id)
+            cacheVisibilityIfNeeded(asset.id, inTimeline: false)
         } catch {
             actionError = Self.describe(error)
         }

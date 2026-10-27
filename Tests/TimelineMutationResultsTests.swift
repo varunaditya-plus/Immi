@@ -116,6 +116,10 @@ final class TimelineMutationResultsTests: XCTestCase {
         await fixture.model.archive(asset)
         XCTAssertEqual(fixture.model.allAssets.map(\.id), Array(fixture.ids.dropFirst()))
         XCTAssertEqual(fixture.manager.getCachedAsset(id: asset.id)?.isArchived, true)
+        let reopened = SwiftDataManager(storeURL: fixture.storeURL, backupJournalURL: fixture.journalURL)
+        XCTAssertEqual(reopened.getCachedAsset(id: asset.id)?.isArchived, true)
+        XCTAssertTrue(reopened.nonTimelineAssetIDs.contains(asset.id))
+        XCTAssertFalse(reopened.timelineAssets().contains { $0.asset.id == asset.id })
         XCTAssertNil(fixture.model.actionError)
     }
 
