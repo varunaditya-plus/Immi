@@ -57,6 +57,7 @@ struct PhotoCollectionScreen<Options: View>: View {
     /// yang sudah dibersihkan dari aset yang dibuang di layar lain.
     let assets: [AssetLite]
     let phase: LoadingPhase<Void>
+    var actionError: Binding<String?> = .constant(nil)
     /// Pesan khusus setelah server berhasil menyatakan koleksinya kosong.
     /// `nil` mempertahankan tampilan kosong bawaan layar tersebut.
     var emptyState: PhotoCollectionEmptyState? = nil
@@ -119,6 +120,7 @@ struct PhotoCollectionScreen<Options: View>: View {
     @State private var isSelecting = false
     @State private var selectedIDs: Set<String> = []
     @State private var isPreparingShare = false
+    @State private var isPerformingAction = false
     @State private var preparedURLs: [URL] = []
     @State private var isSharePresented = false
     /// Foto yang menunggu konfirmasi hapus DARI CONTEXT MENU.
@@ -216,12 +218,20 @@ struct PhotoCollectionScreen<Options: View>: View {
                         // Getarnya sama dengan jalur bar seleksi; tanpa ini,
                         // menghapus lewat context menu terasa berbeda dari
                         // menghapus hal yang sama lewat mode pilih.
-                        deleteFeedback += 1
+                        if actionError.wrappedValue == nil { deleteFeedback += 1 }
                     }
                 }
                 Button("Cancel", role: .cancel) {}
             } message: { _ in
                 Text("This cannot be undone.")
+            }
+            .alert("Action Failed", isPresented: Binding(
+                get: { actionError.wrappedValue != nil },
+                set: { if !$0 { actionError.wrappedValue = nil } })
+            ) {
+                Button("OK", role: .cancel) { actionError.wrappedValue = nil }
+            } message: {
+                Text(actionError.wrappedValue ?? "")
             }
             .deleteFromDeviceAlert($deviceDeleteID) { deleteFeedback += 1 }
             .sensoryFeedback(deleteHaptic, trigger: deleteFeedback)
@@ -234,6 +244,10 @@ struct PhotoCollectionScreen<Options: View>: View {
             // Dikelompokkan ulang hanya saat isinya benar-benar berganti, dan
             // di luar main actor.
             .task(id: assetsSignature) { await rebuildSections() }
+            .onChange(of: assetsSignature) { _, _ in
+                selectedIDs.formIntersection(Set(visibleAssets.map(\.id)))
+                if selectedIDs.isEmpty { endSelection() }
+            }
     }
 
     // MARK: - Grid
@@ -839,7 +853,7 @@ struct PhotoCollectionScreen<Options: View>: View {
         // Tombolnya tetap terlihat saat belum ada yang dipilih, hanya dimatikan.
         // Bar yang berubah-ubah isinya sesuai jumlah pilihan lebih membingungkan
         // daripada tombol kelabu.
-        actions.isBusy = isPreparingShare || selectedIDs.isEmpty
+        actions.isBusy = isPreparingShare || isPerformingAction || selectedIDs.isEmpty
 
         if allowsSelectionShare { actions.share = { share(ids) } }
         actions.trashConfirmation = SelectionConfirmation(
@@ -857,7 +871,7 @@ struct PhotoCollectionScreen<Options: View>: View {
             actions.favorite = {
                 runSelection {
                     await onFavoriteSelection(ids)
-                    favoriteFeedback += 1
+                    if actionError.wrappedValue == nil { favoriteFeedback += 1 }
                 }
             }
         }
@@ -877,19 +891,19 @@ struct PhotoCollectionScreen<Options: View>: View {
     }
 
     private func runSelection(_ work: @escaping () async -> Void) {
+        guard !isPerformingAction, !selectedIDs.isEmpty else { return }
+        isPerformingAction = true
         Task {
+            defer { isPerformingAction = false }
             await work()
-            endSelection()
+            if actionError.wrappedValue == nil { endSelection() }
         }
     }
 
     private func runRestore() {
         guard let onRestoreSelection else { return }
         let ids = Array(selectedIDs)
-        Task {
-            await onRestoreSelection(ids)
-            endSelection()
-        }
+        runSelection { await onRestoreSelection(ids) }
     }
 
     private var destructiveDialogTitle: String {
@@ -966,18 +980,14 @@ struct PhotoCollectionScreen<Options: View>: View {
 
     private func runRemoval(_ removal: PhotoCollectionRemoval) {
         let ids = Array(selectedIDs)
-        Task {
-            await removal.perform(ids)
-            endSelection()
-        }
+        runSelection { await removal.perform(ids) }
     }
 
     private func runDelete() {
         let ids = Array(selectedIDs)
-        Task {
+        runSelection {
             await onDelete(ids)
-            deleteFeedback += 1
-            endSelection()
+            if actionError.wrappedValue == nil { deleteFeedback += 1 }
         }
     }
 
@@ -1043,6 +1053,7 @@ extension PhotoCollectionScreen where Options == EmptyView {
         subtitle: String? = nil,
         assets: [AssetLite],
         phase: LoadingPhase<Void>,
+        actionError: Binding<String?> = .constant(nil),
         emptyState: PhotoCollectionEmptyState? = nil,
         onRetry: @escaping () -> Void,
         onToggleFavorite: @escaping (AssetLite) async -> Void,
@@ -1068,6 +1079,7 @@ extension PhotoCollectionScreen where Options == EmptyView {
             subtitle: subtitle,
             assets: assets,
             phase: phase,
+            actionError: actionError,
             emptyState: emptyState,
             onRetry: onRetry,
             onToggleFavorite: onToggleFavorite,

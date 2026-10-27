@@ -42,18 +42,18 @@ struct SharedLinkPresentation: Identifiable {
 
     /// Membuat tautan publik baru untuk sebuah album.
     ///
-    /// Ditaruh di sini karena tiga layar memerlukannya (daftar album, detail
-    /// album, dan Collections); disalin di masing-masing hanya menunggu
-    /// ketiganya menyimpang.
+    /// Used by the album list and Library. Errors reach their existing action
+    /// feedback instead of making a failed tap appear to do nothing.
     @MainActor
     static func create(
         albumId: String,
         session: SessionManager
-    ) async -> SharedLinkPresentation? {
+    ) async throws -> SharedLinkPresentation {
         let repo = AlbumRepository(api: APIClient(session: session))
-        guard let link = try? await repo.createSharedLink(albumId: albumId),
-              let url = link.publicURL(base: session.baseURL)
-        else { return nil }
+        let link = try await repo.createSharedLink(albumId: albumId)
+        guard let url = link.publicURL(base: session.baseURL) else {
+            throw APIError.invalidURL
+        }
         return SharedLinkPresentation(url: url)
     }
 }
@@ -200,52 +200,75 @@ struct AlbumEditSheet: View {
 
 /// Sheet pemilih pengguna untuk dibagikan aksesnya ke album.
 struct AlbumAddUserSheet: View {
-    let album: AlbumResponseDTO
-    var onAdd: ([String]) -> Void
+    var onAdd: ([String]) async -> String?
 
     @Environment(SessionManager.self) private var session
     @Environment(\.dismiss) private var dismiss
-    @State private var users: [UserResponseDTO] = []
+    @State private var vm: AlbumUserPickerViewModel?
     @State private var selectedIDs: Set<String> = []
-    @State private var isLoading = true
+    @State private var isSaving = false
+    @State private var errorMessage: String?
 
     var body: some View {
         NavigationStack {
-            content
+            VStack(spacing: 12) {
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.callout)
+                        .foregroundStyle(.red)
+                        .padding(.horizontal)
+                }
+                content
+            }
                 .navigationTitle("Add User")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Cancel") { dismiss() }
+                            .disabled(isSaving)
                     }
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("Add") {
-                            onAdd(Array(selectedIDs))
-                            dismiss()
+                        Button {
+                            Task { await addSelectedUsers() }
+                        } label: {
+                            if isSaving { ProgressView() } else { Text("Add") }
                         }
-                        .disabled(selectedIDs.isEmpty)
+                        .disabled(selectedIDs.isEmpty || isSaving)
                     }
                 }
                 .task { await load() }
+                .interactiveDismissDisabled(isSaving)
         }
     }
 
     @ViewBuilder
     private var content: some View {
-        if isLoading {
+        switch vm?.phase ?? .loading {
+        case .idle, .loading:
             ProgressView()
-        } else if users.isEmpty {
-            ContentUnavailableView(
-                "No Other Users",
-                systemImage: "person.2",
-                description: Text("There is no one else on this server to share with."))
-        } else {
-            list
+        case .failed(let message):
+            ContentUnavailableView {
+                Label("Failed to Load", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(message)
+            } actions: {
+                Button("Retry") { Task { await vm?.load() } }
+                    .buttonStyle(.borderedProminent)
+            }
+        case .loaded:
+            if vm?.users.isEmpty != false {
+                ContentUnavailableView(
+                    "No Other Users",
+                    systemImage: "person.2",
+                    description: Text("There is no one else on this server to share with."))
+            } else {
+                list
+            }
         }
     }
 
     private var list: some View {
-        List(users) { user in
+        List(vm?.users ?? []) { user in
             Button {
                 toggle(user)
             } label: {
@@ -265,6 +288,7 @@ struct AlbumAddUserSheet: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .disabled(isSaving)
         }
     }
 
@@ -277,11 +301,58 @@ struct AlbumAddUserSheet: View {
     }
 
     private func load() async {
-        let repo = AlbumRepository(api: APIClient(session: session))
-        let all = (try? await repo.users()) ?? []
-        // Diri sendiri disaring keluar — pemilik album tidak perlu diundang ke
-        // albumnya sendiri.
-        users = all.filter { $0.id != session.currentUser?.id }
-        isLoading = false
+        if vm == nil {
+            vm = AlbumUserPickerViewModel(
+                repo: AlbumRepository(api: APIClient(session: session)),
+                currentUserID: session.currentUser?.id)
+        }
+        await vm?.load()
+    }
+
+    private func addSelectedUsers() async {
+        guard !isSaving, !selectedIDs.isEmpty else { return }
+        isSaving = true
+        errorMessage = nil
+        defer { isSaving = false }
+        if let message = await onAdd(Array(selectedIDs)) {
+            errorMessage = message
+        } else {
+            dismiss()
+        }
+    }
+}
+
+@MainActor
+@Observable
+final class AlbumUserPickerViewModel {
+    private(set) var users: [UserResponseDTO] = []
+    private(set) var phase: LoadingPhase<Void> = .idle
+    private let repo: AlbumRepository
+    private let currentUserID: String?
+
+    init(repo: AlbumRepository, currentUserID: String?) {
+        self.repo = repo
+        self.currentUserID = currentUserID
+    }
+
+    func load() async {
+        switch phase {
+        case .loading, .loaded: return
+        case .idle, .failed: break
+        }
+        phase = .loading
+        do {
+            let fetched = try await repo.users()
+            try Task.checkCancellation()
+            users = fetched.filter { $0.id != currentUserID }
+            phase = .loaded(())
+        } catch {
+            if Task.isCancelled || error is CancellationError {
+                phase = .idle
+            } else {
+                phase = .failed((error as? APIError)?.errorDescription
+                    ?? String(localized: "Failed to load users"))
+            }
+        }
     }
 }

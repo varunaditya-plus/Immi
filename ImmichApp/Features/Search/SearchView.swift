@@ -15,6 +15,7 @@ struct SearchView: View {
     @State private var isSelecting = false
     @State private var selectedIDs: Set<String> = []
     @State private var isPreparingShare = false
+    @State private var isPerformingAction = false
     @State private var shareURLs: [URL] = []
     @State private var isSharePresented = false
     @State private var albumPicker: SelectedAssets?
@@ -338,15 +339,17 @@ struct SearchView: View {
     private var selectionActions: SelectionActions {
         let ids = Array(selectedIDs)
         var actions = SelectionActions()
-        actions.isBusy = isPreparingShare || selectedIDs.isEmpty
+        actions.isBusy = isPreparingShare || isPerformingAction || selectedIDs.isEmpty
         actions.share = { share(ids) }
         actions.favorite = {
             runSelection {
                 // Getarnya HANYA setelah server menerimanya.
-                if await vm?.setFavorite(ids, to: true) == true { favoriteFeedback += 1 }
+                let succeeded = await vm?.setFavorite(ids, to: true) ?? false
+                if succeeded { favoriteFeedback += 1 }
+                return succeeded
             }
         }
-        actions.archive = { runSelection { await vm?.archive(ids) } }
+        actions.archive = { runSelection { await vm?.archive(ids) ?? false } }
         actions.trash = { pendingDelete = SelectedAssets(ids: ids) }
         actions.menu = [
             SelectionMenuAction(title: "Share Link", systemImage: "link") {
@@ -378,10 +381,16 @@ struct SearchView: View {
             favoriteChanged: { vm?.patchFavorite($0, to: $1) })
     }
 
-    private func runSelection(_ work: @escaping () async -> Void) {
+    private func runSelection(_ work: @escaping () async -> Bool) {
+        guard !isPerformingAction else { return }
+        isPerformingAction = true
         Task {
-            await work()
-            exitSelection()
+            defer { isPerformingAction = false }
+            if await work() {
+                exitSelection()
+            } else {
+                selectedIDs.formIntersection(Set(vm?.results.map(\.id) ?? []))
+            }
         }
     }
 
@@ -422,9 +431,10 @@ struct SearchView: View {
 
     private func performDelete(_ ids: [String]) {
         pendingDelete = nil
-        Task {
-            if await vm?.delete(ids) == true { deleteFeedback += 1 }
-            if isSelecting { exitSelection() }
+        runSelection {
+            let succeeded = await vm?.delete(ids) ?? false
+            if succeeded { deleteFeedback += 1 }
+            return succeeded
         }
     }
 
@@ -449,9 +459,8 @@ struct SearchView: View {
             }
             .sheet(item: $albumPicker) { selection in
                 AlbumPickerLoader { album in
-                    Task {
-                        await vm?.addToAlbum(selection.ids, album: album)
-                        if isSelecting { exitSelection() }
+                    runSelection {
+                        await vm?.addToAlbum(selection.ids, album: album) ?? false
                     }
                 }
             }

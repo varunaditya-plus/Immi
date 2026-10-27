@@ -131,6 +131,7 @@ final class AlbumListViewModel {
 
     func addUsers(_ userIDs: [String], to albumId: String) async {
         guard !userIDs.isEmpty else { return }
+        actionError = nil
         do {
             try await repo.addUsers(userIDs, to: albumId)
             // Status `shared` ikut berubah di server, jadi daftarnya dimuat
@@ -143,6 +144,7 @@ final class AlbumListViewModel {
     }
 
     func deleteAlbum(_ id: String) async {
+        actionError = nil
         do {
             try await repo.delete(id)
             albums.removeAll { $0.id == id }
@@ -152,7 +154,8 @@ final class AlbumListViewModel {
             // dibaca, tidak pernah dibersihkan.
             LocalSnapshot.remove(LocalSnapshot.Key.album(id), expectedGeneration: snapshotGeneration)
         } catch {
-            // Handle error silently for now
+            actionError = (error as? APIError)?.errorDescription
+                ?? String(localized: "Failed to delete album")
         }
     }
 

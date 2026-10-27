@@ -42,6 +42,9 @@ struct TrashView: View {
             layout: .monthly,
             assets: vm?.assets ?? [],
             phase: vm?.phase ?? .loading,
+            actionError: Binding(
+                get: { vm?.actionError },
+                set: { vm?.actionError = $0 }),
             emptyState: PhotoCollectionEmptyState(
                 title: "Trash is Empty",
                 systemImage: "trash",

@@ -91,12 +91,21 @@ struct AlbumsListView: View {
                 }
             }
             .sheet(item: $addUserTarget) { album in
-                AlbumAddUserSheet(album: album) { userIDs in
-                    Task { await vm?.addUsers(userIDs, to: album.id) }
+                AlbumAddUserSheet { userIDs in
+                    await vm?.addUsers(userIDs, to: album.id)
+                    defer { vm?.actionError = nil }
+                    return vm?.actionError
                 }
             }
             .sheet(item: $sharedLink) { link in
                 ShareSheet(url: link.url)
+            }
+            .alert("Action Failed", isPresented: Binding(
+                get: { vm?.actionError != nil },
+                set: { if !$0 { vm?.actionError = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(vm?.actionError ?? "")
             }
             .task { await start() }
     }
@@ -391,8 +400,13 @@ struct AlbumsListView: View {
 
     private func createLink(for album: AlbumResponseDTO) {
         Task {
-            sharedLink = await SharedLinkPresentation.create(
-                albumId: album.id, session: session)
+            do {
+                sharedLink = try await SharedLinkPresentation.create(
+                    albumId: album.id, session: session)
+            } catch {
+                vm?.actionError = (error as? APIError)?.errorDescription
+                    ?? String(localized: "Failed to create shared link")
+            }
         }
     }
 

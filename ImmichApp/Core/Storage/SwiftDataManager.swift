@@ -467,6 +467,7 @@ final class SwiftDataManager {
 
     /// Track whether a server asset and its mapped device copy may appear in
     /// Photos, even when the server row is absent from the rebuildable cache.
+
     func setTimelineVisibility(_ ids: [String], inTimeline: Bool) throws {
         guard !ids.isEmpty else { return }
         visibilityMutationRevision = UUID()

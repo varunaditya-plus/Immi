@@ -187,6 +187,7 @@ final class LibraryViewModel {
 
     func addUsers(_ userIDs: [String], to albumId: String) async {
         guard !userIDs.isEmpty else { return }
+        actionError = nil
         do {
             try await albumRepo.addUsers(userIDs, to: albumId)
             apply(await fetchAlbums(), to: \.albums, key: LocalSnapshot.Key.libraryAlbums)
@@ -197,6 +198,7 @@ final class LibraryViewModel {
     }
 
     func deleteAlbum(_ id: String) async {
+        actionError = nil
         do {
             try await albumRepo.delete(id)
             albums.removeAll { $0.id == id }
@@ -273,6 +275,7 @@ final class LibraryViewModel {
     /// Baris Favorites berisi HANYA foto favorit, jadi mencabut favorit berarti
     /// foto itu keluar dari baris — bukan sekadar berganti ikon hati.
     func toggleFavorite(_ asset: AssetLite) async {
+        actionError = nil
         let newValue = !asset.isFavorite
         do {
             try await assetRepo.toggleFavorite(asset.id, to: newValue)
@@ -288,6 +291,7 @@ final class LibraryViewModel {
     }
 
     func archive(_ asset: AssetLite) async {
+        actionError = nil
         do {
             try await assetRepo.toggleArchive(asset.id, to: true)
             removeFavorite(asset.id)
@@ -298,6 +302,7 @@ final class LibraryViewModel {
     }
 
     func delete(_ asset: AssetLite) async -> Bool {
+        actionError = nil
         do {
             try await assetRepo.delete(asset.id)
             removeFavorite(asset.id)
@@ -310,6 +315,7 @@ final class LibraryViewModel {
     }
 
     func addToAlbum(_ asset: AssetLite, album: AlbumResponseDTO) async {
+        actionError = nil
         do {
             let duplicates = try await albumRepo.addAssets([asset.id], to: album.id)
             if !duplicates.isEmpty {

@@ -254,6 +254,9 @@ struct PersonDetailView: View {
             title: LocalizedStringKey(person.name),
             assets: vm?.assets ?? [],
             phase: vm?.phase ?? .loading,
+            actionError: Binding(
+                get: { vm?.actionError },
+                set: { vm?.actionError = $0 }),
             onRetry: { Task { await vm?.load() } },
             onToggleFavorite: { await vm?.toggleFavorite($0) },
             onDelete: { await vm?.delete($0) },
@@ -290,10 +293,18 @@ struct PersonDetailView: View {
         guard !ids.isEmpty else { return }
         let repo = SharedLinkRepository(api: APIClient(session: session))
         Task {
-            guard let link = try? await repo.create(assetIds: ids),
-                  let url = link.publicURL(base: session.baseURL)
-            else { return }
-            sharedLink = SharedLinkPresentation(url: url)
+            vm?.actionError = nil
+            do {
+                let link = try await repo.create(assetIds: ids)
+                guard let url = link.publicURL(base: session.baseURL) else {
+                    vm?.actionError = String(localized: "Failed to create shared link")
+                    return
+                }
+                sharedLink = SharedLinkPresentation(url: url)
+            } catch {
+                vm?.actionError = (error as? APIError)?.errorDescription
+                    ?? String(localized: "Failed to create shared link")
+            }
         }
     }
 

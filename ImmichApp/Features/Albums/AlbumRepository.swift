@@ -1,13 +1,13 @@
 import Foundation
 
-/// Hasil per-id untuk operasi massal Immich (`PUT /albums/{id}/assets`).
-///
-/// `error` berisi alasannya saat `success` false — yang paling sering
-/// "duplicate": asetnya memang sudah ada di album itu.
-struct BulkIdResponseDTO: Decodable {
-    let id: String
-    let success: Bool
-    let error: String?
+struct AlbumMutationError: LocalizedError {
+    let succeededIDs: Set<String>
+    let duplicateIDs: Set<String>
+    let failedIDs: Set<String>
+
+    var errorDescription: String? {
+        String(localized: "Some photos could not be updated in the album.")
+    }
 }
 
 class AlbumRepository {
@@ -163,24 +163,49 @@ class AlbumRepository {
         struct Body: Encodable {
             let ids: [String]
         }
-        let results: [BulkIdResponseDTO] = try await api.send(
+        guard !ids.isEmpty else { return [] }
+        let results: [BulkIDResponseDTO] = try await api.send(
             .json("/albums/\(albumId)/assets", method: .put, body: Body(ids: ids)))
-
-        let failed = results.filter { !$0.success }
-        // Yang gagal karena alasan LAIN — izin, aset tidak ada — dilempar,
-        // bukan diam-diam dihitung sebagai duplikat. Keduanya sama-sama "tidak
-        // masuk album", tapi hanya satu yang tidak perlu dikhawatirkan.
-        if failed.contains(where: { $0.error != "duplicate" }) {
-            throw APIError.server(status: 200, message: nil)
-        }
-        return failed.map(\.id)
+        let outcome = mutationResult(for: ids, results: results, allowDuplicates: true)
+        guard outcome.failedIDs.isEmpty else { throw outcome }
+        var seen = Set<String>()
+        return ids.filter { outcome.duplicateIDs.contains($0) && seen.insert($0).inserted }
     }
 
     func removeAssets(_ ids: [String], from albumId: String) async throws {
         struct Body: Encodable {
             let ids: [String]
         }
-        try await api.sendVoid(.json("/albums/\(albumId)/assets", method: .delete, body: Body(ids: ids)))
+        guard !ids.isEmpty else { return }
+        let results: [BulkIDResponseDTO] = try await api.send(
+            .json("/albums/\(albumId)/assets", method: .delete, body: Body(ids: ids)))
+        let outcome = mutationResult(for: ids, results: results, allowDuplicates: false)
+        guard outcome.failedIDs.isEmpty else { throw outcome }
+    }
+
+    private func mutationResult(
+        for ids: [String], results: [BulkIDResponseDTO], allowDuplicates: Bool
+    ) -> AlbumMutationError {
+        let responses = Dictionary(grouping: results, by: \.id)
+        var succeeded = Set<String>()
+        var duplicates = Set<String>()
+        var failed = Set<String>()
+        for id in Set(ids) {
+            guard let entries = responses[id], entries.count == 1,
+                  let entry = entries.first else {
+                failed.insert(id)
+                continue
+            }
+            if entry.success {
+                succeeded.insert(id)
+            } else if allowDuplicates && entry.error == "duplicate" {
+                duplicates.insert(id)
+            } else {
+                failed.insert(id)
+            }
+        }
+        return AlbumMutationError(
+            succeededIDs: succeeded, duplicateIDs: duplicates, failedIDs: failed)
     }
 
     func delete(_ id: String) async throws {

@@ -192,8 +192,10 @@ struct LibraryView: View {
                 }
             }
             .sheet(item: $addUserTarget) { album in
-                AlbumAddUserSheet(album: album) { userIDs in
-                    Task { await vm?.addUsers(userIDs, to: album.id) }
+                AlbumAddUserSheet { userIDs in
+                    await vm?.addUsers(userIDs, to: album.id)
+                    defer { vm?.actionError = nil }
+                    return vm?.actionError
                 }
             }
             .sheet(item: $sharedLink) { link in
@@ -321,8 +323,14 @@ struct LibraryView: View {
 
     private func createLink(for album: AlbumResponseDTO) {
         Task {
-            sharedLink = await SharedLinkPresentation.create(
-                albumId: album.id, session: session)
+            vm?.actionError = nil
+            do {
+                sharedLink = try await SharedLinkPresentation.create(
+                    albumId: album.id, session: session)
+            } catch {
+                vm?.actionError = (error as? APIError)?.errorDescription
+                    ?? String(localized: "Failed to create shared link")
+            }
         }
     }
 

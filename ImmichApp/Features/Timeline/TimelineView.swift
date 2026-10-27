@@ -33,6 +33,7 @@ struct TimelineView: View {
     @State private var albumPickerAsset: AssetLite?
     @State private var selectedIDs: Set<String> = []
     @State private var isPreparingSelectionShare = false
+    @State private var isPerformingSelectionAction = false
     @State private var deviceSelectionRemoval: Task<Void, Never>?
     private var isRemovingDeviceSelection: Bool { deviceSelectionRemoval != nil }
     @State private var selectionShareURLs: [URL] = []
@@ -190,7 +191,7 @@ struct TimelineView: View {
         }
         .sheet(item: $albumPickerSelection) { selection in
             AlbumPickerSheet(albums: vm?.albums ?? []) { album in
-                runSelection { await vm?.addToAlbum(selection.ids, album: album) }
+                runSelection { await vm?.addToAlbum(selection.ids, album: album) ?? false }
             }
         }
         .sheet(item: $selectionLink) { ShareSheet(url: $0.url) }
@@ -575,16 +576,19 @@ struct TimelineView: View {
         let localIDs = DeviceCopyDeletion.localIdentifiers(for: selectedAssets)
         var actions = SelectionActions()
         actions.isBusy = isPreparingSelectionShare
+            || isPerformingSelectionAction
             || isRemovingDeviceSelection
             || selectedIDs.isEmpty
 
         actions.share = { shareSelection() }
         actions.favorite = {
             runSelection {
-                if await vm?.favoriteSelected(ids) == true { favoriteFeedback += 1 }
+                let succeeded = await vm?.favoriteSelected(ids) ?? false
+                if succeeded { favoriteFeedback += 1 }
+                return succeeded
             }
         }
-        actions.archive = { runSelection { await vm?.archiveSelected(ids) } }
+        actions.archive = { runSelection { await vm?.archiveSelected(ids) ?? false } }
         // Konfirmasi dimiliki tombol Trash-nya sendiri. Ini menjaga anchor dan
         // animasi presentasi berasal dari posisi tombol di bottom toolbar,
         // bukan muncul sebagai dialog milik layar di tengah.
@@ -606,7 +610,7 @@ struct TimelineView: View {
                 albumPickerSelection = SelectedAssets(ids: ids)
             },
             SelectionMenuAction(title: "Move to Locked Folder", systemImage: "lock") {
-                runSelection { await vm?.lockSelected(ids) }
+                runSelection { await vm?.lockSelected(ids) ?? false }
             },
         ]
         if !localIDs.isEmpty {
@@ -626,20 +630,36 @@ struct TimelineView: View {
     }
 
     private func createSharedLink(for ids: [String]) {
-        guard !ids.isEmpty else { return }
+        guard !ids.isEmpty, !isPerformingSelectionAction else { return }
+        isPerformingSelectionAction = true
         let repo = SharedLinkRepository(api: APIClient(session: session))
         Task {
-            guard let link = try? await repo.create(assetIds: ids),
-                  let url = link.publicURL(base: session.baseURL)
-            else { return }
-            selectionLink = SharedLinkPresentation(url: url)
+            defer { isPerformingSelectionAction = false }
+            vm?.actionError = nil
+            do {
+                let link = try await repo.create(assetIds: ids)
+                guard let url = link.publicURL(base: session.baseURL) else {
+                    vm?.actionError = String(localized: "Failed to create shared link")
+                    return
+                }
+                selectionLink = SharedLinkPresentation(url: url)
+            } catch {
+                vm?.actionError = (error as? APIError)?.errorDescription
+                    ?? String(localized: "Failed to create shared link")
+            }
         }
     }
 
-    private func runSelection(_ work: @escaping () async -> Void) {
+    private func runSelection(_ work: @escaping () async -> Bool) {
+        guard !isPerformingSelectionAction else { return }
+        isPerformingSelectionAction = true
         Task {
-            await work()
-            exitSelection()
+            defer { isPerformingSelectionAction = false }
+            if await work() {
+                exitSelection()
+            } else {
+                selectedIDs.formIntersection(Set(vm?.allAssets.map(\.id) ?? []))
+            }
         }
     }
 
@@ -716,11 +736,10 @@ struct TimelineView: View {
 
     private func deleteSelection() {
         let ids = Array(selectedIDs)
-        Task {
-            if await vm?.deleteSelected(ids) == true {
-                deleteFeedback += 1
-            }
-            exitSelection()
+        runSelection {
+            let succeeded = await vm?.deleteSelected(ids) ?? false
+            if succeeded { deleteFeedback += 1 }
+            return succeeded
         }
     }
 

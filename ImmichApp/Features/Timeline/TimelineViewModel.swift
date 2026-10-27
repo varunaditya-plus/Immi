@@ -524,6 +524,7 @@ final class TimelineViewModel {
     ///   umpan balik getar hanya saat perubahannya benar-benar terjadi.
     @discardableResult
     func toggleFavorite(_ asset: AssetLite) async -> Bool {
+        actionError = nil
         guard let assetRepo else { return false }
         let newValue = !asset.isFavorite
         do {
@@ -548,6 +549,7 @@ final class TimelineViewModel {
     /// tulisannya. Hasilnya: foto yang baru saja difavoritkan tetap menawarkan
     /// "Favorite", tidak pernah "Unfavorite".
     func setFavorite(_ id: String, to value: Bool) {
+        guard accountGeneration == LocalSnapshot.generation else { return }
         rebuildRevision &+= 1
         signature = nil
         var updated = content
@@ -576,9 +578,21 @@ final class TimelineViewModel {
         if let index = allAssets.firstIndex(where: { $0.id == id }) {
             allAssets[index].isFavorite = value
         }
+        if let cached = dataManager?.getCachedAsset(id: id), cached.isFavorite != value {
+            try? dataManager?.patchCachedAsset(id, isFavorite: value)
+        }
+    }
+
+    private func cacheVisibilityIfNeeded(_ id: String, inTimeline: Bool) {
+        guard let dataManager else { return }
+        if dataManager.nonTimelineAssetIDs.contains(id) != !inTimeline
+            || dataManager.getCachedAsset(id: id).map({ $0.isArchived != !inTimeline }) == true {
+            try? dataManager.setTimelineVisibility([id], inTimeline: inTimeline)
+        }
     }
 
     func archive(_ asset: AssetLite) async {
+        actionError = nil
         guard let assetRepo else { return }
         do {
             try await assetRepo.toggleArchive(asset.id, to: true)
@@ -591,6 +605,7 @@ final class TimelineViewModel {
 
     @discardableResult
     func delete(_ asset: AssetLite) async -> Bool {
+        actionError = nil
         // Foto yang belum ada di server bukan kegagalan API: tempatnya memang
         // hanya di PhotoKit, jadi penghapusannya harus lewat Photos.
         if asset.origin == .device {
@@ -626,6 +641,7 @@ final class TimelineViewModel {
     /// separuh menyala separuh padam — hasil yang tidak diminta siapa pun.
     @discardableResult
     func favoriteSelected(_ ids: [String]) async -> Bool {
+        actionError = nil
         guard let assetRepo, !ids.isEmpty else { return false }
         do {
             for id in ids {
@@ -643,13 +659,15 @@ final class TimelineViewModel {
     /// Memindahkan seleksi ke arsip; fotonya keluar dari linimasa.
     @discardableResult
     func archiveSelected(_ ids: [String]) async -> Bool {
+        actionError = nil
         guard let assetRepo, !ids.isEmpty else { return false }
         do {
             for id in ids {
                 try await assetRepo.toggleArchive(id, to: true)
                 guard accountGeneration == LocalSnapshot.generation else { return false }
+                removeAsset(id)
+                cacheVisibilityIfNeeded(id, inTimeline: false)
             }
-            removeAssets(Set(ids))
             return true
         } catch {
             actionError = Self.describe(error)
@@ -660,13 +678,15 @@ final class TimelineViewModel {
     /// Memindahkan ke folder terkunci; fotonya keluar dari linimasa.
     @discardableResult
     func lockSelected(_ ids: [String]) async -> Bool {
+        actionError = nil
         guard let assetRepo, !ids.isEmpty else { return false }
         do {
             for id in ids {
                 try await assetRepo.setVisibility(id, to: .locked)
                 guard accountGeneration == LocalSnapshot.generation else { return false }
+                removeAsset(id)
+                cacheVisibilityIfNeeded(id, inTimeline: false)
             }
-            removeAssets(Set(ids))
             return true
         } catch {
             actionError = Self.describe(error)
@@ -676,6 +696,7 @@ final class TimelineViewModel {
 
     @discardableResult
     func deleteSelected(_ ids: [String]) async -> Bool {
+        actionError = nil
         guard let assetRepo, !ids.isEmpty else { return false }
 
         let selected = ids.compactMap(asset(for:))
@@ -812,8 +833,10 @@ final class TimelineViewModel {
         await addToAlbum([asset.id], album: album)
     }
 
-    func addToAlbum(_ ids: [String], album: AlbumResponseDTO) async {
-        guard let albumRepo, !ids.isEmpty else { return }
+    @discardableResult
+    func addToAlbum(_ ids: [String], album: AlbumResponseDTO) async -> Bool {
+        actionError = nil
+        guard let albumRepo, !ids.isEmpty else { return false }
         do {
             let duplicates = try await albumRepo.addAssets(ids, to: album.id)
             if !duplicates.isEmpty {
@@ -822,8 +845,10 @@ final class TimelineViewModel {
                 // yang terlihat.
                 actionError = String(localized: "Already in this album")
             }
+            return true
         } catch {
             actionError = Self.describe(error)
+            return false
         }
     }
 

@@ -59,6 +59,9 @@ struct AlbumDetailView: View {
             subtitle: currentAlbum.description,
             assets: assets,
             phase: vm?.phase ?? .loading,
+            actionError: Binding(
+                get: { vm?.actionError },
+                set: { vm?.actionError = $0 }),
             onRetry: { Task { await vm?.retry(album.id) } },
             onToggleFavorite: { await vm?.toggleFavorite($0) },
             onDelete: { await vm?.deleteAssets($0) },
@@ -129,8 +132,10 @@ struct AlbumDetailView: View {
     }
 
     private var addUserSheet: some View {
-        AlbumAddUserSheet(album: currentAlbum) { userIDs in
-            Task { await vm?.addUsers(userIDs, to: album.id) }
+        AlbumAddUserSheet { userIDs in
+            await vm?.addUsers(userIDs, to: album.id)
+            defer { vm?.actionError = nil }
+            return vm?.actionError
         }
     }
 
@@ -174,18 +179,26 @@ struct AlbumDetailView: View {
         guard !ids.isEmpty else { return }
         let repo = SharedLinkRepository(api: APIClient(session: session))
         Task {
-            guard let link = try? await repo.create(assetIds: ids),
-                  let url = link.publicURL(base: session.baseURL)
-            else { return }
-            sharedLink = SharedLinkPresentation(url: url)
+            do {
+                let link = try await repo.create(assetIds: ids)
+                guard let url = link.publicURL(base: session.baseURL) else {
+                    throw APIError.invalidURL
+                }
+                sharedLink = SharedLinkPresentation(url: url)
+            } catch {
+                actionMessage = ErrorEvent((error as? APIError)?.errorDescription
+                    ?? String(localized: "Failed to create shared link"))
+            }
         }
     }
 
     private func createSharedLink() {
         Task {
-            guard let link = await vm?.createSharedLink(albumId: album.id),
-                  let url = link.publicURL(base: session.baseURL)
-            else { return }
+            guard let link = await vm?.createSharedLink(albumId: album.id) else { return }
+            guard let url = link.publicURL(base: session.baseURL) else {
+                vm?.actionError = String(localized: "Failed to create shared link")
+                return
+            }
             sharedLink = SharedLinkPresentation(url: url)
         }
     }
@@ -213,10 +226,12 @@ final class AlbumDetailViewModel {
         set { assetStorage = AssetStorage(assets: newValue) }
     }
     var phase: LoadingPhase<Void> = .idle
+    var actionError: String?
 
     private let timelineRepo: TimelineRepository
     private let albumRepo: AlbumRepository
     private let assetRepo: AssetDetailRepository
+    private let dataManager: SwiftDataManager
     /// Album yang sedang dibuka; dipakai untuk menamai potret lokalnya.
     private var albumId: String?
     /// Count dari daftar album adalah fallback pagination saat server tidak
@@ -226,11 +241,13 @@ final class AlbumDetailViewModel {
     init(
         timelineRepo: TimelineRepository,
         albumRepo: AlbumRepository,
-        assetRepo: AssetDetailRepository
+        assetRepo: AssetDetailRepository,
+        dataManager: SwiftDataManager? = nil
     ) {
         self.timelineRepo = timelineRepo
         self.albumRepo = albumRepo
         self.assetRepo = assetRepo
+        self.dataManager = dataManager ?? .shared
     }
 
     func updateAlbum(_ id: String, name: String, description: String) async -> String? {
@@ -248,16 +265,31 @@ final class AlbumDetailViewModel {
 
     func addUsers(_ userIDs: [String], to albumId: String) async {
         guard !userIDs.isEmpty else { return }
-        try? await albumRepo.addUsers(userIDs, to: albumId)
+        actionError = nil
+        do {
+            try await albumRepo.addUsers(userIDs, to: albumId)
+        } catch {
+            actionError = (error as? APIError)?.errorDescription
+                ?? String(localized: "Failed to add user")
+        }
     }
 
     func createSharedLink(albumId: String) async -> SharedLinkDTO? {
-        try? await albumRepo.createSharedLink(albumId: albumId)
+        actionError = nil
+        do {
+            return try await albumRepo.createSharedLink(albumId: albumId)
+        } catch {
+            actionError = (error as? APIError)?.errorDescription
+                ?? String(localized: "Failed to create shared link")
+            return nil
+        }
     }
 
     /// Status favorit ditambal di tempat, bukan lewat muat ulang — hanya satu
     /// nilai boolean yang berubah.
     func toggleFavorite(_ asset: AssetLite) async {
+        guard snapshotGeneration == LocalSnapshot.generation else { return }
+        actionError = nil
         let newValue = !asset.isFavorite
         do {
             try await assetRepo.toggleFavorite(asset.id, to: newValue)
@@ -266,9 +298,11 @@ final class AlbumDetailViewModel {
                 assets[index].isFavorite = newValue
                 persist()
             }
+            cacheFavoriteIfNeeded(asset.id, value: newValue)
         } catch {
-            phase = .failed((error as? APIError)?.errorDescription
-                ?? String(localized: "Failed to update favorite"))
+            guard snapshotGeneration == LocalSnapshot.generation else { return }
+            actionError = (error as? APIError)?.errorDescription
+                ?? String(localized: "Failed to update favorite")
         }
     }
 
@@ -276,20 +310,24 @@ final class AlbumDetailViewModel {
     /// bisa berisi campuran, dan membalik masing-masing menghasilkan separuh
     /// menyala separuh padam.
     func setFavorite(_ ids: [String], to value: Bool) async {
-        guard !ids.isEmpty else { return }
+        guard !ids.isEmpty, snapshotGeneration == LocalSnapshot.generation else { return }
+        actionError = nil
         // Lihat alasan `defer` di AssetGridViewModel.setFavorite.
         defer { persist() }
         do {
             for id in ids {
+                try Task.checkCancellation()
                 try await assetRepo.toggleFavorite(id, to: value)
                 guard snapshotGeneration == LocalSnapshot.generation else { return }
                 if let index = assets.firstIndex(where: { $0.id == id }) {
                     assets[index].isFavorite = value
                 }
+                cacheFavoriteIfNeeded(id, value: value)
             }
         } catch {
-            phase = .failed((error as? APIError)?.errorDescription
-                ?? String(localized: "Failed to update favorite"))
+            guard snapshotGeneration == LocalSnapshot.generation else { return }
+            actionError = (error as? APIError)?.errorDescription
+                ?? String(localized: "Failed to update favorite")
         }
     }
 
@@ -298,21 +336,26 @@ final class AlbumDetailViewModel {
     /// Album adalah kumpulan pilihan pengguna; arsip adalah status foto itu di
     /// perpustakaan. Keduanya berdiri sendiri, jadi daftarnya dibiarkan utuh.
     func setArchived(_ ids: [String], to archived: Bool) async {
-        guard !ids.isEmpty else { return }
+        guard !ids.isEmpty, snapshotGeneration == LocalSnapshot.generation else { return }
+        actionError = nil
         do {
             for id in ids {
+                try Task.checkCancellation()
                 try await assetRepo.setVisibility(id, to: archived ? .archive : .timeline)
                 guard snapshotGeneration == LocalSnapshot.generation else { return }
+                cacheVisibilityIfNeeded(id, inTimeline: !archived)
             }
         } catch {
-            phase = .failed((error as? APIError)?.errorDescription
-                ?? String(localized: "Failed to archive photos"))
+            guard snapshotGeneration == LocalSnapshot.generation else { return }
+            actionError = (error as? APIError)?.errorDescription
+                ?? String(localized: "Failed to archive photos")
         }
     }
 
     /// Menghapus dari PERPUSTAKAAN, bukan sekadar mengeluarkan dari album.
     func deleteAssets(_ ids: [String]) async {
-        guard !ids.isEmpty else { return }
+        guard !ids.isEmpty, snapshotGeneration == LocalSnapshot.generation else { return }
+        actionError = nil
         do {
             try await assetRepo.delete(ids)
             guard snapshotGeneration == LocalSnapshot.generation else { return }
@@ -320,25 +363,29 @@ final class AlbumDetailViewModel {
             assets.removeAll { removed.contains($0.id) }
             persist()
         } catch {
-            phase = .failed((error as? APIError)?.errorDescription
-                ?? String(localized: "Failed to delete photos"))
+            guard snapshotGeneration == LocalSnapshot.generation else { return }
+            actionError = (error as? APIError)?.errorDescription
+                ?? String(localized: "Failed to delete photos")
         }
     }
 
     /// Memindahkan ke folder terkunci; fotonya keluar dari album di layar ini.
     func setLocked(_ ids: [String]) async {
-        guard !ids.isEmpty else { return }
+        guard !ids.isEmpty, snapshotGeneration == LocalSnapshot.generation else { return }
+        actionError = nil
+        defer { persist() }
         do {
             for id in ids {
+                try Task.checkCancellation()
                 try await assetRepo.setVisibility(id, to: .locked)
                 guard snapshotGeneration == LocalSnapshot.generation else { return }
+                assets.removeAll { $0.id == id }
+                cacheVisibilityIfNeeded(id, inTimeline: false)
             }
-            let moved = Set(ids)
-            assets.removeAll { moved.contains($0.id) }
-            persist()
         } catch {
-            phase = .failed((error as? APIError)?.errorDescription
-                ?? String(localized: "Failed to move photos"))
+            guard snapshotGeneration == LocalSnapshot.generation else { return }
+            actionError = (error as? APIError)?.errorDescription
+                ?? String(localized: "Failed to move photos")
         }
     }
 
@@ -363,6 +410,19 @@ final class AlbumDetailViewModel {
         LocalSnapshot.save(assets, for: LocalSnapshot.Key.album(albumId), expectedGeneration: snapshotGeneration)
     }
 
+    private func cacheFavoriteIfNeeded(_ id: String, value: Bool) {
+        if let cached = dataManager.getCachedAsset(id: id), cached.isFavorite != value {
+            try? dataManager.patchCachedAsset(id, isFavorite: value)
+        }
+    }
+
+    private func cacheVisibilityIfNeeded(_ id: String, inTimeline: Bool) {
+        if dataManager.nonTimelineAssetIDs.contains(id) != !inTimeline
+            || dataManager.getCachedAsset(id: id).map({ $0.isArchived != !inTimeline }) == true {
+            try? dataManager.setTimelineVisibility([id], inTimeline: inTimeline)
+        }
+    }
+
     /// Yang gagal diunduh dilewati, bukan membatalkan seluruh operasi.
     func shareURLs(for ids: [String]) async -> [URL] {
         var urls: [URL] = []
@@ -377,12 +437,13 @@ final class AlbumDetailViewModel {
         return urls
     }
 
-    /// Aset dibuang dari daftar lokal lebih dulu, tanpa memuat ulang album.
+    /// Hanya id yang dikonfirmasi server dikeluarkan dari daftar lokal.
     ///
     /// Memuat ulang berarti menarik seluruh bucket lagi hanya untuk kehilangan
     /// beberapa baris — dan grid akan berkedip kosong sesaat.
     func removeAssets(_ ids: [String], from albumId: String) async {
         guard !ids.isEmpty else { return }
+        actionError = nil
         do {
             try await albumRepo.removeAssets(ids, from: albumId)
             guard snapshotGeneration == LocalSnapshot.generation else { return }
@@ -390,8 +451,14 @@ final class AlbumDetailViewModel {
             assets.removeAll { removed.contains($0.id) }
             persist()
         } catch {
-            phase = .failed((error as? APIError)?.errorDescription
-                ?? String(localized: "Failed to remove photos"))
+            guard snapshotGeneration == LocalSnapshot.generation else { return }
+            if let mutation = error as? AlbumMutationError {
+                let confirmed = mutation.succeededIDs.intersection(ids)
+                assets.removeAll { confirmed.contains($0.id) }
+                persist()
+            }
+            actionError = (error as? APIError)?.errorDescription
+                ?? String(localized: "Failed to remove photos")
         }
     }
 
@@ -399,16 +466,33 @@ final class AlbumDetailViewModel {
     /// server, jadi menyisipkannya sendiri berisiko meleset dari urutan asli.
     func addAssets(_ ids: [String], to albumId: String) async {
         guard !ids.isEmpty else { return }
+        actionError = nil
         // Duplikat di layar album itu sendiri sengaja DIABAIKAN: sheet
         // penambah foto sudah menyaring yang sudah ada (`existingIDs`), jadi
         // kalau sampai muncul, itu balapan dengan perubahan dari perangkat lain
         // — dan hasilnya tetap benar setelah dimuat ulang di bawah.
-        _ = try? await albumRepo.addAssets(ids, to: albumId)
-        await loadAlbumDetail(albumId)
+        do {
+            _ = try await albumRepo.addAssets(ids, to: albumId)
+            guard snapshotGeneration == LocalSnapshot.generation else { return }
+            if !(await loadAlbumDetail(albumId)) {
+                guard snapshotGeneration == LocalSnapshot.generation else { return }
+                actionError = String(localized: "Failed to load album")
+            }
+        } catch {
+            guard snapshotGeneration == LocalSnapshot.generation else { return }
+            if let mutation = error as? AlbumMutationError,
+               !mutation.succeededIDs.isEmpty || !mutation.duplicateIDs.isEmpty {
+                await loadAlbumDetail(albumId)
+            }
+            guard snapshotGeneration == LocalSnapshot.generation else { return }
+            actionError = (error as? APIError)?.errorDescription
+                ?? String(localized: "Failed to add to album")
+        }
     }
 
     @discardableResult
     func deleteAlbum(_ id: String) async -> Bool {
+        actionError = nil
         do {
             try await albumRepo.delete(id)
             guard snapshotGeneration == LocalSnapshot.generation else { return false }
@@ -418,8 +502,8 @@ final class AlbumDetailViewModel {
             LocalSnapshot.remove(LocalSnapshot.Key.album(id), expectedGeneration: snapshotGeneration)
             return true
         } catch {
-            phase = .failed((error as? APIError)?.errorDescription
-                ?? String(localized: "Failed to delete album"))
+            actionError = (error as? APIError)?.errorDescription
+                ?? String(localized: "Failed to delete album")
             return false
         }
     }
@@ -428,11 +512,12 @@ final class AlbumDetailViewModel {
     ///
     /// Album disegarkan lewat pencarian metadata publik dengan pagination.
     /// Potret lokal tetap dipasang lebih dulu agar offline tidak berarti kosong.
+    @discardableResult
     func loadAlbumDetail(
         _ albumId: String,
         expectedAssetCount: Int? = nil
-    ) async {
-        guard snapshotGeneration == LocalSnapshot.generation else { return }
+    ) async -> Bool {
+        guard snapshotGeneration == LocalSnapshot.generation else { return false }
         self.albumId = albumId
         if let expectedAssetCount {
             self.expectedAssetCount = expectedAssetCount
@@ -453,19 +538,22 @@ final class AlbumDetailViewModel {
             let fetched = try await timelineRepo.albumAssets(
                 albumId,
                 expectedCount: self.expectedAssetCount)
-            guard snapshotGeneration == LocalSnapshot.generation else { return }
+            guard snapshotGeneration == LocalSnapshot.generation else { return false }
             LocalSnapshot.save(fetched, for: key, expectedGeneration: snapshotGeneration)
             if !assets.elementsEqual(fetched, by: { $0.hasSameContent(as: $1) }) {
                 assets = fetched
             }
             phase = .loaded(())
+            return true
         } catch {
+            guard snapshotGeneration == LocalSnapshot.generation else { return false }
             // Sudah ada jawaban yang sah di layar — potret maupun muatan
             // sebelumnya — jadi kegagalannya diam. Album yang memang kosong pun
             // punya potret `[]` yang sah, jadi yang diperiksa `phase`, bukan
             // "isinya kosong".
-            if case .loaded = phase { return }
+            if case .loaded = phase { return false }
             phase = .failed((error as? APIError)?.errorDescription ?? String(localized: "Failed to load album"))
+            return false
         }
     }
 
