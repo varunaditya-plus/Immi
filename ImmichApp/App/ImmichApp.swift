@@ -123,6 +123,7 @@ struct ImmichApp: App {
                 .onChange(of: scenePhase) { _, phase in
                     switch phase {
                     case .active:
+                        LocalPhotoLibrary.shared.refreshAuthorizationStatus()
                         // INILAH tulang punggung pencadangan di iOS, bukan tugas
                         // latarnya. Yang benar-benar bisa diandalkan adalah saat
                         // pengguna membuka aplikasinya sendiri; sisanya bonus.

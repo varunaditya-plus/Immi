@@ -102,7 +102,7 @@ private final class SyncStatusViewModel {
         // Local storage remains available even if server requests are slow.
         await refreshStorageUsage()
 
-        async let localTask = library.statusCounts()
+        async let localTask = try? library.statusCounts()
         async let statsTask: AssetStatsDTO? = try? settingsRepo.getAssetStats()
         async let remoteAlbumsTask: [AlbumResponseDTO]? = try? albumRepo.all()
         async let memoriesTask: [MemoryDTO]? = try? memoriesRepo.getMemories()
@@ -112,8 +112,8 @@ private final class SyncStatusViewModel {
             remoteAlbumsTask,
             memoriesTask)
 
-        localAssets = local.assets
-        localAlbums = local.albums
+        localAssets = local?.assets
+        localAlbums = local?.albums
         remoteAssets = stats?.total
         remoteAlbums = albums?.count
         memories = memoryItems?.count
@@ -129,7 +129,7 @@ private final class SyncStatusViewModel {
             let result: String
             switch job {
             case .syncLocal:
-                let counts = await library.statusCounts()
+                let counts = try await library.statusCounts()
                 await BackupService.shared.prepare()
                 result = counts.assets == 1
                     ? "Scanned 1 local asset"

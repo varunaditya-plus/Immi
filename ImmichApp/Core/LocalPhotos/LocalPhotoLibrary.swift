@@ -64,6 +64,23 @@ struct LocalLibraryStatusCounts: Sendable {
     let albums: Int
 }
 
+struct LocalPhotoScan: Sendable {
+    let photos: [LocalPhoto]
+    let albumTitles: [String: String]
+}
+
+enum LocalPhotoLibraryError: LocalizedError {
+    case accessRequired
+    case libraryChanged
+
+    var errorDescription: String? {
+        switch self {
+        case .accessRequired: "Allow Photos access to read the library on this device."
+        case .libraryChanged: "Your photo library changed. Try again."
+        }
+    }
+}
+
 /// Metadata minimum untuk menemukan kembali pasangan PhotoKit milik aset
 /// server lama yang belum mempunyai `BackupRecord`.
 struct LocalLivePhotoMatchHint: Equatable, Sendable {
@@ -98,13 +115,21 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
     nonisolated static let idPrefix = "device:"
 
     private(set) var photos: [LocalPhoto] = []
-    private(set) var isAuthorized = false
+    private(set) var authorizationStatus: PHAuthorizationStatus = .notDetermined
+    var isAuthorized: Bool {
+        authorizationStatus == .authorized || authorizationStatus == .limited
+    }
 
     /// Status langsung dari PhotoKit, termasuk saat singleton baru dibuat dan
     /// `requestAccess()` belum sempat memperbarui state observasinya.
     nonisolated static var hasReadAccess: Bool {
         let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         return status == .authorized || status == .limited
+    }
+
+    /// Limited access cannot establish that an inaccessible asset was deleted.
+    nonisolated static var hasFullReadAccess: Bool {
+        PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized
     }
 
     /// Bertambah setiap kali PhotoKit memberi tahu bahwa pustaka berubah.
@@ -114,6 +139,7 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
     /// untuk menyegarkan asal aset dan menu yang bergantung padanya.
     private(set) var revision = 0
     private var accountGeneration = UUID()
+    private var scanID = UUID()
 
     /// `localIdentifier` foto → nama album perangkat asalnya.
     ///
@@ -138,11 +164,16 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
     var selectedAlbumIDs: Set<String> {
         didSet {
             guard selectedAlbumIDs != oldValue else { return }
-            UserDefaults.standard.set(Array(selectedAlbumIDs), forKey: Self.selectionKey)
+            defaults.set(Array(selectedAlbumIDs), forKey: Self.selectionKey)
+            invalidateScan()
+            photos = []
+            albumTitles = [:]
         }
     }
 
     private static let selectionKey = "localPhotos.selectedAlbums"
+    private let defaults: UserDefaults
+    private let reader: Reader
 
     private let imageManager = PHCachingImageManager()
 
@@ -164,11 +195,47 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
         return options
     }()
 
-    private override init() {
-        let stored = UserDefaults.standard.stringArray(forKey: Self.selectionKey) ?? []
+    private override convenience init() {
+        self.init(defaults: .standard, reader: Reader())
+        PHPhotoLibrary.shared().register(self)
+    }
+
+    init(defaults: UserDefaults, reader: Reader) {
+        self.defaults = defaults
+        self.reader = reader
+        let stored = defaults.stringArray(forKey: Self.selectionKey) ?? []
         selectedAlbumIDs = Set(stored)
         super.init()
-        PHPhotoLibrary.shared().register(self)
+        refreshAuthorizationStatus()
+    }
+
+    struct Reader {
+        var authorizationStatus: () -> PHAuthorizationStatus = {
+            PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        }
+        var requestAuthorization: () async -> PHAuthorizationStatus = {
+            await PHPhotoLibrary.requestAuthorization(for: .readWrite)
+        }
+        var photosInAlbums: (Set<String>) async -> LocalPhotoScan = { ids in
+            await Task.detached(priority: .userInitiated) { LocalPhotoLibrary.fetchPhotos(inAlbums: ids) }.value
+        }
+        var albums: () async -> [LocalAlbum] = {
+            await Task.detached(priority: .userInitiated) { LocalPhotoLibrary.fetchAlbums() }.value
+        }
+        var statusCounts: () async -> LocalLibraryStatusCounts = {
+            await Task.detached(priority: .userInitiated) {
+                let options = PHFetchOptions()
+                options.predicate = NSPredicate(
+                    format: "mediaType == %d OR mediaType == %d",
+                    PHAssetMediaType.image.rawValue, PHAssetMediaType.video.rawValue)
+                return LocalLibraryStatusCounts(
+                    assets: PHAsset.fetchAssets(with: options).count,
+                    albums: LocalPhotoLibrary.fetchAlbums().count)
+            }.value
+        }
+        var allPhotos: () async -> [LocalPhoto] = {
+            await Task.detached(priority: .userInitiated) { LocalPhotoLibrary.fetchAllPhotosForSync() }.value
+        }
     }
 
     // MARK: - Album
@@ -179,12 +246,10 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
     /// Yang kosong dibuang — memilihnya tidak menghasilkan apa pun, dan
     /// daftarnya jadi panjang tanpa isi.
     func albums() async -> [LocalAlbum] {
-        // Dipecah, dengan alasan yang sama seperti di `load()`: sisi kanan `||`
-        // adalah autoclosure, dan autoclosure tidak mendukung `await`.
-        if !isAuthorized {
-            guard await requestAccess() else { return [] }
-        }
-        return await Task.detached(priority: .userInitiated) { Self.fetchAlbums() }.value
+        guard let context = try? await readContext() else { return [] }
+        let result = await reader.albums()
+        guard (try? validateRead(context)) != nil else { return [] }
+        return result
     }
 
     /// Jumlah seluruh foto/video dan album yang dapat diakses aplikasi.
@@ -192,35 +257,21 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
     /// Berbeda dari `photos`, yang memang hanya berisi album pilihan backup.
     /// Layar status perlu menjelaskan keadaan pustaka perangkat, bukan subset
     /// yang kebetulan dipilih untuk tampil di linimasa.
-    func statusCounts() async -> LocalLibraryStatusCounts {
-        if !isAuthorized {
-            guard await requestAccess() else {
-                return LocalLibraryStatusCounts(assets: 0, albums: 0)
-            }
-        }
-
-        return await Task.detached(priority: .userInitiated) {
-            let options = PHFetchOptions()
-            options.predicate = NSPredicate(
-                format: "mediaType == %d OR mediaType == %d",
-                PHAssetMediaType.image.rawValue,
-                PHAssetMediaType.video.rawValue)
-            return LocalLibraryStatusCounts(
-                assets: PHAsset.fetchAssets(with: options).count,
-                albums: Self.fetchAlbums().count)
-        }.value
+    func statusCounts() async throws -> LocalLibraryStatusCounts {
+        let context = try await readContext()
+        let result = await reader.statusCounts()
+        try validateRead(context)
+        return result
     }
 
     /// Metadata seluruh foto/video yang dapat diakses, untuk job manual
     /// pencocokan cloud id dan hash. Tidak mengubah pilihan album backup dan
     /// tidak menimpa `photos` yang sedang dipakai linimasa.
     func allPhotosForSync() async -> [LocalPhoto] {
-        if !isAuthorized {
-            guard await requestAccess() else { return [] }
-        }
-        return await Task.detached(priority: .userInitiated) {
-            Self.fetchAllPhotosForSync()
-        }.value
+        guard let context = try? await readContext() else { return [] }
+        let result = await reader.allPhotos()
+        guard (try? validateRead(context)) != nil else { return [] }
+        return result
     }
 
     private nonisolated static func fetchAllPhotosForSync() -> [LocalPhoto] {
@@ -415,12 +466,10 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
     /// album TERPILIH dan dipakai linimasa. Detail album butuh isi satu album
     /// saja — termasuk yang sudah terunggah, yang justru dibuang dari linimasa.
     func photos(inAlbum id: String) async -> [LocalPhoto] {
-        if !isAuthorized {
-            guard await requestAccess() else { return [] }
-        }
-        return await Task.detached(priority: .userInitiated) {
-            Self.fetchPhotos(inAlbums: [id]).photos
-        }.value
+        guard let context = try? await readContext() else { return [] }
+        let result = await reader.photosInAlbums([id])
+        guard (try? validateRead(context)) != nil else { return [] }
+        return result.photos
     }
 
     // MARK: - Id
@@ -451,44 +500,97 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
     /// membuat permintaan kedua terasa mencurigakan.
     @discardableResult
     func requestAccess() async -> Bool {
-        let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
-        isAuthorized = status == .authorized || status == .limited
+        let generation = accountGeneration
+        let status = refreshAuthorizationStatus()
+        guard !Task.isCancelled else { return false }
+        if status == .notDetermined {
+            _ = await reader.requestAuthorization()
+        }
+        guard !Task.isCancelled, generation == accountGeneration else { return false }
+        // A permission callback can arrive after another Settings change.
+        refreshAuthorizationStatus()
         return isAuthorized
     }
 
     func load() async {
-        let generation = accountGeneration
-        // DIPECAH, bukan `isAuthorized || await requestAccess()`.
-        //
-        // Sisi kanan `||` adalah autoclosure, dan autoclosure itu tidak
-        // mendukung `await` — bentuk ringkasnya tidak sekadar kurang rapi, ia
-        // tidak kompilasi.
-        if !isAuthorized {
-            guard await requestAccess() else {
-                photos = []
-                albumTitles = [:]
-                return
-            }
-        }
-        // Enumerasi DI LUAR main actor.
-        //
-        // Pustaka puluhan ribu foto berarti puluhan ribu iterasi, dan tidak satu
-        // pun bagiannya butuh main thread — sama seperti pengelompokan linimasa
-        // yang sudah lebih dulu dipindahkan keluar.
-        guard generation == accountGeneration else { return }
+        invalidateScan()
+        let requestID = scanID
         let albumIDs = selectedAlbumIDs
-        // Tidak ada yang dipilih berarti tidak ada yang perlu dibaca.
+        guard let context = try? await readContext(), requestID == scanID else { return }
         guard !albumIDs.isEmpty else {
             photos = []
             albumTitles = [:]
             return
         }
-        let result = await Task.detached(priority: .userInitiated) {
-            Self.fetchPhotos(inAlbums: albumIDs)
-        }.value
-        guard generation == accountGeneration else { return }
+        let result = await reader.photosInAlbums(albumIDs)
+        guard (try? validateRead(context)) != nil,
+              requestID == scanID, albumIDs == selectedAlbumIDs else { return }
         photos = result.photos
         albumTitles = result.albumTitles
+    }
+
+    @discardableResult
+    func refreshAuthorizationStatus() -> PHAuthorizationStatus {
+        let previous = authorizationStatus
+        let status = updateAuthorizationStatus()
+        if status != previous { onLibraryChange?() }
+        return status
+    }
+
+    private func updateAuthorizationStatus() -> PHAuthorizationStatus {
+        let status = reader.authorizationStatus()
+        guard status != authorizationStatus else { return status }
+        authorizationStatus = status
+        photos = []
+        albumTitles = [:]
+        revision &+= 1
+        return status
+    }
+
+    private struct ReadContext {
+        let accountGeneration: UUID
+        let revision: Int
+        let authorizationStatus: PHAuthorizationStatus
+    }
+
+    private func readContext() async throws -> ReadContext {
+        let generation = accountGeneration
+        try Task.checkCancellation()
+        guard await requestAccess() else {
+            try Task.checkCancellation()
+            guard generation == accountGeneration else { throw LocalPhotoLibraryError.libraryChanged }
+            throw LocalPhotoLibraryError.accessRequired
+        }
+        try Task.checkCancellation()
+        guard generation == accountGeneration else { throw LocalPhotoLibraryError.libraryChanged }
+        return ReadContext(accountGeneration: generation, revision: revision,
+                           authorizationStatus: authorizationStatus)
+    }
+
+    private func validateRead(_ context: ReadContext) throws {
+        try Task.checkCancellation()
+        refreshAuthorizationStatus()
+        guard isAuthorized else { throw LocalPhotoLibraryError.accessRequired }
+        guard context.accountGeneration == accountGeneration, context.revision == revision,
+              context.authorizationStatus == authorizationStatus else {
+            throw LocalPhotoLibraryError.libraryChanged
+        }
+    }
+
+    private func invalidateScan() {
+        scanID = UUID()
+    }
+
+    func libraryDidChange() {
+        invalidateScan()
+        _ = updateAuthorizationStatus()
+        // The readable subset can change without leaving `.limited`.
+        if authorizationStatus == .limited {
+            photos = []
+            albumTitles = [:]
+        }
+        revision &+= 1
+        onLibraryChange?()
     }
 
     /// Foto dari album TERPILIH saja.
@@ -498,7 +600,7 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
     /// terpilih akan muncul dua petak.
     private nonisolated static func fetchPhotos(
         inAlbums ids: Set<String>
-    ) -> (photos: [LocalPhoto], albumTitles: [String: String]) {
+    ) -> LocalPhotoScan {
         let collections = PHAssetCollection.fetchAssetCollections(
             withLocalIdentifiers: Array(ids), options: nil)
 
@@ -538,7 +640,7 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
         // MENAIK, sama dengan urutan cache linimasa — penggabungannya jadi
         // sekadar merge dua deret terurut, bukan pengurutan ulang. Pengurutan
         // per-album tidak cukup karena hasilnya digabung dari beberapa album.
-        return (unique.values.sorted { $0.createdAt < $1.createdAt }, titles)
+        return LocalPhotoScan(photos: unique.values.sorted { $0.createdAt < $1.createdAt }, albumTitles: titles)
     }
 
     // MARK: - Gambar
@@ -720,6 +822,7 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
     /// Melupakan seluruh state PhotoKit milik sesi tanpa menghapus foto asli.
     func resetForLogout() {
         accountGeneration = UUID()
+        invalidateScan()
         imageManager.stopCachingImagesForAllAssets()
         photos = []
         albumTitles = [:]
@@ -841,9 +944,7 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
     /// Menyimpan hasil download server ke pustaka perangkat dan mengembalikan
     /// `PHAsset.localIdentifier` yang baru dibuat.
     func saveDownloadedFile(_ fileURL: URL, isVideo: Bool) async -> String? {
-        if !isAuthorized {
-            guard await requestAccess() else { return nil }
-        }
+        guard await requestAccess() else { return nil }
 
         var localIdentifier: String?
         do {
@@ -953,8 +1054,7 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
 extension LocalPhotoLibrary: PHPhotoLibraryChangeObserver {
     nonisolated func photoLibraryDidChange(_ changeInstance: PHChange) {
         Task { @MainActor [weak self] in
-            self?.revision &+= 1
-            self?.onLibraryChange?()
+            self?.libraryDidChange()
         }
     }
 }
