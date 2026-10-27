@@ -71,14 +71,6 @@ struct FreeUpSpaceView: View {
         }
     }
 
-    private enum Stage: Equatable {
-        case select
-        case scanning
-        case review
-        case deleting
-        case complete
-    }
-
     @State private var library = LocalPhotoLibrary.shared
     @State private var albums: [LocalAlbum] = []
     @State private var isLoadingAlbums = true
@@ -94,10 +86,13 @@ struct FreeUpSpaceView: View {
         value: -1,
         to: .now) ?? .now
 
-    @State private var stage = Stage.select
-    @State private var candidates: [LocalSpaceCandidate] = []
-    @State private var removedCount = 0
-    @State private var actionError: ErrorEvent?
+    @Environment(SessionManager.self) private var session
+    @State private var model: FreeUpSpaceViewModel?
+
+    private var stage: FreeUpSpaceViewModel.Stage { model?.stage ?? .select }
+    private var candidates: [LocalSpaceCandidate] { model?.candidates ?? [] }
+    private var removedCount: Int { model?.removedCount ?? 0 }
+    private var isBusy: Bool { model?.isBusy == true }
 
     private let gridColumns = Array(
         repeating: GridItem(.flexible(), spacing: 10),
@@ -114,15 +109,25 @@ struct FreeUpSpaceView: View {
         .formStyle(.grouped)
         .navigationTitle("Free Up Space")
         .navigationBarTitleDisplayMode(.inline)
-        .task { await loadAlbums() }
-        .errorToast($actionError)
+        .task {
+            if model == nil { configureModel() }
+            await loadAlbums()
+        }
+        .onDisappear { model?.invalidate() }
+        .onChange(of: session.isLoggedIn) { _, _ in configureModel() }
+        .onChange(of: session.baseURL) { _, _ in configureModel() }
+        .onChange(of: session.authHeaders) { _, _ in configureModel() }
+        .onChange(of: session.backupQueueOwner) { _, _ in configureModel() }
+        .errorToast(Binding(
+            get: { model?.actionError },
+            set: { model?.actionError = $0 }))
         .sensoryFeedback(.success, trigger: removedCount)
     }
 
     private var introductionSection: some View {
         Section {
             Label {
-                Text("Move backed-up photos and videos to Recently Deleted to free up space. Copies on your server remain safe.")
+                Text("Only photos and videos with verified matching server copies can be moved to Recently Deleted.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } icon: {
@@ -205,7 +210,7 @@ struct FreeUpSpaceView: View {
         } footer: {
             Text("Favorites, selected albums, and the selected media type will not be removed from this device.")
         }
-        .disabled(stage == .scanning || stage == .deleting)
+        .disabled(isBusy)
         .onChange(of: keepFavorites) { _, _ in invalidateResults() }
         .onChange(of: keepAlbumIDs) { _, _ in invalidateResults() }
         .onChange(of: alwaysKeepMedia) { _, _ in invalidateResults() }
@@ -255,11 +260,12 @@ struct FreeUpSpaceView: View {
             .foregroundStyle(.primary)
             .buttonStyle(.bordered)
             .controlSize(.large)
-            .disabled(cutoffDate == nil || stage == .scanning || stage == .deleting)
+            .disabled(cutoffDate == nil || isBusy || model == nil)
         } header: {
             stepHeader(1, title: "Select Cutoff Date", active: true)
         }
         .listRowSeparator(.hidden)
+        .disabled(isBusy)
     }
 
     private var scanSection: some View {
@@ -299,7 +305,7 @@ struct FreeUpSpaceView: View {
                     .foregroundStyle(.secondary)
             case .review:
                 if candidates.isEmpty {
-                    Text("All eligible items are already protected by your current keep rules, or nothing older than the cutoff is backed up.")
+                    Text("No items older than the cutoff have verified matching server copies outside your keep rules.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 } else {
@@ -315,14 +321,14 @@ struct FreeUpSpaceView: View {
                     .tint(.red)
                     .controlSize(.large)
 
-                    Text("iOS will ask for final confirmation. You can recover these items from Recently Deleted for a limited time.")
+                    Text("Server copies are checked again before iOS asks for final confirmation. You can recover removed items from Recently Deleted for a limited time.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             case .deleting:
                 HStack(spacing: 12) {
                     ProgressView()
-                    Text("Waiting for Photos…")
+                    Text("Checking copies and waiting for Photos…")
                 }
             case .complete:
                 Label {
@@ -362,7 +368,6 @@ struct FreeUpSpaceView: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .disabled(stage == .scanning || stage == .deleting)
     }
 
     private func stepHeader(_ number: Int, title: String, active: Bool) -> some View {
@@ -417,66 +422,31 @@ struct FreeUpSpaceView: View {
         }
     }
 
+    private func configureModel() {
+        model?.invalidate()
+        let service = FreeUpSpaceService(session: session)
+        model = FreeUpSpaceViewModel(
+            scanner: { try await service.scan($0) },
+            remover: { try await service.remove($0) })
+    }
+
     private func invalidateResults() {
-        guard stage == .review || stage == .complete else { return }
-        candidates = []
-        removedCount = 0
-        stage = .select
+        model?.invalidate()
     }
 
     private func scan() {
-        guard let cutoffDate else { return }
-
-        stage = .scanning
-        candidates = []
-        removedCount = 0
-
-        let keepFavorites = keepFavorites
-        let keepAlbumIDs = keepAlbumIDs
-        let keepPhotos = alwaysKeepMedia == .photos
-        let keepVideos = alwaysKeepMedia == .videos
-
-        Task {
-            let result = await library.freeUpSpaceCandidates(
-                olderThan: cutoffDate,
-                keepFavorites: keepFavorites,
-                keepAlbumIDs: keepAlbumIDs,
-                keepPhotos: keepPhotos,
-                keepVideos: keepVideos)
-
-            guard stage == .scanning else { return }
-            if !library.isAuthorized {
-                stage = .select
-                actionError = ErrorEvent("Allow full Photos access to scan your library.")
-                return
-            }
-
-            candidates = result
-            stage = .review
-        }
+        guard let cutoffDate, let model else { return }
+        let rules = LocalSpaceRules(
+            cutoff: cutoffDate,
+            keepFavorites: keepFavorites,
+            keepAlbumIDs: keepAlbumIDs,
+            keepPhotos: alwaysKeepMedia == .photos,
+            keepVideos: alwaysKeepMedia == .videos)
+        model.scan(rules)
     }
 
     private func moveToRecentlyDeleted() {
-        let ids = candidates.map(\.id)
-        guard !ids.isEmpty else { return }
-
-        stage = .deleting
-        Task {
-            guard await library.delete(ids) else {
-                stage = .review
-                actionError = ErrorEvent("The selected items could not be moved to Recently Deleted.")
-                return
-            }
-
-            let manager = SwiftDataManager.shared
-            for id in ids {
-                try? manager.unlinkDeviceAsset(localIdentifier: id)
-            }
-            BackupService.shared.refreshCounts()
-
-            removedCount = ids.count
-            candidates = []
-            stage = .complete
-        }
+        guard let model else { return }
+        model.remove()
     }
 }

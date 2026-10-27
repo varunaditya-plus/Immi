@@ -87,18 +87,6 @@ struct LocalPhotoDisplayMetadata: Sendable {
     let createdAt: Date
 }
 
-/// Aset perangkat yang aman ditawarkan oleh halaman Free Up Space.
-///
-/// Daftar ini sengaja hanya berisi metadata yang dibutuhkan UI. `PHAsset`
-/// sendiri tidak `Sendable`, jadi objek PhotoKit tidak pernah diseberangkan dari
-/// antrean pemindaian ke main actor.
-struct LocalSpaceCandidate: Identifiable, Sendable {
-    /// `PHAsset.localIdentifier` tanpa awalan `device:`.
-    let id: String
-    let createdAt: Date
-    let isVideo: Bool
-}
-
 /// Hitungan ringan untuk halaman Sync Status.
 ///
 /// Tidak membawa `PHAsset` keluar dari antrean PhotoKit dan tidak membaca byte
@@ -130,7 +118,7 @@ struct LocalLivePhotoMatchHint: Equatable, Sendable {
 /// dan mode pilih tidak perlu tahu asal fotonya kecuali untuk menggambar lencana.
 @MainActor
 @Observable
-final class LocalPhotoLibrary: NSObject {
+final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
     static let shared = LocalPhotoLibrary()
 
     /// Awalan id untuk membedakan aset perangkat dari aset server.
@@ -332,82 +320,125 @@ final class LocalPhotoLibrary: NSObject {
 
     // MARK: - Free Up Space
 
-    /// Mencari salinan perangkat yang sudah diketahui mempunyai pasangan di
-    /// server dan lebih lama dari tanggal batas.
-    ///
-    /// Catatan `BackupRecord` adalah pagar pengamannya: aset lokal yang sekadar
-    /// mirip nama/tanggalnya tidak pernah ikut dihapus. Album, favorit, dan tipe
-    /// media yang dipilih pengguna kemudian dikeluarkan dari hasil scan.
-    func freeUpSpaceCandidates(
-        olderThan cutoff: Date,
-        keepFavorites: Bool,
-        keepAlbumIDs: Set<String>,
-        keepPhotos: Bool,
-        keepVideos: Bool
-    ) async -> [LocalSpaceCandidate] {
-        if !isAuthorized {
-            guard await requestAccess() else { return [] }
+    /// Hashes the current PhotoKit originals instead of trusting backup records.
+    func candidates(from localIDs: Set<String>, rules: LocalSpaceRules) async throws -> [LocalSpaceCandidate] {
+        guard !localIDs.isEmpty else { return [] }
+        if !Self.hasReadAccess {
+            guard await requestAccess() else { throw LocalSpaceLibraryError.accessRequired }
         }
-
-        let backedUpIDs = SwiftDataManager.shared.uploadedLocalIdentifiers()
-        guard !backedUpIDs.isEmpty else { return [] }
-
-        return await Task.detached(priority: .userInitiated) {
-            Self.fetchFreeUpSpaceCandidates(
-                backedUpIDs: backedUpIDs,
-                olderThan: cutoff,
-                keepFavorites: keepFavorites,
-                keepAlbumIDs: keepAlbumIDs,
-                keepPhotos: keepPhotos,
-                keepVideos: keepVideos)
-        }.value
+        let work = Task.detached(priority: .userInitiated) {
+            try await Self.verifiedSpaceCandidates(localIDs: localIDs, rules: rules)
+        }
+        let candidates = try await withTaskCancellationHandler {
+            try await work.value
+        } onCancel: {
+            work.cancel()
+        }
+        try Task.checkCancellation()
+        guard Self.hasReadAccess else { throw LocalSpaceLibraryError.accessRequired }
+        return candidates
     }
 
-    private nonisolated static func fetchFreeUpSpaceCandidates(
-        backedUpIDs: Set<String>,
-        olderThan cutoff: Date,
-        keepFavorites: Bool,
-        keepAlbumIDs: Set<String>,
-        keepPhotos: Bool,
-        keepVideos: Bool
-    ) -> [LocalSpaceCandidate] {
-        var protectedAlbumAssetIDs = Set<String>()
+    private nonisolated static func verifiedSpaceCandidates(
+        localIDs: Set<String>, rules: LocalSpaceRules
+    ) async throws -> [LocalSpaceCandidate] {
+        try Task.checkCancellation()
+        let protectedIDs = try protectedSpaceAssetIDs(in: rules.keepAlbumIDs)
+        let assets = PHAsset.fetchAssets(withLocalIdentifiers: Array(localIDs), options: nil)
+        var candidates: [LocalSpaceCandidate] = []
+        for index in 0..<assets.count {
+            try Task.checkCancellation()
+            let asset = assets.object(at: index)
+            guard let snapshot = spaceSnapshot(for: asset, protectedIDs: protectedIDs),
+                  LocalSpaceSafety.isEligible(snapshot.state, rules: rules),
+                  let roles = LocalSpaceSafety.resourceRoles(for: snapshot.state.version) else { continue }
+            var checksums: [LocalSpaceResource: String] = [:]
+            for (role, type) in roles {
+                guard let resource = snapshot.resources.first(where: { $0.type.rawValue == type }),
+                      let checksum = await LocalSpaceResourceHash.checksum(resource) else { break }
+                checksums[role] = checksum
+            }
+            try Task.checkCancellation()
+            guard checksums.count == roles.count else { continue }
+            candidates.append(LocalSpaceCandidate(
+                id: snapshot.state.id, version: snapshot.state.version, resourceChecksums: checksums))
+        }
+        // Asset versions and album membership can change during a long scan.
+        let refreshedProtectedIDs = try protectedSpaceAssetIDs(in: rules.keepAlbumIDs)
+        return candidates.filter { candidate in
+            guard let asset = fetchAsset(candidate.id),
+                  let current = spaceSnapshot(for: asset, protectedIDs: refreshedProtectedIDs)?.state
+            else { return false }
+            return LocalSpaceSafety.canDelete([candidate], current: [current], rules: rules)
+        }.sorted { $0.createdAt < $1.createdAt }
+    }
 
-        if !keepAlbumIDs.isEmpty {
-            let collections = PHAssetCollection.fetchAssetCollections(
-                withLocalIdentifiers: Array(keepAlbumIDs),
-                options: nil)
-            collections.enumerateObjects { collection, _, _ in
-                let assets = PHAsset.fetchAssets(in: collection, options: nil)
-                assets.enumerateObjects { asset, _, _ in
-                    protectedAlbumAssetIDs.insert(asset.localIdentifier)
+    /// Rechecks the reviewed versions and keep rules inside the final PhotoKit
+    /// transaction. A changed or missing item aborts the entire deletion batch.
+    func deleteVerified(_ candidates: [LocalSpaceCandidate], rules: LocalSpaceRules) async throws -> Set<String> {
+        guard !candidates.isEmpty else { return [] }
+        guard Self.hasReadAccess else { throw LocalSpaceLibraryError.accessRequired }
+        try Task.checkCancellation()
+        let transaction = LocalSpaceDeletionTransaction()
+        try await withTaskCancellationHandler {
+            try await PHPhotoLibrary.shared().performChanges {
+                guard !transaction.isCancelled else { return }
+                let ids = candidates.map(\.id)
+                let assets = PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil)
+                guard let protectedIDs = try? Self.protectedSpaceAssetIDs(in: rules.keepAlbumIDs) else { return }
+                let current = (0..<assets.count).compactMap {
+                    Self.spaceSnapshot(for: assets.object(at: $0), protectedIDs: protectedIDs)?.state
+                }
+                guard LocalSpaceSafety.canDelete(candidates, current: current, rules: rules) else { return }
+                _ = transaction.authorize(Set(ids)) {
+                    PHAssetChangeRequest.deleteAssets(assets)
                 }
             }
+        } onCancel: {
+            transaction.cancel()
         }
-
-        let assets = PHAsset.fetchAssets(
-            withLocalIdentifiers: Array(backedUpIDs),
-            options: nil)
-        var result: [LocalSpaceCandidate] = []
-        result.reserveCapacity(assets.count)
-
-        assets.enumerateObjects { asset, _, _ in
-            guard asset.mediaType == .image || asset.mediaType == .video else { return }
-
-            let assetDate = asset.creationDate ?? asset.modificationDate ?? .distantFuture
-            guard assetDate < cutoff else { return }
-            guard !(keepFavorites && asset.isFavorite) else { return }
-            guard !protectedAlbumAssetIDs.contains(asset.localIdentifier) else { return }
-            guard !(keepPhotos && asset.mediaType == .image) else { return }
-            guard !(keepVideos && asset.mediaType == .video) else { return }
-
-            result.append(LocalSpaceCandidate(
-                id: asset.localIdentifier,
-                createdAt: assetDate,
-                isVideo: asset.mediaType == .video))
+        guard let removed = transaction.authorizedIDs else {
+            if transaction.isCancelled { throw CancellationError() }
+            throw LocalSpaceLibraryError.libraryChanged
         }
+        photos.removeAll { removed.contains($0.id) }
+        return removed
+    }
 
-        return result.sorted { $0.createdAt < $1.createdAt }
+    private nonisolated static func spaceSnapshot(
+        for asset: PHAsset, protectedIDs: Set<String>
+    ) -> (state: LocalSpaceAssetState, resources: [PHAssetResource])? {
+        guard asset.mediaType == .image || asset.mediaType == .video,
+              let createdAt = asset.creationDate, let modifiedAt = asset.modificationDate else { return nil }
+        let resources = PHAssetResource.assetResources(for: asset)
+        let descriptors = resources.map {
+            LocalSpaceResourceDescriptor(type: $0.type.rawValue, filename: $0.originalFilename,
+                contentType: $0.contentType.identifier)
+        }.sorted {
+            if $0.type != $1.type { return $0.type < $1.type }
+            if $0.filename != $1.filename { return $0.filename < $1.filename }
+            return $0.contentType < $1.contentType
+        }
+        let version = LocalAssetVersion(
+            createdAt: createdAt, modifiedAt: modifiedAt, isFavorite: asset.isFavorite,
+            isVideo: asset.mediaType == .video, isLivePhoto: asset.mediaSubtypes.contains(.photoLive),
+            pixelWidth: asset.pixelWidth, pixelHeight: asset.pixelHeight, duration: asset.duration,
+            resources: descriptors)
+        return (LocalSpaceAssetState(id: asset.localIdentifier, version: version,
+            isInKeptAlbum: protectedIDs.contains(asset.localIdentifier)), resources)
+    }
+
+    private nonisolated static func protectedSpaceAssetIDs(in albumIDs: Set<String>) throws -> Set<String> {
+        guard !albumIDs.isEmpty else { return [] }
+        let collections = PHAssetCollection.fetchAssetCollections(withLocalIdentifiers: Array(albumIDs), options: nil)
+        guard collections.count == albumIDs.count else { throw LocalSpaceLibraryError.libraryChanged }
+        var protectedIDs: Set<String> = []
+        collections.enumerateObjects { collection, _, _ in
+            PHAsset.fetchAssets(in: collection, options: nil).enumerateObjects { asset, _, _ in
+                protectedIDs.insert(asset.localIdentifier)
+            }
+        }
+        return protectedIDs
     }
 
     /// Foto satu album, tanpa menyentuh `photos`.

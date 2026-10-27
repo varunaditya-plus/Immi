@@ -87,6 +87,7 @@ struct AssetDetailView: View {
     @State private var isPreparingEditor = false
     @State private var existingPhotoEdits: [AssetEditRecord] = []
     @State private var showRemoveDeviceConfirm = false
+    @State private var deviceRemoval: Task<Void, Never>?
     /// Salinan kerja dari `assets`, milik layar ini.
     ///
     /// `assets` dimiliki pemanggil dan tidak bisa diubah dari sini. Dulu
@@ -184,7 +185,10 @@ struct AssetDetailView: View {
             // punya caranya sendiri untuk berterus terang: aksi yang gagal
             // memunculkan toast, dan panel info tetap terisi dari potret lokal.
             .onAppear { OfflineBannerSuppression.shared.begin() }
-            .onDisappear { OfflineBannerSuppression.shared.end() }
+            .onDisappear {
+                OfflineBannerSuppression.shared.end()
+            }
+            .cancelDeviceCopyRemoval { deviceRemoval?.cancel() }
             .task { await start() }
             // Memaksa toolbar mengevaluasi ulang keberadaan salinan lokal saat
             // PhotoKit berubah. Sekaligus tutup dialog yang keburu terbuka bila
@@ -199,6 +203,7 @@ struct AssetDetailView: View {
             // yang dipresentasikan, lihat TimelineView dan SearchResultsGrid.
             .ignoresSafeArea(.keyboard, edges: .bottom)
             .onChange(of: currentAsset) { oldAsset, newAsset in
+                deviceRemoval?.cancel()
                 onAssetChange?(newAsset)
                 currentLivePhotoContextAssetID = newAsset.id
                 currentLivePhotoVideoID = newAsset.livePhotoVideoID
@@ -954,6 +959,7 @@ struct AssetDetailView: View {
                 } label: {
                     Label("Remove from Device", systemImage: "iphone.slash")
                 }
+                .disabled(deviceRemoval != nil)
             }
         } label: {
             if isDownloadingToDevice || isSettingProfilePhoto {
@@ -1351,21 +1357,33 @@ struct AssetDetailView: View {
     }
 
     private func removeFromDevice() {
+        guard deviceRemoval == nil else { return }
         let asset = currentAsset
-        Task {
-            if asset.origin == .both {
-                guard await DeviceCopyDeletion.perform(asset.id) else { return }
-                // Detail album perangkat memakai id PhotoKit. Setelah salinan
-                // perangkat dihapus, item itu memang tidak lagi termasuk dalam
-                // daftar ini; aset servernya tetap ada di timeline server.
-                if LocalPhotoLibrary.isLocal(asset.id) {
+        let service = FreeUpSpaceService(session: session)
+        deviceRemoval = Task {
+            defer { deviceRemoval = nil }
+            do {
+                try Task.checkCancellation()
+                if asset.origin == .both {
+                    guard try await DeviceCopyDeletion.perform(asset.id, using: service) else { return }
+                    guard !Task.isCancelled, currentAsset.id == asset.id else { return }
+                    // Device-album pages use PhotoKit IDs and leave this list
+                    // when removed. A server page stays with a server-only badge.
+                    if LocalPhotoLibrary.isLocal(asset.id) {
+                        removeCurrentAsset()
+                    } else {
+                        updateCurrentOrigin(.server)
+                    }
+                } else if asset.origin == .device {
+                    guard await LocalPhotoLibrary.shared.delete([asset.id]) else { return }
+                    guard !Task.isCancelled, currentAsset.id == asset.id else { return }
                     removeCurrentAsset()
-                } else {
-                    updateCurrentOrigin(.server)
                 }
-            } else if asset.origin == .device {
-                guard await LocalPhotoLibrary.shared.delete([asset.id]) else { return }
-                removeCurrentAsset()
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled, currentAsset.id == asset.id else { return }
+                vm?.actionError = ErrorEvent(error.localizedDescription)
             }
         }
     }

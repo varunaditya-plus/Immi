@@ -16,6 +16,8 @@ struct DeviceAlbumDetailView: View {
     @State private var photos: [LocalPhoto] = []
     @State private var uploadedIDs: Set<String> = []
     @State private var phase: LoadingPhase<Void> = .loading
+    @State private var actionError: ErrorEvent?
+    @State private var deviceRemoval: Task<Void, Never>?
 
     var body: some View {
         PhotoCollectionScreen(
@@ -39,6 +41,8 @@ struct DeviceAlbumDetailView: View {
                 backup.configure(session: session)
                 await load()
             }
+            .errorToast($actionError)
+            .cancelDeviceCopyRemoval { deviceRemoval?.cancel() }
             // Unggahan yang selesai — dari sini maupun dari pencadangan latar —
             // mengubah lencana dan isi menunya.
             .onChange(of: backup.backedUp) { _, _ in refreshUploaded() }
@@ -78,7 +82,9 @@ struct DeviceAlbumDetailView: View {
 
     private func load() async {
         if photos.isEmpty { phase = .loading }
-        photos = await LocalPhotoLibrary.shared.photos(inAlbum: album.id)
+        let fetched = await LocalPhotoLibrary.shared.photos(inAlbum: album.id)
+        guard !Task.isCancelled else { return }
+        photos = fetched
         refreshUploaded()
         phase = .loaded(())
     }
@@ -114,7 +120,7 @@ struct DeviceAlbumDetailView: View {
                 systemImage: "iphone.slash",
                 isDestructive: true
             ) {
-                Task { await deleteFromDevice(Array(ids)) }
+                deleteFromDevice(Array(ids))
             })
         }
 
@@ -133,11 +139,26 @@ struct DeviceAlbumDetailView: View {
     /// Seleksi bisa bercampur, dan menghapus yang belum terunggah berarti
     /// membuang satu-satunya salinannya — bukan itu yang diminta orang yang
     /// menekan "Delete from Device".
-    private func deleteFromDevice(_ ids: [String]) async {
-        for id in ids where uploadedIDs.contains(LocalPhotoLibrary.localIdentifier(from: id)) {
-            await DeviceCopyDeletion.perform(id)
+    private func deleteFromDevice(_ ids: [String]) {
+        guard deviceRemoval == nil else { return }
+        let localIDs = ids.map(LocalPhotoLibrary.localIdentifier(from:)).filter(uploadedIDs.contains)
+        guard !localIDs.isEmpty else { return }
+        let service = FreeUpSpaceService(session: session)
+        actionError = nil
+        deviceRemoval = Task {
+            defer { deviceRemoval = nil }
+            do {
+                try Task.checkCancellation()
+                let removed = try await DeviceCopyDeletion.perform(localIdentifiers: localIDs, using: service)
+                guard !Task.isCancelled, removed > 0 else { return }
+                await load()
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled else { return }
+                actionError = ErrorEvent(error.localizedDescription)
+            }
         }
-        await load()
     }
 
     private func delete(_ ids: [String]) async {

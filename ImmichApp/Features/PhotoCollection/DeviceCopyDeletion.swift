@@ -84,12 +84,12 @@ enum DeviceCopyDeletion {
     /// - Returns: true kalau berkasnya benar-benar terhapus.
     @discardableResult
     @MainActor
-    static func perform(_ id: String) async -> Bool {
+    static func perform(_ id: String, using service: FreeUpSpaceService) async throws -> Bool {
         let manager = SwiftDataManager.shared
-        guard let localID = localIdentifier(for: id, manager: manager),
-              LocalPhotoLibrary.assetExists(localID)
-        else { return false }
-        return await perform(localIdentifiers: [localID]) == 1
+        guard let localID = localIdentifier(for: id, manager: manager) else {
+            throw DeviceCopySafetyError.copiesChanged
+        }
+        return try await perform(localIdentifiers: [localID], using: service) == 1
     }
 
     /// Menghapus beberapa salinan lokal dalam satu transaksi PhotoKit.
@@ -99,24 +99,14 @@ enum DeviceCopyDeletion {
     /// yang benar-benar diminta untuk dihapus, bukan jumlah seluruh seleksi.
     @discardableResult
     @MainActor
-    static func perform(localIdentifiers: [String]) async -> Int {
-        let existing = LocalPhotoLibrary.existingLocalIdentifiers(localIdentifiers)
-        guard !existing.isEmpty else { return 0 }
-
-        let ids = existing.map { LocalPhotoLibrary.assetID(for: $0) }
-        guard await LocalPhotoLibrary.shared.delete(ids) else { return 0 }
-
-        // Tautannya DIPUTUS, catatan unggahannya tidak.
-        //
-        // Asetnya tetap ada di server dan tetap tidak boleh diunggah ulang —
-        // yang tidak berlaku lagi hanya "ada salinannya di perangkat ini".
-        // Menghapus catatannya sekalian akan membuat fotonya naik lagi pada
-        // putaran pencadangan berikutnya.
-        let manager = SwiftDataManager.shared
-        for localID in existing {
-            try? manager.unlinkDeviceAsset(localIdentifier: localID)
+    static func perform(localIdentifiers: [String], using service: FreeUpSpaceService) async throws -> Int {
+        let requested = Set(localIdentifiers.map(LocalPhotoLibrary.localIdentifier(from:)))
+        guard !requested.isEmpty else { return 0 }
+        let review = try await service.review(localIDs: requested)
+        guard Set(review.candidates.map(\.id)) == requested else {
+            throw DeviceCopySafetyError.copiesChanged
         }
-        return existing.count
+        return try await service.remove(review)
     }
 
     @MainActor
@@ -131,8 +121,11 @@ enum DeviceCopyDeletion {
 }
 
 private struct DeviceCopyDeletionAlert: ViewModifier {
+    @Environment(SessionManager.self) private var session
     @Binding var pendingID: String?
     var onDeleted: () -> Void
+    @State private var actionError: ErrorEvent?
+    @State private var operation: Task<Void, Never>?
 
     func body(content: Content) -> some View {
         content.alert(
@@ -142,12 +135,8 @@ private struct DeviceCopyDeletionAlert: ViewModifier {
                 set: { if !$0 { pendingID = nil } }),
             presenting: pendingID
         ) { id in
-            Button("Delete", role: .destructive) {
-                pendingID = nil
-                Task {
-                    if await DeviceCopyDeletion.perform(id) { onDeleted() }
-                }
-            }
+            Button("Delete", role: .destructive) { remove(id) }
+                .disabled(operation != nil)
             Button("Cancel", role: .cancel) {}
         } message: { _ in
             // Kalimatnya BERBEDA dari "Delete Photo", dan itu intinya.
@@ -157,15 +146,56 @@ private struct DeviceCopyDeletionAlert: ViewModifier {
             // seperti tindakan yang tidak bisa ditarik kembali.
             Text("The copy on this device will be removed. The photo stays on your server.")
         }
+        .errorToast($actionError)
+        .cancelDeviceCopyRemoval { operation?.cancel() }
+    }
+
+    private func remove(_ id: String) {
+        guard operation == nil else { return }
+        let service = FreeUpSpaceService(session: session)
+        pendingID = nil
+        actionError = nil
+        operation = Task {
+            defer { operation = nil }
+            do {
+                try Task.checkCancellation()
+                let removed = try await DeviceCopyDeletion.perform(id, using: service)
+                guard !Task.isCancelled else { return }
+                if removed { onDeleted() }
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled else { return }
+                actionError = ErrorEvent(error.localizedDescription)
+            }
+        }
     }
 }
 
 extension View {
+    func cancelDeviceCopyRemoval(_ cancel: @escaping () -> Void) -> some View {
+        modifier(DeviceCopyRemovalLifetime(cancel: cancel))
+    }
+
     /// - Parameter onDeleted: dipanggil hanya kalau berkasnya benar-benar
     ///   terhapus — untuk getaran dan penggambaran ulang.
     func deleteFromDeviceAlert(
         _ pendingID: Binding<String?>, onDeleted: @escaping () -> Void = {}
     ) -> some View {
         modifier(DeviceCopyDeletionAlert(pendingID: pendingID, onDeleted: onDeleted))
+    }
+}
+
+private struct DeviceCopyRemovalLifetime: ViewModifier {
+    @Environment(SessionManager.self) private var session
+    let cancel: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onDisappear { cancel() }
+            .onChange(of: session.baseURL) { _, _ in cancel() }
+            .onChange(of: session.authHeaders) { _, _ in cancel() }
+            .onChange(of: session.backupQueueOwner) { _, _ in cancel() }
+            .onChange(of: session.isLoggedIn) { _, _ in cancel() }
     }
 }

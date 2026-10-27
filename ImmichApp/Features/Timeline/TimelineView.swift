@@ -33,7 +33,8 @@ struct TimelineView: View {
     @State private var albumPickerAsset: AssetLite?
     @State private var selectedIDs: Set<String> = []
     @State private var isPreparingSelectionShare = false
-    @State private var isRemovingDeviceSelection = false
+    @State private var deviceSelectionRemoval: Task<Void, Never>?
+    private var isRemovingDeviceSelection: Bool { deviceSelectionRemoval != nil }
     @State private var selectionShareURLs: [URL] = []
     @State private var isSelectionSharePresented = false
     /// Naik satu setiap penghapusan yang dikonfirmasi server.
@@ -74,6 +75,62 @@ struct TimelineView: View {
     }
 
     var body: some View {
+        screen
+        .task {
+            if vm == nil {
+                let api = APIClient(session: session)
+                vm = TimelineViewModel(
+                    dataManager: SwiftDataManager.shared,
+                    assetRepo: AssetDetailRepository(api: api),
+                    albumRepo: AlbumRepository(api: api),
+                    matcher: DeviceAssetMatcher(
+                        repo: BackupRepository(api: api),
+                        dataManager: SwiftDataManager.shared)
+                )
+            }
+            await vm?.loadTimelineIfNeeded()
+
+            // Foto perangkat menyusul SETELAH linimasa tergambar.
+            //
+            // Kunjungan pertama memunculkan dialog izin sistem, dan itu tidak
+            // boleh menghalangi foto yang sudah ada di cache untuk tampil lebih
+            // dulu.
+            await vm?.loadDevicePhotos()
+            await vm?.loadAlbumsIfNeeded()
+
+            // Bisa saja sync selesai sebelum Timeline sempat mengamati
+            // perubahannya (misalnya cache kecil atau perangkat offline).
+            if (syncVM?.backgroundSyncCompletionCount ?? 0) > 0 {
+                await finishInitialTimelineLoad()
+            }
+        }
+        // Sync pertama biasanya selesai SETELAH layar ini muncul; tanpa ini
+        // grid-nya tetap kosong sampai tab dibuka ulang.
+        .onChange(of: syncVM?.lastSyncTime) { _, _ in
+            Task {
+                if initialNewestContentReady {
+                    await vm?.loadTimeline()
+                } else {
+                    await finishInitialTimelineLoad()
+                }
+            }
+        }
+        // Snapshot cache memang cepat, tetapi belum tentu yang terbaru. Tunggu
+        // percobaan sync pembuka selesai, baca cache hasilnya, baru buka gerbang
+        // render milik UICollectionView.
+        .onChange(of: syncVM?.backgroundSyncCompletionCount) { _, count in
+            guard let count, count > 0 else { return }
+            Task { await finishInitialTimelineLoad() }
+        }
+        // Ketukan kedua pada tab Photos. Dikirim AppRouter sebagai penghitung
+        // yang naik, bukan Bool, supaya ketukan beruntun tetap terbaca.
+        .onChange(of: resetScrollRequest) { _, _ in
+            guard let vm else { return }
+            returnToNewest(vm)
+        }
+    }
+
+    private var screen: some View {
         NavigationStack {
             content
                 // TANPA `toolbarBackground` sama sekali — latarnya diserahkan
@@ -191,62 +248,11 @@ struct TimelineView: View {
             Task { await vm?.loadTimeline() }
         }
         .deleteFromDeviceAlert($deviceDeleteID) { deleteFeedback += 1 }
+        .cancelDeviceCopyRemoval { deviceSelectionRemoval?.cancel() }
         .sensoryFeedback(.impact(weight: .heavy), trigger: deleteFeedback)
         // Favorit BUKAN ketukan berat: hasilnya bukan sesuatu yang hilang,
         // melainkan sesuatu yang bertambah — `.success` yang menyampaikannya.
         .sensoryFeedback(.success, trigger: favoriteFeedback)
-        .task {
-            if vm == nil {
-                let api = APIClient(session: session)
-                vm = TimelineViewModel(
-                    dataManager: SwiftDataManager.shared,
-                    assetRepo: AssetDetailRepository(api: api),
-                    albumRepo: AlbumRepository(api: api),
-                    matcher: DeviceAssetMatcher(
-                        repo: BackupRepository(api: api),
-                        dataManager: SwiftDataManager.shared)
-                )
-            }
-            await vm?.loadTimelineIfNeeded()
-
-            // Foto perangkat menyusul SETELAH linimasa tergambar.
-            //
-            // Kunjungan pertama memunculkan dialog izin sistem, dan itu tidak
-            // boleh menghalangi foto yang sudah ada di cache untuk tampil lebih
-            // dulu.
-            await vm?.loadDevicePhotos()
-            await vm?.loadAlbumsIfNeeded()
-
-            // Bisa saja sync selesai sebelum Timeline sempat mengamati
-            // perubahannya (misalnya cache kecil atau perangkat offline).
-            if (syncVM?.backgroundSyncCompletionCount ?? 0) > 0 {
-                await finishInitialTimelineLoad()
-            }
-        }
-        // Sync pertama biasanya selesai SETELAH layar ini muncul; tanpa ini
-        // grid-nya tetap kosong sampai tab dibuka ulang.
-        .onChange(of: syncVM?.lastSyncTime) { _, _ in
-            Task {
-                if initialNewestContentReady {
-                    await vm?.loadTimeline()
-                } else {
-                    await finishInitialTimelineLoad()
-                }
-            }
-        }
-        // Snapshot cache memang cepat, tetapi belum tentu yang terbaru. Tunggu
-        // percobaan sync pembuka selesai, baca cache hasilnya, baru buka gerbang
-        // render milik UICollectionView.
-        .onChange(of: syncVM?.backgroundSyncCompletionCount) { _, count in
-            guard let count, count > 0 else { return }
-            Task { await finishInitialTimelineLoad() }
-        }
-        // Ketukan kedua pada tab Photos. Dikirim AppRouter sebagai penghitung
-        // yang naik, bukan Bool, supaya ketukan beruntun tetap terbaca.
-        .onChange(of: resetScrollRequest) { _, _ in
-            guard let vm else { return }
-            returnToNewest(vm)
-        }
     }
 
     @ViewBuilder
@@ -720,21 +726,28 @@ struct TimelineView: View {
     }
 
     private func removeSelectionFromDevice(_ localIDs: [String]) {
-        guard !localIDs.isEmpty, !isRemovingDeviceSelection else { return }
-        isRemovingDeviceSelection = true
-        Task {
-            let removed = await DeviceCopyDeletion.perform(
-                localIdentifiers: localIDs)
-            isRemovingDeviceSelection = false
-            guard removed > 0 else { return }
+        guard !localIDs.isEmpty, deviceSelectionRemoval == nil else { return }
+        let service = FreeUpSpaceService(session: session)
+        deviceSelectionRemoval = Task {
+            defer { deviceSelectionRemoval = nil }
+            do {
+                try Task.checkCancellation()
+                let removed = try await DeviceCopyDeletion.perform(
+                    localIdentifiers: localIDs, using: service)
+                guard !Task.isCancelled, removed > 0 else { return }
 
-            // Segera bangun ulang dari PhotoKit agar petak lokal hilang dan
-            // petak `.both` berubah menjadi server-only dalam snapshot yang
-            // sama. Observer Photos tetap menjadi pengaman bila perubahan
-            // datang dari luar aplikasi.
-            await vm?.reloadDevicePhotos()
-            deleteFeedback += 1
-            exitSelection()
+                // Rebuild from PhotoKit so removed local rows and device-copy
+                // badges reflect the confirmed deletion.
+                await vm?.reloadDevicePhotos()
+                guard !Task.isCancelled else { return }
+                deleteFeedback += 1
+                exitSelection()
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled else { return }
+                vm?.actionError = error.localizedDescription
+            }
         }
     }
 
