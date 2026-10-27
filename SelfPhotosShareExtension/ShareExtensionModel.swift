@@ -25,7 +25,7 @@ final class ShareExtensionModel: ObservableObject {
     @Published private(set) var phase: Phase = .loading
     @Published private(set) var items: [SharePreviewItem] = []
     @Published private(set) var session = SharedSessionStore.load()
-    private let batchID = UUID()
+    private let submission = SharedUploadSubmission()
     private weak var shareContext: NSExtensionContext?
     private var hasLoaded = false
 
@@ -34,10 +34,8 @@ final class ShareExtensionModel: ObservableObject {
     }
 
     var selectedCount: Int { items.count(where: \.isSelected) }
-    var isBusy: Bool {
-        if case .uploading = phase { return true }
-        return phase == .loading
-    }
+    var canEditSelection: Bool { !isBusy && submission.canEdit }
+    var isBusy: Bool { phase == .loading || submission.isProcessing || submission.isClosing }
     var serverLabel: String {
         session?.displayServerURL ?? String(localized: "Sign in to SelfPhotos first")
     }
@@ -47,7 +45,7 @@ final class ShareExtensionModel: ObservableObject {
         hasLoaded = true
 
         do {
-            let directory = try await SharedUploadStore.shared.makeBatchDirectory(id: batchID)
+            let directory = try await SharedUploadStore.shared.makeBatchDirectory(id: submission.batchID)
             let providers = (shareContext?.inputItems as? [NSExtensionItem] ?? [])
                 .flatMap { $0.attachments ?? [] }
                 .prefix(30)
@@ -71,87 +69,81 @@ final class ShareExtensionModel: ObservableObject {
     }
 
     func toggle(_ id: UUID) {
-        guard !isBusy, let index = items.firstIndex(where: { $0.id == id }) else { return }
+        guard canEditSelection, let index = items.firstIndex(where: { $0.id == id }) else { return }
         items[index].isSelected.toggle()
     }
 
     func primaryAction() {
         switch phase {
         case .queued:
-            complete()
+            cancel()
         case .ready, .failed:
-            Task { await uploadSelected() }
+            let selected = items.filter(\.isSelected).map(\.uploadItem)
+            guard !selected.isEmpty, submission.begin() else { return }
+            phase = .uploading(current: 0, total: selected.count)
+            Task { await uploadSelected(selected) }
         default:
             break
         }
     }
 
     func cancel() {
+        guard !isBusy else { return }
+        phase = .loading
         Task {
-            try? await SharedUploadStore.shared.removeBatch(id: batchID)
-            shareContext?.completeRequest(returningItems: nil)
+            do {
+                if try await submission.close() { complete() }
+            } catch {
+                phase = .failed(error.localizedDescription)
+            }
         }
     }
 
-    private func uploadSelected() async {
+    private func uploadSelected(_ selected: [SharedUploadItem]) async {
+        defer { submission.finish() }
         guard let credential = session?.credential() else {
             phase = .failed(String(localized: "Open SelfPhotos and sign in before uploading."))
             return
         }
 
-        let selected = items.filter(\.isSelected)
-        guard !selected.isEmpty else { return }
-
-        var batch = SharedUploadBatch(
-            id: batchID,
-            owner: credential.owner,
-            createdAt: .now,
-            items: selected.map(\.uploadItem))
-
         do {
-            try await SharedUploadStore.shared.save(batch)
+            try await submission.admit(owner: credential.owner, items: selected)
         } catch {
             phase = .failed(error.localizedDescription)
             return
         }
 
         let client = SharedUploadClient(credential: credential)
-        var queued = 0
-        for index in batch.items.indices {
-            phase = .uploading(current: index + 1, total: batch.items.count)
-            batch.items[index].state = .uploading
-            batch.items[index].lastError = nil
-            try? await SharedUploadStore.shared.save(batch)
-
-            do {
-                let item = batch.items[index]
-                let fileURL = try await SharedUploadStore.shared.fileURL(
-                    for: item,
-                    batchID: batch.id)
-                let directory = try await SharedUploadStore.shared.makeBatchDirectory(id: batch.id)
-                _ = try await client.upload(
-                    item: item,
-                    fileURL: fileURL,
-                    bodyDirectory: directory)
-                batch.items[index].state = .uploaded
-                try? await SharedUploadStore.shared.removeFile(for: item, batchID: batch.id)
-            } catch {
-                queued += 1
-                batch.items[index].state = .queued
-                batch.items[index].lastError = error.localizedDescription
+        do {
+            let outcome = try await SharedUploadProcessor(store: .shared).process(
+                batchID: submission.batchID,
+                owner: credential.owner,
+                upload: { item, fileURL, directory in
+                    _ = try await client.upload(item: item, fileURL: fileURL, bodyDirectory: directory)
+                },
+                progress: { [weak self] current, total in
+                    self?.phase = .uploading(current: current, total: total)
+                })
+            switch outcome {
+            case .busy:
+                phase = .queued(selected.count)
+            case .finished(let remaining):
+                phase = .queued(remaining)
+                if remaining == 0 {
+                    try? await Task.sleep(for: .milliseconds(450))
+                    complete()
+                }
             }
-            try? await SharedUploadStore.shared.save(batch)
-        }
-
-        batch.items.removeAll { $0.state == .uploaded }
-        if batch.items.isEmpty {
-            try? await SharedUploadStore.shared.removeBatch(id: batch.id)
-            phase = .queued(0)
-            try? await Task.sleep(for: .milliseconds(450))
-            complete()
-        } else {
-            try? await SharedUploadStore.shared.save(batch)
-            phase = .queued(queued)
+        } catch {
+            // Admission already succeeded. Closing must leave these files for
+            // the app even when a later checkpoint or cleanup could not save.
+            do {
+                let batch = try await SharedUploadStore.shared.batch(
+                    id: submission.batchID, owner: credential.owner)
+                phase = .queued(batch?.items.count { $0.state != .uploaded } ?? 0)
+            } catch {
+                phase = .queued(selected.count)
+            }
         }
     }
 

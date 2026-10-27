@@ -130,6 +130,6 @@ struct ShareUploadView: View {
             .background(.quaternary, in: RoundedRectangle(cornerRadius: 18))
         }
         .buttonStyle(.plain)
-        .disabled(model.isBusy)
+        .disabled(!model.canEditSelection)
     }
 }

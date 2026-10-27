@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 struct SharedUploadOwner: Codable, Equatable, Sendable {
@@ -45,6 +46,21 @@ enum SharedUploadStoreError: LocalizedError {
     }
 }
 
+/// The descriptor keeps the batch claimed across awaits and processes. The
+/// system releases it even if an extension is terminated during an upload.
+final class SharedUploadBatchClaim: @unchecked Sendable {
+    private let descriptor: Int32
+
+    fileprivate init(descriptor: Int32) {
+        self.descriptor = descriptor
+    }
+
+    deinit {
+        flock(descriptor, LOCK_UN)
+        close(descriptor)
+    }
+}
+
 /// Ledger per batch, bukan satu JSON global. Dengan begitu proses extension dan
 /// aplikasi utama tidak menimpa batch satu sama lain saat keduanya aktif.
 actor SharedUploadStore {
@@ -66,12 +82,54 @@ actor SharedUploadStore {
     }
 
     func makeBatchDirectory(id: UUID) throws -> URL {
-        guard let rootURL else { throw SharedUploadStoreError.appGroupUnavailable }
-        let directory = rootURL.appendingPathComponent(id.uuidString, isDirectory: true)
+        let directory = try batchDirectory(id: id)
         try fileManager.createDirectory(
             at: directory,
             withIntermediateDirectories: true)
         return directory
+    }
+
+    func existingBatchDirectory(id: UUID) throws -> URL? {
+        let directory = try batchDirectory(id: id)
+        do {
+            let values = try directory.resourceValues(forKeys: [.isDirectoryKey])
+            guard values.isDirectory == true else {
+                throw CocoaError(.fileReadInvalidFileName)
+            }
+            return directory
+        } catch let error as CocoaError where Self.isMissing(error) {
+            return nil
+        }
+    }
+
+    func claimBatch(id: UUID) throws -> SharedUploadBatchClaim? {
+        guard let directory = try existingBatchDirectory(id: id) else { return nil }
+        let lockURL = directory.appendingPathComponent(".processing.lock")
+        let descriptor = open(lockURL.path, O_CREAT | O_RDWR | O_CLOEXEC, S_IRUSR | S_IWUSR)
+        guard descriptor >= 0 else {
+            if errno == ENOENT { return nil }
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+            let failure = errno
+            close(descriptor)
+            if failure == EWOULDBLOCK || failure == EAGAIN { return nil }
+            throw POSIXError(POSIXErrorCode(rawValue: failure) ?? .EIO)
+        }
+        return SharedUploadBatchClaim(descriptor: descriptor)
+    }
+
+    func batch(id: UUID, owner: SharedUploadOwner) throws -> SharedUploadBatch? {
+        let manifest = try batchDirectory(id: id).appendingPathComponent("manifest.json")
+        let data: Data
+        do {
+            data = try Data(contentsOf: manifest)
+        } catch let error as CocoaError where Self.isMissing(error) {
+            return nil
+        }
+        let batch = try decoder.decode(SharedUploadBatch.self, from: data)
+        guard batch.id == id, batch.version == 1, batch.owner == owner else { return nil }
+        return batch
     }
 
     func save(_ batch: SharedUploadBatch) throws {
@@ -108,7 +166,7 @@ actor SharedUploadStore {
     }
 
     func fileURL(for item: SharedUploadItem, batchID: UUID) throws -> URL {
-        let directory = try makeBatchDirectory(id: batchID)
+        let directory = try batchDirectory(id: batchID)
         let candidate = directory.appendingPathComponent(item.relativePath)
             .standardizedFileURL
         guard candidate.deletingLastPathComponent() == directory.standardizedFileURL else {
@@ -125,10 +183,18 @@ actor SharedUploadStore {
     }
 
     func removeBatch(id: UUID) throws {
-        guard let rootURL else { throw SharedUploadStoreError.appGroupUnavailable }
-        let directory = rootURL.appendingPathComponent(id.uuidString, isDirectory: true)
+        let directory = try batchDirectory(id: id)
         if fileManager.fileExists(atPath: directory.path) {
             try fileManager.removeItem(at: directory)
         }
+    }
+
+    private func batchDirectory(id: UUID) throws -> URL {
+        guard let rootURL else { throw SharedUploadStoreError.appGroupUnavailable }
+        return rootURL.appendingPathComponent(id.uuidString, isDirectory: true)
+    }
+
+    private static func isMissing(_ error: CocoaError) -> Bool {
+        error.code == .fileNoSuchFile || error.code == .fileReadNoSuchFile
     }
 }
