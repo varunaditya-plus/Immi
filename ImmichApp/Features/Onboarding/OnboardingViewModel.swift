@@ -156,6 +156,7 @@ final class OnboardingViewModel {
     func prepareToEditServer() {
         session.cancelAuthentication()
         attemptID = UUID()
+        clearValidation()
         phase = .idle
     }
 

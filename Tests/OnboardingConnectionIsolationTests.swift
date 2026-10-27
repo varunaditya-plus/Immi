@@ -293,6 +293,44 @@ final class OnboardingConnectionIsolationTests: XCTestCase {
         XCTAssertNil(UserDefaults.standard.string(forKey: "onboarding.lastServer"))
     }
 
+    func testBackRejectsQueuedPasswordAndOAuthLoginsUntilAFreshConnection() async throws {
+        for usesOAuth in [false, true] {
+            OnboardingViewModel.clearStoredServer()
+            let (model, session) = fixture()
+            try await connect(model, session: session, request: 0, oauth: true)
+            session.shouldSucceedLogin = true
+            session.shouldSucceedOIDC = true
+            var started = false
+            let queued = Task { @MainActor in
+                started = true
+                return usesOAuth ? await model.signInWithOIDC() : await model.signIn()
+            }
+
+            // This actor has not yielded since queuing the login, so Back runs
+            // before the login enters either model method.
+            XCTAssertFalse(started)
+            model.prepareToEditServer()
+            assertUnvalidated(model)
+            let signedIn = await queued.value
+
+            XCTAssertTrue(started)
+            XCTAssertFalse(signedIn)
+            XCTAssertEqual(session.loginPasswordCallCount, 0)
+            XCTAssertEqual(session.loginOIDCCallCount, 0)
+            XCTAssertFalse(session.isLoggedIn)
+            XCTAssertNil(UserDefaults.standard.string(forKey: "onboarding.lastServer"))
+
+            try await connect(model, session: session, request: 2, oauth: true)
+            let freshSignIn = usesOAuth ? await model.signInWithOIDC() : await model.signIn()
+            XCTAssertTrue(freshSignIn)
+            XCTAssertEqual(session.passwordServers.count, usesOAuth ? 0 : 1)
+            XCTAssertEqual(session.oauthServers.count, usesOAuth ? 1 : 0)
+            XCTAssertTrue(session.isLoggedIn)
+            XCTAssertEqual(UserDefaults.standard.string(forKey: "onboarding.lastServer"),
+                           "https://original.example.com")
+        }
+    }
+
     private func fixture() -> (OnboardingViewModel, HeldOnboardingSession) {
         let session = HeldOnboardingSession()
         sessions.append(session)
