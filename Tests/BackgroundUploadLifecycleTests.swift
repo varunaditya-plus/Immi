@@ -56,7 +56,77 @@ final class BackgroundUploadQueueTests: XCTestCase {
         XCTAssertTrue(queue.snapshot.completionNotificationPending)
     }
 
-    func testRediscoveringSameFailedItemDoesNotReplayCompletion() throws {
+    func testAutomaticContinuationPreservesProgressAfterAnEntireWindowFinishes() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+        let queue = BackupQueueStore(fileURL: fixture.queueURL)
+        let first = (0..<100).map { "first-\($0)" }
+        let second = (0..<100).map { "second-\($0)" }
+        let last = (0..<25).map { "last-\($0)" }
+        try queue.enqueue(first)
+        for id in first { try queue.markCompleted(id) }
+        XCTAssertTrue(queue.items.isEmpty)
+        XCTAssertEqual(queue.snapshot.completed, 100)
+
+        try queue.enqueue(second, continuingBatch: true)
+
+        let secondWindow = BackupQueueStore(fileURL: fixture.queueURL)
+        XCTAssertEqual(secondWindow.snapshot.total, 200)
+        XCTAssertEqual(secondWindow.snapshot.completed, 100)
+        XCTAssertEqual(secondWindow.snapshot.queued, 100)
+        XCTAssertEqual(Set(secondWindow.readyItems().map(\.id)), Set(second))
+
+        for id in second { try queue.markCompleted(id) }
+        try queue.enqueue(last, continuingBatch: true)
+        let finalWindow = BackupQueueStore(fileURL: fixture.queueURL)
+        XCTAssertEqual(finalWindow.snapshot.total, 225)
+        XCTAssertEqual(finalWindow.snapshot.completed, 200)
+        XCTAssertEqual(finalWindow.snapshot.queued, 25)
+
+        for id in last { try queue.markCompleted(id) }
+        let completed = BackupQueueStore(fileURL: fixture.queueURL)
+        XCTAssertEqual(completed.snapshot.total, 225)
+        XCTAssertEqual(completed.snapshot.completed, 225)
+        XCTAssertEqual(completed.snapshot.unfinished, 0)
+        XCTAssertTrue(completed.snapshot.completionNotificationPending)
+        try queue.consumeCompletionNotification()
+        XCTAssertFalse(BackupQueueStore(fileURL: fixture.queueURL).snapshot.completionNotificationPending)
+    }
+
+    func testContinuationDoesNotResetExistingFailuresRetriesOrUploadAttempts() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+        let queue = BackupQueueStore(fileURL: fixture.queueURL)
+        let started = Date(timeIntervalSince1970: 100)
+        let retryAt = Date(timeIntervalSince1970: 500)
+        try queue.enqueue(["failed", "retry", "uploading", "completed"], now: started)
+        try queue.markPreparing("failed", phase: .livePhotoMotion, motionAssetID: "motion-failed", now: started)
+        try queue.markUploading("failed", phase: .livePhotoMotion, checksum: "failed-checksum", taskIdentifier: 1, now: started)
+        try queue.markFailed("failed", error: "invalid asset", now: started)
+        try queue.markPreparing("retry", phase: .primaryAsset, now: started)
+        try queue.markUploading("retry", phase: .primaryAsset, checksum: "retry-checksum", taskIdentifier: 2, now: started)
+        try queue.markRetry("retry", state: .retryScheduled, error: "temporary error", retryAt: retryAt, now: started)
+        try queue.markPreparing("uploading", phase: .primaryAsset, now: started)
+        try queue.markUploading("uploading", phase: .primaryAsset, checksum: "upload-checksum", taskIdentifier: 3, now: started)
+        try queue.markCompleted("completed")
+        let original = queue.items
+
+        try queue.enqueue(["failed", "retry", "uploading", "new", "new"], continuingBatch: true,
+            now: Date(timeIntervalSince1970: 200))
+
+        let restored = BackupQueueStore(fileURL: fixture.queueURL)
+        XCTAssertEqual(Array(restored.items.prefix(original.count)), original)
+        XCTAssertEqual(restored.snapshot.total, 5)
+        XCTAssertEqual(restored.snapshot.completed, 1)
+        XCTAssertEqual(restored.snapshot.failed, 1)
+        XCTAssertEqual(restored.snapshot.retryScheduled, 1)
+        XCTAssertEqual(restored.snapshot.active, 1)
+        XCTAssertEqual(restored.snapshot.queued, 1)
+        XCTAssertEqual(restored.readyItems(now: started).map(\.id), ["new"])
+        XCTAssertEqual(restored.item(id: "new")?.attemptCount, 0)
+    }
+
+    func testEnqueueingSameFailedItemDoesNotReplayCompletion() throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
         let queue = BackupQueueStore(fileURL: fixture.queueURL)
@@ -64,7 +134,7 @@ final class BackgroundUploadQueueTests: XCTestCase {
         try queue.markFailed("failed", error: "invalid asset")
         try queue.consumeCompletionNotification()
 
-        // Automatic scans rediscover failed local assets on every launch.
+        // A repeated enqueue request does not represent fresh work.
         try queue.enqueue(["failed"])
 
         XCTAssertFalse(queue.snapshot.completionNotificationPending)

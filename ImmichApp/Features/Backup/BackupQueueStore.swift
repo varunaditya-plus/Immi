@@ -246,9 +246,15 @@ final class BackupQueueStore {
         return replacedExistingOwner
     }
 
-    func enqueue(_ localIdentifiers: [String], now: Date = .now) throws {
+    /// Automatic discovery can append a window after fast transfers drain the
+    /// queue. Keep that run's progress; an ordinary new batch starts at zero.
+    func enqueue(
+        _ localIdentifiers: [String],
+        continuingBatch: Bool = false,
+        now: Date = .now
+    ) throws {
         guard !localIdentifiers.isEmpty else { return }
-        if ledger.items.isEmpty, ledger.completed > 0 {
+        if !continuingBatch, ledger.items.isEmpty, ledger.completed > 0 {
             ledger.completed = 0
         }
         var known = Set(ledger.items.map(\.id))

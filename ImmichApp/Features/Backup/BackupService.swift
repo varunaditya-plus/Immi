@@ -144,7 +144,9 @@ final class BackupService {
     private weak var session: SessionManager?
     private let dataManager: SwiftDataManager
     private let queue: BackupQueueStore
+    private let automaticDiscovery: AutomaticBackupDiscovery
     private var task: Task<Void, Never>?
+    private var workID: UUID?
     private var refillRequested = false
     private var allowsManualQueueRefill = false {
         didSet {
@@ -184,6 +186,7 @@ final class BackupService {
     init(dataManager: SwiftDataManager, queue: BackupQueueStore) {
         self.dataManager = dataManager
         self.queue = queue
+        automaticDiscovery = AutomaticBackupDiscovery(queue: queue, batchSize: BackupService.automaticBatchSize)
         isEnabled = UserDefaults.standard.bool(forKey: Self.enabledKey)
         cellularPhotos = UserDefaults.standard.bool(forKey: Self.cellularPhotosKey)
         cellularVideos = UserDefaults.standard.bool(forKey: Self.cellularVideosKey)
@@ -440,19 +443,13 @@ final class BackupService {
 
     /// Dipanggil saat aplikasi dibuka atau kembali aktif.
     func start() {
-        guard isEnabled, task == nil, repo != nil, let ownership = uploadOwnership else { return }
+        guard isEnabled, task == nil, repo != nil, uploadOwnership != nil else { return }
         guard dataManager.isPersistentStoreAvailable else {
             lastError = BackupPersistenceError().localizedDescription
             return
         }
-        task = Task { [weak self] in
-            await self?.enqueueAutomaticBatch()
-            guard !Task.isCancelled, self?.uploadOwnership == ownership else { return }
-            self?.task = nil
-            self?.refreshCounts()
-            self?.applyQueueSnapshot()
-            self?.resumeQueuedUploadsIfRequested()
-        }
+        automaticDiscovery.beginCycle()
+        beginQueueWork(discover: true)
     }
 
     /// Completion frees a staging slot. Refill in foreground as well as during
@@ -482,51 +479,89 @@ final class BackupService {
         refillRequested = false
         guard isEnabled || allowsManualQueueRefill,
               acceptsUploadResults, hasAuthenticatedSession, repo != nil,
-              let ownership = uploadOwnership,
-              dataManager.isPersistentStoreAvailable,
-              !queue.readyItems(limit: 1).isEmpty else { return }
+              uploadOwnership != nil, dataManager.isPersistentStoreAvailable else { return }
+        guard !queue.readyItems(limit: 1).isEmpty
+                || (hasAutomaticCandidates && canUploadNow) else { return }
+        beginQueueWork(discover: isEnabled)
+    }
+
+    private func beginQueueWork(discover: Bool) {
+        guard let ownership = uploadOwnership else { return }
+        let id = UUID()
+        workID = id
         task = Task { [weak self] in
-            await NetworkMonitor.shared.waitUntilReady()
-            await self?.processReadyQueueItems()
-            guard !Task.isCancelled, self?.uploadOwnership == ownership else { return }
-            self?.task = nil
-            self?.refreshCounts()
-            self?.applyQueueSnapshot()
-            self?.resumeQueuedUploadsIfRequested()
+            guard let self else { return }
+            defer { self.finishQueueWork(id, ownership: ownership) }
+            if discover {
+                await self.enqueueAutomaticBatch()
+            } else {
+                await NetworkMonitor.shared.waitUntilReady()
+                guard !Task.isCancelled, self.workID == id,
+                      self.uploadOwnership == ownership else { return }
+                await self.processReadyQueueItems()
+            }
         }
     }
 
-    /// Discover up to 100 metadata candidates. Only the staging window below
-    /// may export originals and hand their multipart bodies to URLSession.
+    private func finishQueueWork(_ id: UUID, ownership: BackupUploadOwnership) {
+        guard workID == id else { return }
+        task = nil
+        workID = nil
+        guard uploadOwnership == ownership else { return }
+        refreshCounts()
+        applyQueueSnapshot()
+        resumeQueuedUploadsIfRequested()
+    }
+
+    private var hasAutomaticCandidates: Bool {
+        guard isEnabled, acceptsUploadResults, hasAuthenticatedSession,
+              repo != nil, uploadOwnership != nil, dataManager.isPersistentStoreAvailable else { return false }
+        return automaticDiscovery.hasCandidates(
+            photos: LocalPhotoLibrary.shared.photos,
+            uploadedIDs: dataManager.uploadedLocalIdentifiers())
+    }
+
+    /// Replenish the metadata window while preparation can make progress.
+    /// Original exports remain bounded by the staging policy below.
     private func enqueueAutomaticBatch() async {
         await NetworkMonitor.shared.waitUntilReady()
-        guard !Task.isCancelled, let ownership = uploadOwnership else { return }
+        guard !Task.isCancelled, isEnabled, let ownership = uploadOwnership else { return }
 
         do {
             guard try await reconcileBackgroundTasks(ownership: ownership) else { return }
         } catch {
+            guard !Task.isCancelled, uploadOwnership == ownership else { return }
             lastError = error.localizedDescription
             acceptsUploadResults = false
             applyQueueSnapshot()
             return
         }
-        let active = await BackupUploader.shared.activeLocalIdentifiers(ownership: ownership)
-        guard !Task.isCancelled, uploadOwnership == ownership else { return }
-        let uploaded = dataManager.uploadedLocalIdentifiers()
-        let pending = LocalPhotoLibrary.shared.photos
-            .filter { !uploaded.contains($0.id) && !active.contains($0.id) }
-            .sorted { $0.createdAt > $1.createdAt }
-            .prefix(Self.automaticBatchSize)
         do {
-            try queue.enqueue(pending.map(\.id))
+            var processedPass = false
+            try await automaticDiscovery.run(
+                photos: { LocalPhotoLibrary.shared.photos },
+                uploadedIDs: { self.dataManager.uploadedLocalIdentifiers() },
+                activeIDs: { await BackupUploader.shared.activeLocalIdentifiers(ownership: ownership) },
+                shouldContinue: {
+                    self.isEnabled && self.uploadOwnership == ownership
+                        && self.repo != nil && self.dataManager.isPersistentStoreAvailable
+                        && (!processedPass || self.canUploadNow)
+                },
+                processReady: {
+                    guard !Task.isCancelled, self.uploadOwnership == ownership else { return }
+                    self.applyQueueSnapshot()
+                    await self.processReadyQueueItems()
+                    processedPass = true
+                })
         } catch {
+            guard !Task.isCancelled, uploadOwnership == ownership else { return }
             lastError = error.localizedDescription
             acceptsUploadResults = false
             applyQueueSnapshot()
             return
         }
+        guard !Task.isCancelled, uploadOwnership == ownership else { return }
         applyQueueSnapshot()
-        await processReadyQueueItems()
     }
 
     private func reconcileBackgroundTasks(ownership: BackupUploadOwnership) async throws -> Bool {
@@ -577,19 +612,21 @@ final class BackupService {
         }
         applyQueueSnapshot()
         allowsManualQueueRefill = true
-        let work = Task { await processReadyQueueItems() }
+        let id = UUID()
+        workID = id
+        let work = Task {
+            defer { finishQueueWork(id, ownership: ownership) }
+            await processReadyQueueItems()
+        }
         task = work
         await work.value
-        guard !work.isCancelled, uploadOwnership == ownership else { return }
-        task = nil
-        refreshCounts()
-        resumeQueuedUploadsIfRequested()
     }
 
     func stop() {
         refillRequested = false
         task?.cancel()
         task = nil
+        workID = nil
         libraryChangeTask?.cancel()
         libraryChangeTask = nil
         retryWakeTask?.cancel()
@@ -646,6 +683,7 @@ final class BackupService {
         albumRepo = nil
         task?.cancel()
         task = nil
+        workID = nil
         pendingPhotos.removeAll()
         let message = String(localized: "Your Immich session expired. Sign in again to resume backup.")
         do {
@@ -756,11 +794,12 @@ final class BackupService {
     /// Dipakai tugas latar, yang WAJIB memanggil `setTaskCompleted` — dan tidak
     /// boleh memanggilnya sebelum kerjanya betul-betul selesai.
     ///
-    /// `task` dibaca sebelum penangguhan pertama, jadi nilainya masih yang baru
-    /// dipasang `start()`: putaran itu terikat main actor dan tidak bisa mulai
-    /// berjalan — apalagi membereskan dirinya — selagi kita masih memegang actor.
+    /// Completion can schedule a successor pass. Follow that task too before
+    /// releasing the background execution time used to prepare its uploads.
     func waitUntilFinished() async {
-        await task?.value
+        while !Task.isCancelled, let work = task {
+            await work.value
+        }
     }
 
     /// Jaringan mengizinkan foto INI naik sekarang.
@@ -1447,6 +1486,8 @@ final class BackupService {
     /// putaran dari RAM yang bisa berbeda setelah cold launch.
     private func applyQueueSnapshot(notify: Bool = true) {
         let state = queue.snapshot
+        let defersCompletion = state.unfinished == 0 && isEnabled
+            && (task != nil || enqueueDepth > 0 || hasAutomaticCandidates)
         uploadItems = queue.items.sorted { lhs, rhs in
             if lhs.state.isActive != rhs.state.isActive {
                 return lhs.state.isActive
@@ -1463,8 +1504,8 @@ final class BackupService {
         waitingForICloud = state.waitingForICloud
         waitingForAuthentication = state.waitingForAuthentication
         scheduledForRetry = state.retryScheduled
-        queueStatusTitle = state.presentation?.title
-        queueStatusBody = state.presentation?.body
+        queueStatusTitle = defersCompletion ? nil : state.presentation?.title
+        queueStatusBody = defersCompletion ? nil : state.presentation?.body
         scheduleRetryWake(for: state.nextAttemptAt)
         if let queueError = state.lastError {
             lastError = queueError
@@ -1472,11 +1513,14 @@ final class BackupService {
             lastError = nil
         }
         notificationRevision += 1
-        guard notify, isEnabled else { return }
+        guard notify, isEnabled, !defersCompletion else { return }
         let revision = notificationRevision
         Task { [weak self] in
             await BackupNotifier.shared.ensureAuthorization(prompt: false)
             guard let self, self.notificationRevision == revision else { return }
+            guard state.unfinished != 0
+                    || (self.task == nil && self.enqueueDepth == 0 && !self.hasAutomaticCandidates)
+            else { return }
             if state.unfinished == 0, state.completionNotificationPending {
                 // Consume before posting. This intentionally guarantees
                 // at-most-once delivery across process termination: a launch
@@ -1504,15 +1548,15 @@ final class BackupService {
         }
     }
 
-    /// Menutup putaran, sekali saja.
-    ///
-    /// Dipanggil dari dua arah — penyelesaian terakhir, dan akhir pengantrean
-    /// yang ternyata tidak menyerahkan apa pun — jadi penjaga `isUploading` di
-    /// depan bukan basa-basi: tanpa itu "Backup Complete" bisa terbit dua kali
-    /// untuk satu putaran.
+    /// Settle only after queued preparation and automatic discovery have ended.
     private func finishRunIfSettled() {
         let state = queue.snapshot
         guard state.active == 0, state.queued == 0 else { return }
+        if hasAutomaticCandidates {
+            if canUploadNow { refillRequested = true }
+            else { BackupScheduler.schedule() }
+            return
+        }
         allowsManualQueueRefill = false
         lastRunAt = Date()
         applyQueueSnapshot()
