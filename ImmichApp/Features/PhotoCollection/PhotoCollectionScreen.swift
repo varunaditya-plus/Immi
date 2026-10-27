@@ -95,6 +95,8 @@ struct PhotoCollectionScreen<Options: View>: View {
     /// sampah. Mengubah peringatannya, dan membuat penghapusan lewat context menu
     /// ikut bertanya lebih dulu.
     var deletesPermanently = false
+    /// Trash includes soft-deleted photos while still excluding unavailable ones.
+    var removalScope: RemovedAssets.Scope = .library
     /// Detail album di iPad tetap membutuhkan sidebar sebagai jalan kembali ke
     /// All Albums. Di compact/iPhone, tab bar tetap disembunyikan seperti biasa.
     var keepsTabBarVisibleOnRegularWidth = false
@@ -161,11 +163,12 @@ struct PhotoCollectionScreen<Options: View>: View {
     /// sudah tidak ada tetap berdiri di sini sampai layarnya memuat ulang dari
     /// server, dan menekannya berujung pada aset yang tidak ada.
     private var visibleAssets: [AssetLite] {
-        removed.filter(assets)
+        removed.filter(assets, scope: removalScope)
     }
 
     var body: some View {
         screenContent
+            .onChange(of: SwiftDataManager.shared.assetMutationRevision) { _, _ in onRetry() }
             // Bar transparan selama judul sampulnya masih terlihat, supaya
             // gambarnya penuh sampai ke belakang tombol-tombolnya. Begitu
             // judulnya merapat ke bar, latarnya dipasang — kalau tidak, judul
@@ -391,16 +394,25 @@ struct PhotoCollectionScreen<Options: View>: View {
         visibleAssets.first { $0.id == id }
     }
 
-    /// Sidik jari isi koleksi: jumlah plus kedua ujungnya.
-    ///
-    /// Perubahan status favorit sengaja TIDAK ikut terhitung — itu tidak
-    /// memindahkan foto mana pun, jadi tidak ada yang perlu dikelompokkan ulang.
-    private var assetsSignature: String {
-        "\(visibleAssets.count)|\(visibleAssets.first?.id ?? "")|\(visibleAssets.last?.id ?? "")|\(layout == .monthly)"
+    private struct CollectionContent: Equatable {
+        let assets: [AssetLite]
+        let monthly: Bool
+
+        static func == (lhs: CollectionContent, rhs: CollectionContent) -> Bool {
+            lhs.monthly == rhs.monthly
+                && lhs.assets.elementsEqual(rhs.assets) { $0.hasSameContent(as: $1) }
+        }
+    }
+
+    private var assetsSignature: CollectionContent {
+        CollectionContent(assets: visibleAssets, monthly: layout == .monthly)
     }
 
     private func rebuildSections() async {
-        gridSections = await groupAssets(visibleAssets, monthly: layout == .monthly)
+        let input = assetsSignature
+        let sections = await groupAssets(input.assets, monthly: input.monthly)
+        guard !Task.isCancelled, input == assetsSignature else { return }
+        gridSections = sections
     }
 
     // MARK: - Sampul

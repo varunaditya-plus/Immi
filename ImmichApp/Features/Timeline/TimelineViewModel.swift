@@ -41,7 +41,13 @@ final class TimelineViewModel {
     /// ia diratakan ulang setiap kali penutup fullScreenCover dievaluasi —
     /// termasuk pada SETIAP usapan halaman, karena foto yang tampil ikut berubah.
     /// Pada puluhan ribu foto itu penyalinan array penuh per usapan.
-    private(set) var allAssets: [AssetLite] = []
+    // Array equality uses AssetLite's stable IDs. Keep content changes observable.
+    private struct AssetStorage { var assets: [AssetLite] = [] }
+    private var assetStorage = AssetStorage()
+    private(set) var allAssets: [AssetLite] {
+        get { assetStorage.assets }
+        set { assetStorage = AssetStorage(assets: newValue) }
+    }
     var phase: LoadingPhase<Void> = .idle
     var albums: [AlbumResponseDTO] = []
     var actionError: String?
@@ -58,9 +64,11 @@ final class TimelineViewModel {
     /// puluhan ribu objek.
     private(set) var hasLocalData = false
 
-    /// Sidik jari isi linimasa terakhir yang berhasil disusun.
+    /// Ordered content last admitted to the timeline.
     private var signature: Signature?
+    private var rebuildRevision = 0
     private var hasLoaded = false
+    private var loadedMutationRevision: UUID?
     /// Pilihan album yang isinya sudah dimuat.
     ///
     /// Bukan bendera "sudah pernah", melainkan APA yang sudah dimuat. Dengan
@@ -202,18 +210,17 @@ final class TimelineViewModel {
         await rebuild()
     }
 
-    /// Dipakai `task` layar, yang berjalan ulang SETIAP KALI tab dibuka lagi.
-    ///
-    /// Membaca ulang seluruh cache tiap perpindahan tab itu mahal — pada
-    /// perpustakaan puluhan ribu foto, itulah jeda berdetik-detik saat berpindah.
-    /// Linimasa hanya berubah lewat sync atau aksi lokal, dan keduanya sudah
-    /// memuat ulang sendiri, jadi pembukaan tab tidak perlu melakukan apa pun.
+    /// Reuse loaded content unless a committed local mutation made it stale.
     func loadTimelineIfNeeded() async {
-        guard !hasLoaded || signature?.nonTimelineAssetIDs != (dataManager?.nonTimelineAssetIDs ?? []) else { return }
+        guard !hasLoaded || loadedMutationRevision != dataManager?.assetMutationRevision
+            || signature?.nonTimelineAssetIDs != (dataManager?.nonTimelineAssetIDs ?? []) else { return }
         await loadTimeline()
     }
 
     private func rebuild() async {
+        rebuildRevision &+= 1
+        let revision = rebuildRevision
+        let mutationRevision = dataManager?.assetMutationRevision
         let nonTimelineIDs = dataManager?.nonTimelineAssetIDs ?? []
         let rows = mergedRows()
         hasLocalData = !rows.isEmpty
@@ -227,6 +234,7 @@ final class TimelineViewModel {
             sections = []
             allAssets = []
             signature = nil
+            loadedMutationRevision = mutationRevision
             phase = .loaded(())
             return
         }
@@ -239,6 +247,7 @@ final class TimelineViewModel {
         // ikut terguncang tanpa ada satu foto pun yang berubah.
         let newSignature = Signature(rows, nonTimelineAssetIDs: nonTimelineIDs)
         guard newSignature != signature else {
+            loadedMutationRevision = mutationRevision
             hasLoaded = true
             phase = .loaded(())
             return
@@ -250,13 +259,15 @@ final class TimelineViewModel {
         // yang boleh menahan antarmuka — dan tidak ada satu pun bagiannya yang
         // butuh main thread.
         let built = await Self.build(rows, calendar: calendar)
-        guard accountGeneration == LocalSnapshot.generation else { return }
+        guard accountGeneration == LocalSnapshot.generation,
+              !Task.isCancelled, revision == rebuildRevision else { return }
         guard nonTimelineIDs == (dataManager?.nonTimelineAssetIDs ?? []) else {
             await rebuild()
             return
         }
 
         signature = newSignature
+        loadedMutationRevision = mutationRevision
         content = built.content
         allAssets = built.assets
         hasLoaded = true
@@ -355,58 +366,21 @@ final class TimelineViewModel {
         await rebuild()
     }
 
-    /// Sidik jari murah untuk isi linimasa.
-    ///
-    /// Cukup jumlah plus aset di kedua ujungnya: penambahan, penghapusan, dan
-    /// perubahan tanggal semuanya menggeser salah satu dari ketiganya. Menyusuri
-    /// seluruh id hanya akan mengulang pekerjaan yang justru ingin dihindari.
+    /// Compare every ordered row; interior replacements and metadata changes
+    /// can keep the same count and endpoint IDs.
     private struct Signature: Equatable {
-        let count: Int
-        let firstID: String?
-        let lastID: String?
-        // An interior asset may become private while another becomes visible,
-        // leaving counts and endpoints unchanged.
+        let rows: [TimelineRow]
         let nonTimelineAssetIDs: Set<String>
 
-        /// Jumlah aset perangkat ikut dihitung TERPISAH.
-        ///
-        /// Menyisipkan foto lokal di tengah tidak mengubah jumlah total maupun
-        /// kedua ujungnya kalau ada foto server yang hilang di saat yang sama —
-        /// dan penjaga ini akan melewatkannya diam-diam.
-        let deviceCount: Int
-
-        /// Yang ada di KEDUA tempat, dihitung terpisah lagi.
-        ///
-        /// Tanpa ini "Delete from Device" tidak pernah terlihat hasilnya.
-        /// Menghapus salinan perangkat mengubah asalnya dari `.both` jadi
-        /// `.server` — jumlah baris tetap, kedua ujungnya tetap, dan `.both`
-        /// maupun `.server` sama-sama BUKAN `.device`, jadi ketiga angka lama
-        /// tidak bergeming. Sidik jarinya identik, penjaga di `rebuild` pulang
-        /// lebih awal, dan lencananya bertahan menunjuk berkas yang sudah tidak
-        /// ada.
-        ///
-        /// Arah sebaliknya kebetulan selamat: unggahan mengubah `.device` jadi
-        /// `.both`, dan itu menggeser `deviceCount`. Kebetulan yang menyamarkan
-        /// setengah dari lubangnya.
-        let linkedCount: Int
-
         init(_ rows: [TimelineRow], nonTimelineAssetIDs: Set<String>) {
+            self.rows = rows
             self.nonTimelineAssetIDs = nonTimelineAssetIDs
-            count = rows.count
-            firstID = rows.first?.asset.id
-            lastID = rows.last?.asset.id
+        }
 
-            var device = 0
-            var linked = 0
-            for row in rows {
-                switch row.asset.origin {
-                case .device: device += 1
-                case .both:   linked += 1
-                case .server: break
-                }
+        static func == (lhs: Signature, rhs: Signature) -> Bool {
+            lhs.nonTimelineAssetIDs == rhs.nonTimelineAssetIDs && lhs.rows.elementsEqual(rhs.rows) {
+                $0.monthKey == $1.monthKey && $0.asset.hasSameContent(as: $1.asset)
             }
-            deviceCount = device
-            linkedCount = linked
         }
     }
 
@@ -574,6 +548,8 @@ final class TimelineViewModel {
     /// tulisannya. Hasilnya: foto yang baru saja difavoritkan tetap menawarkan
     /// "Favorite", tidak pernah "Unfavorite".
     func setFavorite(_ id: String, to value: Bool) {
+        rebuildRevision &+= 1
+        signature = nil
         var updated = content
         for sectionIndex in updated.sections.indices {
             guard let assetIndex = updated.sections[sectionIndex].assets
@@ -637,8 +613,6 @@ final class TimelineViewModel {
             try await assetRepo.delete(target.serverID)
             guard accountGeneration == LocalSnapshot.generation else { return false }
             removeAsset(target.displayID)
-            // Dihapus berarti BUANG dari cache, bukan disembunyikan.
-            try? dataManager?.purgeAssets([target.serverID])
             return true
         } catch {
             actionError = Self.describe(error)
@@ -718,7 +692,6 @@ final class TimelineViewModel {
         let unresolvedServerCount = selected.count - localOnly.count - serverTargets.count
 
         var removedDisplayIDs = Set<String>()
-        var removedServerIDs = Set<String>()
         var failedCount = unresolvedServerCount
         var lastServerError: Error?
 
@@ -736,13 +709,11 @@ final class TimelineViewModel {
             let result = await deleteServerTargets(serverTargets, using: assetRepo)
             guard accountGeneration == LocalSnapshot.generation else { return false }
             removedDisplayIDs.formUnion(result.succeeded.map(\.displayID))
-            removedServerIDs.formUnion(result.succeeded.map(\.serverID))
             failedCount += result.failedCount
             lastServerError = result.lastError
         }
 
         removeAssets(removedDisplayIDs)
-        try? dataManager?.purgeAssets(Array(removedServerIDs))
 
         guard failedCount == 0 else {
             // Kalau semuanya gagal, pesan asli server paling berguna. Pada
@@ -892,6 +863,7 @@ final class TimelineViewModel {
     /// foto, sehingga grid terlihat berkedut menyusun ulang berkali-kali.
     private func removeAssets(_ ids: Set<String>) {
         guard !ids.isEmpty else { return }
+        rebuildRevision &+= 1
         withAnimation(.easeInOut(duration: 0.25)) {
             var updatedSections = sections
             var changedMonths = Set<String>()

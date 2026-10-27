@@ -11,7 +11,13 @@ import Observation
 final class AssetGridViewModel {
     private let snapshotGeneration = LocalSnapshot.generation
 
-    var assets: [AssetLite] = []
+    // AssetLite equality compares IDs; this storage also publishes metadata changes.
+    private struct AssetStorage { var assets: [AssetLite] = [] }
+    private var assetStorage = AssetStorage()
+    var assets: [AssetLite] {
+        get { assetStorage.assets }
+        set { assetStorage = AssetStorage(assets: newValue) }
+    }
     var phase: LoadingPhase<Void> = .idle
 
     private let assetRepo: AssetDetailRepository
@@ -65,12 +71,11 @@ final class AssetGridViewModel {
             let fetched = try await loader()
             guard snapshotGeneration == LocalSnapshot.generation else { return }
             if let snapshotKey {
-                // Hanya dipasang ulang kalau isinya memang berbeda — lihat
-                // alasannya di `LocalSnapshot.save`.
-                if LocalSnapshot.save(fetched, for: snapshotKey, expectedGeneration: snapshotGeneration) || assets.isEmpty {
-                    assets = fetched
-                }
-            } else {
+                LocalSnapshot.save(fetched, for: snapshotKey, expectedGeneration: snapshotGeneration)
+            }
+            // Another instance may already have written this snapshot. Compare
+            // against this screen's content rather than the disk write result.
+            if !assets.elementsEqual(fetched, by: { $0.hasSameContent(as: $1) }) {
                 assets = fetched
             }
             phase = .loaded(())
@@ -178,7 +183,6 @@ final class AssetGridViewModel {
             let moved = Set(ids)
             assets.removeAll { moved.contains($0.id) }
             persist()
-
             return true
         } catch {
             phase = .failed((error as? APIError)?.errorDescription
@@ -200,7 +204,6 @@ final class AssetGridViewModel {
             let moved = Set(ids)
             assets.removeAll { moved.contains($0.id) }
             persist()
-
             return true
         } catch {
             phase = .failed((error as? APIError)?.errorDescription
@@ -239,18 +242,29 @@ final class AssetGridViewModel {
 
     // MARK: - Tong sampah
 
+    private func restorable(_ candidates: [AssetLite]) -> [AssetLite] {
+        RemovedAssets.shared.filter(candidates, scope: .trash)
+            .filter { !DeletedServerAssetRegistry.shared.isPermanentlyDeleted($0.id) }
+    }
+
     /// Mengembalikan foto terpilih dari tong sampah.
     func restore(_ ids: [String], using repo: TrashRepository) async {
         guard !ids.isEmpty else { return }
         // DICATAT SEBELUM dibuang dari daftar: setelah `removeAll`, tidak ada
         // lagi tempat mengambil rasio dan thumbhash-nya untuk ditulis balik ke
         // cache linimasa.
-        let restoredAssets = assets.filter { ids.contains($0.id) }
+        let selected = Set(ids)
+        let candidates = restorable(assets).filter { selected.contains($0.id) }
+        let requestedIDs = candidates.map(\.id)
+        guard !requestedIDs.isEmpty else { return }
         do {
-            try await repo.restore(ids)
+            try await repo.restore(requestedIDs)
             guard snapshotGeneration == LocalSnapshot.generation else { return }
-            DeletedServerAssetRegistry.shared.restore(ids)
-            let restored = Set(ids)
+            let restoredAssets = restorable(candidates)
+            let restoredIDs = restoredAssets.map(\.id)
+            DeletedServerAssetRegistry.shared.restore(restoredIDs)
+            RemovedAssets.shared.restore(restoredIDs)
+            let restored = Set(requestedIDs)
             assets.removeAll { restored.contains($0.id) }
             persist()
             // Aset yang dibuang sudah tidak ada di cache linimasa, jadi ini
@@ -263,12 +277,16 @@ final class AssetGridViewModel {
     }
 
     func restoreAll(using repo: TrashRepository) async {
+        let candidates = restorable(assets)
         do {
             try await repo.restoreAll()
             guard snapshotGeneration == LocalSnapshot.generation else { return }
+            let restoredAssets = restorable(candidates)
             DeletedServerAssetRegistry.shared.restoreAllFromTrash()
+            RemovedAssets.shared.restoreAllFromTrash()
             assets.removeAll()
             persist()
+            try? dataManager.restoreToTimeline(restoredAssets)
         } catch {
             phase = .failed((error as? APIError)?.errorDescription
                 ?? String(localized: "Failed to restore photos"))
@@ -276,10 +294,13 @@ final class AssetGridViewModel {
     }
 
     func emptyTrash(using repo: TrashRepository) async {
+        let removedIDs = assets.map(\.id)
         do {
             try await repo.empty()
             guard snapshotGeneration == LocalSnapshot.generation else { return }
             DeletedServerAssetRegistry.shared.emptyTrash()
+            RemovedAssets.shared.remove(removedIDs)
+            RemovedAssets.shared.emptyTrash()
             assets.removeAll()
             persist()
         } catch {

@@ -69,6 +69,8 @@ final class SwiftDataManager {
     /// Upload preparation can finish before its background transfer. Viewers
     /// refresh device/server actions only after a mapping has actually saved.
     private(set) var backupMappingRevision = UUID()
+    /// Local actions can change the timeline without a sync completing.
+    private(set) var assetMutationRevision = UUID()
 
     var isPersistentStoreAvailable: Bool {
         startupState.isPersistentStoreAvailable
@@ -322,6 +324,12 @@ final class SwiftDataManager {
         try saveWithTimelineVisibility(upserts) {
             try context.save()
         }
+
+        let deleted = Set(deletedIds)
+        RemovedAssets.shared.restore(upserts.map(\.id).filter { !deleted.contains($0) })
+        let trashed = deletedIds.filter { DeletedServerAssetRegistry.shared.isTrashed($0) }
+        RemovedAssets.shared.remove(trashed, reason: .trashed)
+        RemovedAssets.shared.remove(deletedIds.filter { !DeletedServerAssetRegistry.shared.isTrashed($0) })
     }
 
     private func saveWithTimelineVisibility(
@@ -365,7 +373,7 @@ final class SwiftDataManager {
     /// stream hanya membawa yang BERUBAH, dan dari sudut pandang server tidak ada
     /// yang berubah — jadi kalau tidak dibuang di sini ia menetap sampai ada
     /// sync penuh.
-    func purgeAssets(_ ids: [String]) throws {
+    func purgeAssets(_ ids: [String], reason: RemovedAssets.Reason = .unavailable) throws {
         guard !ids.isEmpty else { return }
         try applySyncBatch(upserts: [], deletedIds: ids)
         // Satu titik cegat untuk SEMUA jalur yang membuang aset.
@@ -374,7 +382,8 @@ final class SwiftDataManager {
         // Favorites, dan foto per orang punya potretnya masing-masing. Mencatat
         // pembuangannya di sini berarti setiap layar bisa menyaring miliknya
         // sendiri tanpa ada yang perlu diberi tahu satu per satu.
-        RemovedAssets.shared.remove(ids)
+        RemovedAssets.shared.remove(ids, reason: reason)
+        assetMutationRevision = UUID()
     }
 
     /// Dipecah per potongan: SQLite membatasi jumlah pengikat dalam satu klausa
@@ -419,11 +428,49 @@ final class SwiftDataManager {
 
     // MARK: - Tambalan dari layar lain
 
+    /// Patch only the fields accepted by an asset action. The cache can contain
+    /// visibility and media metadata that the detail response does not include.
+    func patchCachedAsset(
+        _ id: String,
+        isFavorite: Bool? = nil,
+        createdAt: Date? = nil,
+        description: String? = nil,
+        latitude: Double? = nil,
+        longitude: Double? = nil
+    ) throws {
+        guard let asset = getCachedAsset(id: id) else {
+            // A collection may show a server asset before its first sync. Its
+            // observers still need the accepted action, without inventing a row.
+            assetMutationRevision = UUID()
+            return
+        }
+        if let isFavorite { asset.isFavorite = isFavorite }
+        if let createdAt {
+            asset.createdAt = createdAt
+            asset.monthKey = MonthKey.of(createdAt)
+        }
+        if description != nil || createdAt != nil || latitude != nil || longitude != nil {
+            var exif = asset.exifData
+                .flatMap { $0.data(using: .utf8) }
+                .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+            if let description { exif["description"] = description }
+            if let createdAt {
+                exif["dateTimeOriginal"] = ISO8601DateFormatter.immichFractional.string(from: createdAt)
+            }
+            if let latitude { exif["latitude"] = latitude }
+            if let longitude { exif["longitude"] = longitude }
+            asset.exifData = String(data: try JSONSerialization.data(withJSONObject: exif), encoding: .utf8)
+        }
+        try modelContext.save()
+        assetMutationRevision = UUID()
+    }
+
     /// Track whether a server asset and its mapped device copy may appear in
     /// Photos, even when the server row is absent from the rebuildable cache.
     func setTimelineVisibility(_ ids: [String], inTimeline: Bool) throws {
         guard !ids.isEmpty else { return }
         visibilityMutationRevision = UUID()
+        assetMutationRevision = UUID()
         if inTimeline {
             try saveCachedTimelineVisibility(ids, inTimeline: true)
             let remaining = nonTimelineAssetIDs.subtracting(ids)
@@ -484,6 +531,7 @@ final class SwiftDataManager {
             upsert(cached)
         }
         try modelContext.save()
+        assetMutationRevision = UUID()
     }
 
     func cachedAssetCount() -> Int {

@@ -71,6 +71,19 @@ struct AssetLite: Identifiable, Hashable, Sendable, Codable {
     static func == (lhs: AssetLite, rhs: AssetLite) -> Bool {
         lhs.id == rhs.id
     }
+
+    /// Identity stays stable while these values change the displayed content.
+    func hasSameContent(as other: AssetLite) -> Bool {
+        id == other.id
+            && isVideo == other.isVideo
+            && ratio == other.ratio
+            && thumbhash == other.thumbhash
+            && createdAt == other.createdAt
+            && isFavorite == other.isFavorite
+            && duration == other.duration
+            && livePhotoVideoID == other.livePhotoVideoID
+            && origin == other.origin
+    }
 }
 
 /// Init tambahan HARUS di extension.

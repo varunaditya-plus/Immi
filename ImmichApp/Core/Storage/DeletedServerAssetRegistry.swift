@@ -28,6 +28,9 @@ final class DeletedServerAssetRegistry {
         trashedIDs.union(permanentIDs)
     }
 
+    func isTrashed(_ id: String) -> Bool { trashedIDs.contains(id) }
+    func isPermanentlyDeleted(_ id: String) -> Bool { permanentIDs.contains(id) }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         trashedIDs = Set(defaults.stringArray(forKey: Key.trashed) ?? [])

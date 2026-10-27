@@ -243,8 +243,7 @@ struct TimelineView: View {
         .onChange(of: LocalPhotoLibrary.shared.revision) { _, _ in
             Task { await vm?.reloadDevicePhotos() }
         }
-        .onChange(of: SwiftDataManager.shared.nonTimelineAssetIDs) { _, _ in
-            // Search, Library, and sync can hide assets while Photos stays alive.
+        .onChange(of: SwiftDataManager.shared.assetMutationRevision) { _, _ in
             Task { await vm?.loadTimeline() }
         }
         .deleteFromDeviceAlert($deviceDeleteID) { deleteFeedback += 1 }

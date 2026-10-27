@@ -762,6 +762,7 @@ final class PhotoGridController: UIViewController {
             guard let self else { return }
             guard self.contentRevision == revision else { return }
             self.applyingSnapshotRevision = nil
+            self.refreshVisibleHeaders()
             if let anchor {
                 self.restorePosition(anchor)
             } else if self.isAnchoredToNewest {
@@ -771,6 +772,16 @@ final class PhotoGridController: UIViewController {
                 // pengguna menggeser grid sendiri.
                 _ = self.scrollToNewestIfNeeded()
             }
+        }
+    }
+
+    private func refreshVisibleHeaders() {
+        let kind = UICollectionView.elementKindSectionHeader
+        for path in collectionView.indexPathsForVisibleSupplementaryElements(ofKind: kind) {
+            guard let sectionID = dataSource.sectionIdentifier(for: path.section),
+                  let header = collectionView.supplementaryView(forElementKind: kind, at: path) as? PhotoGridHeaderView
+            else { continue }
+            header.configure(title: sectionTitles[sectionID] ?? "")
         }
     }
 
@@ -801,8 +812,7 @@ final class PhotoGridController: UIViewController {
         let changed = current.compactMap { asset -> String? in
             guard existing.contains(asset.id),
                   let previous = renderedAssets[asset.id],
-                  previous.origin != asset.origin
-                      || previous.isFavorite != asset.isFavorite
+                  !previous.hasSameContent(as: asset)
             else { return nil }
             return asset.id
         }
@@ -933,44 +943,12 @@ final class PhotoGridController: UIViewController {
         }
     }
 
-    /// Pembanding murah: jumlah section, plus jumlah dan ujung tiap section.
-    /// Isi yang SAMA — termasuk hal-hal yang hidup di dalam sel.
-    ///
-    /// Dulu pembandingnya hanya id section, jumlah aset, dan id aset terakhir.
-    /// Cepat, tapi buta terhadap perubahan yang tidak menggeser satu pun dari
-    /// ketiganya: foto selesai diunggah, atau salinan perangkatnya dihapus. Yang
-    /// berubah cuma `origin` — daftarnya sama persis, urutannya sama persis —
-    /// jadi `apply` pulang lebih awal dan lencananya tidak pernah digambar ulang.
-    ///
-    /// Gejalanya khas dan sempat menyesatkan: context menu-nya BENAR sementara
-    /// lencananya salah. Menu dibaca langsung dari view model tiap kali dibuka;
-    /// lencana hidup di sel, dan sel hanya digambar ulang lewat jalur ini.
-    ///
-    /// Sekarang setiap aset dibandingkan isinya. Lintasan penuh atas puluhan
-    /// ribu perbandingan bilangan hitungannya mikrodetik — jauh lebih murah
-    /// daripada yang dijaganya, yaitu membangun ulang snapshot beserta diff-nya.
-    /// Dan begitu ada satu yang berbeda, ia langsung berhenti.
     private func isSameContent(as other: [TimelineSection]) -> Bool {
-        guard sections.count == other.count else { return false }
-        for (lhs, rhs) in zip(sections, other) {
-            if lhs.id != rhs.id || lhs.assets.count != rhs.assets.count { return false }
-            for (a, b) in zip(lhs.assets, rhs.assets) where !Self.rendersSame(a, b) {
-                return false
-            }
+        (pending?.sections ?? sections).elementsEqual(other) { lhs, rhs in
+            lhs.id == rhs.id && lhs.title == rhs.title
+                && lhs.count == rhs.count && lhs.startIndex == rhs.startIndex
+                && lhs.assets.elementsEqual(rhs.assets) { $0.hasSameContent(as: $1) }
         }
-        return true
-    }
-
-    /// Dua aset yang menghasilkan sel yang sama persis.
-    ///
-    /// Hanya yang benar-benar TERGAMBAR yang dibandingkan — id, lencana asal,
-    /// favorit, dan durasi. Sisanya boleh berbeda tanpa mengubah apa pun di
-    /// layar, dan memasukkannya hanya membuat pembaruan yang tidak perlu.
-    private static func rendersSame(_ lhs: AssetLite, _ rhs: AssetLite) -> Bool {
-        lhs.id == rhs.id
-            && lhs.origin == rhs.origin
-            && lhs.isFavorite == rhs.isFavorite
-            && lhs.duration == rhs.duration
     }
 
     // MARK: - Posisi

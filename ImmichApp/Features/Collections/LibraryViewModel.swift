@@ -8,7 +8,18 @@ final class LibraryViewModel {
 
     var memories: [MemoryStory] = []
     var albums: [AlbumResponseDTO] = []
-    var favorites: [AssetLite] = []
+    // AssetLite equality compares IDs; this storage also publishes metadata changes.
+    private struct FavoriteStorage { var assets: [AssetLite] = [] }
+    private var favoriteStorage = FavoriteStorage()
+    var favorites: [AssetLite] {
+        get { favoriteStorage.assets }
+        set { favoriteStorage = FavoriteStorage(assets: newValue) }
+    }
+    private struct FavoriteResponse {
+        let revision: UUID
+        let assets: [AssetLite]
+    }
+    private var favoriteRequest = UUID()
     var people: [PersonDTO] = []
     var actionError: String?
 
@@ -85,7 +96,7 @@ final class LibraryViewModel {
         if let loadedMemories { self.memories = loadedMemories }
 
         apply(loadedAlbums, to: \.albums, key: LocalSnapshot.Key.libraryAlbums)
-        apply(loadedFavorites, to: \.favorites, key: LocalSnapshot.Key.libraryFavorites)
+        applyFavorites(loadedFavorites)
         apply(loadedPeople, to: \.people, key: LocalSnapshot.Key.libraryPeople)
 
         // Hanya kalau ADA yang benar-benar dijawab server. Menyalakannya setelah
@@ -233,6 +244,29 @@ final class LibraryViewModel {
         apply(await fetchAlbums(), to: \.albums, key: LocalSnapshot.Key.libraryAlbums)
     }
 
+    func refreshFavorites() async {
+        guard snapshotGeneration == LocalSnapshot.generation else { return }
+        applyFavorites(await fetchFavorites())
+    }
+
+    private func applyFavorites(_ fetched: FavoriteResponse?) {
+        guard let fetched, snapshotGeneration == LocalSnapshot.generation,
+              !Task.isCancelled, fetched.revision == favoriteRequest else { return }
+        LocalSnapshot.save(fetched.assets, for: LocalSnapshot.Key.libraryFavorites,
+            expectedGeneration: snapshotGeneration)
+        if !favorites.elementsEqual(fetched.assets, by: { $0.hasSameContent(as: $1) }) {
+            favorites = fetched.assets
+        }
+    }
+
+    private func removeFavorite(_ id: String) {
+        guard snapshotGeneration == LocalSnapshot.generation else { return }
+        favoriteRequest = UUID()
+        favorites.removeAll { $0.id == id }
+        LocalSnapshot.save(favorites, for: LocalSnapshot.Key.libraryFavorites,
+            expectedGeneration: snapshotGeneration)
+    }
+
     // MARK: - Aksi foto
 
     /// Baris Favorites berisi HANYA foto favorit, jadi mencabut favorit berarti
@@ -242,10 +276,9 @@ final class LibraryViewModel {
         do {
             try await assetRepo.toggleFavorite(asset.id, to: newValue)
             if newValue {
-                apply(await fetchFavorites(), to: \.favorites, key: LocalSnapshot.Key.libraryFavorites)
+                await refreshFavorites()
             } else {
-                favorites.removeAll { $0.id == asset.id }
-                LocalSnapshot.save(favorites, for: LocalSnapshot.Key.libraryFavorites, expectedGeneration: snapshotGeneration)
+                removeFavorite(asset.id)
             }
         } catch {
             actionError = (error as? APIError)?.errorDescription
@@ -256,8 +289,7 @@ final class LibraryViewModel {
     func archive(_ asset: AssetLite) async {
         do {
             try await assetRepo.toggleArchive(asset.id, to: true)
-            favorites.removeAll { $0.id == asset.id }
-            LocalSnapshot.save(favorites, for: LocalSnapshot.Key.libraryFavorites, expectedGeneration: snapshotGeneration)
+            removeFavorite(asset.id)
         } catch {
             actionError = (error as? APIError)?.errorDescription
                 ?? String(localized: "Failed to archive photo")
@@ -267,8 +299,7 @@ final class LibraryViewModel {
     func delete(_ asset: AssetLite) async -> Bool {
         do {
             try await assetRepo.delete(asset.id)
-            favorites.removeAll { $0.id == asset.id }
-            LocalSnapshot.save(favorites, for: LocalSnapshot.Key.libraryFavorites, expectedGeneration: snapshotGeneration)
+            removeFavorite(asset.id)
             return true
         } catch {
             actionError = (error as? APIError)?.errorDescription
@@ -341,9 +372,11 @@ final class LibraryViewModel {
         return all.filter { !$0.isHidden }
     }
 
-    private func fetchFavorites() async -> [AssetLite]? {
+    private func fetchFavorites() async -> FavoriteResponse? {
+        let revision = UUID()
+        favoriteRequest = revision
         let request = SearchRequestDTO(page: 1, isFavorite: true, size: Self.rowLimit)
         guard let response = try? await searchRepo.metadataSearch(request) else { return nil }
-        return response.assets.items.map(AssetLite.init)
+        return FavoriteResponse(revision: revision, assets: response.assets.items.map(AssetLite.init))
     }
 }

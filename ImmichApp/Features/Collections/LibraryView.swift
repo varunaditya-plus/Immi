@@ -123,6 +123,9 @@ struct LibraryView: View {
                     else { return }
                     openExternalDestination(destination)
                 }
+                .onChange(of: SwiftDataManager.shared.assetMutationRevision) { _, _ in
+                    Task { await vm?.refreshFavorites() }
+                }
                 .task {
                     if backupNotifier.shouldOpenBackup { openBackupScreen() }
                     await start()

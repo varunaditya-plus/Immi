@@ -63,6 +63,7 @@ struct TrashView: View {
             // Berbagi isi tong sampah tidak berarti apa pun.
             allowsSelectionShare: false,
             deletesPermanently: true,
+            removalScope: .trash,
             options: { trashMenu })
     }
 

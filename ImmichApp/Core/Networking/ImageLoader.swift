@@ -544,8 +544,6 @@ actor ImageCache {
         // setelah direktori logout dibersihkan.
         let pending = inFlight.values.map(\.task)
         pending.forEach { $0.cancel() }
-        // Finish detached disk writes before replacing the account's cache directory.
-        for task in pending { _ = try? await task.value }
         inFlight.removeAll()
         ImageMemoryCache.shared.removeAll()
         try? FileManager.default.removeItem(at: diskCacheURL)

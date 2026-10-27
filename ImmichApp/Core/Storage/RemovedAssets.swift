@@ -1,7 +1,8 @@
 import Foundation
 import Observation
 
-/// Aset yang sudah TIDAK ADA lagi, sepanjang sesi ini.
+/// Aset yang dikeluarkan dari perpustakaan sepanjang sesi ini.
+/// Soft-delete tetap boleh ditampilkan di Trash; aset yang tidak tersedia tidak.
 ///
 /// **Masalah yang dipecahkannya.** Menghapus foto dari linimasa membereskan
 /// cache linimasa — dan hanya itu. Album, Favorites, dan foto per orang punya
@@ -26,13 +27,21 @@ import Observation
 final class RemovedAssets {
     static let shared = RemovedAssets()
 
+    enum Reason { case trashed, unavailable }
+    enum Scope { case library, trash }
+
     private(set) var ids: Set<String> = []
+    private var trashedIDs: Set<String> = []
 
-    private init() {}
+    init() {}
 
-    func remove(_ removed: [String]) {
+    func remove(_ removed: [String], reason: Reason = .unavailable) {
         guard !removed.isEmpty else { return }
         ids.formUnion(removed)
+        switch reason {
+        case .trashed: trashedIDs.formUnion(removed)
+        case .unavailable: trashedIDs.subtract(removed)
+        }
     }
 
     /// Dipakai saat foto DIKEMBALIKAN dari tong sampah.
@@ -41,19 +50,33 @@ final class RemovedAssets {
     /// yang ada di server tapi tetap tak terlihat di aplikasi — tersaring oleh
     /// catatan yang sudah tidak berlaku.
     func restore(_ restored: [String]) {
-        guard !restored.isEmpty else { return }
+        guard !restored.isEmpty, !ids.isDisjoint(with: restored) else { return }
         ids.subtract(restored)
+        trashedIDs.subtract(restored)
+    }
+
+    func restoreAllFromTrash() {
+        guard !trashedIDs.isEmpty else { return }
+        ids.subtract(trashedIDs)
+        trashedIDs.removeAll()
+    }
+
+    func emptyTrash() {
+        guard !trashedIDs.isEmpty else { return }
+        trashedIDs.removeAll()
     }
 
     func clear() {
         ids.removeAll()
+        trashedIDs.removeAll()
     }
 
     /// Menyaring daftar apa pun. Pulang apa adanya kalau tidak ada yang dibuang —
     /// keadaan yang paling sering terjadi, dan tidak perlu membayar satu lintasan
     /// untuknya.
-    func filter(_ assets: [AssetLite]) -> [AssetLite] {
+    func filter(_ assets: [AssetLite], scope: Scope = .library) -> [AssetLite] {
         guard !ids.isEmpty else { return assets }
-        return assets.filter { !ids.contains($0.id) }
+        let excluded = scope == .trash ? ids.subtracting(trashedIDs) : ids
+        return assets.filter { !excluded.contains($0.id) }
     }
 }

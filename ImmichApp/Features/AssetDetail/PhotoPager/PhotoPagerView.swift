@@ -283,11 +283,9 @@ final class PhotoPagerController: UIViewController {
                 loader: loader)
     }
 
-    /// Pembanding murah: jumlah plus kedua ujungnya.
+    /// Compare page content without changing stable asset identity.
     private func isSameContent(as other: [AssetLite]) -> Bool {
-        assets.count == other.count
-            && assets.first?.id == other.first?.id
-            && assets.last?.id == other.last?.id
+        assets.elementsEqual(other) { $0.hasSameContent(as: $1) }
     }
 
     // MARK: - Posisi

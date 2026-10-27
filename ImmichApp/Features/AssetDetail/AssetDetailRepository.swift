@@ -92,15 +92,7 @@ class AssetDetailRepository {
 
     @MainActor
     func setVisibility(_ id: String, to value: Visibility) async throws {
-        let context = api.session.snapshot
-        let owner = api.session.backupQueueOwner
         try await update(id, with: AssetMutation(visibility: value.rawValue))
-        guard api.session.baseURL == context.baseURL,
-              api.session.authHeaders == context.authHeaders,
-              api.session.backupQueueOwner == owner else { throw CancellationError() }
-        // Every successful visibility mutation must suppress its device copy,
-        // including actions from Search or Library and partial batch results.
-        try (dataManager ?? .shared).setTimelineVisibility([id], inTimeline: value == .timeline)
     }
 
     /// Compatibility shim untuk satu-satunya kontrak mutasi asset yang tersedia
@@ -108,8 +100,46 @@ class AssetDetailRepository {
     /// `replacementId` resmi masih menunjuk kembali ke operation yang sama dan
     /// belum ada endpoint stabil untuk favorite/description/date/location/
     /// visibility. Disatukan di sini agar penggantian berikutnya hanya satu edit.
+    @MainActor
     private func update(_ id: String, with mutation: AssetMutation) async throws {
+        let context = api.session.snapshot
+        let snapshotGeneration = LocalSnapshot.generation
         try await api.sendVoid(.json("/assets/\(id)", method: .put, body: mutation))
+        try api.checkCurrent(context)
+        guard snapshotGeneration == LocalSnapshot.generation else { throw CancellationError() }
+        try cacheMutation(mutation, for: id, expectedGeneration: snapshotGeneration)
+    }
+
+    @MainActor
+    private func cacheMutation(_ mutation: AssetMutation, for id: String, expectedGeneration: UUID) throws {
+        let cache = dataManager ?? .shared
+        if let visibility = mutation.visibility {
+            try cache.setTimelineVisibility([id], inTimeline: visibility == Visibility.timeline.rawValue)
+        } else {
+            try? cache.patchCachedAsset(id,
+                isFavorite: mutation.isFavorite,
+                createdAt: mutation.dateTimeOriginal.flatMap(ISO8601DateFormatter.immichFractional.date(from:)),
+                description: mutation.description,
+                latitude: mutation.latitude,
+                longitude: mutation.longitude)
+        }
+
+        let key = LocalSnapshot.Key.assetDetail(id)
+        guard var cached = LocalSnapshot.load(AssetResponseDTO.self, for: key), cached.id == id else { return }
+        if let favorite = mutation.isFavorite {
+            cached.isFavorite = favorite
+        } else if let description = mutation.description {
+            cached.setDescription(description)
+        } else if let visibility = mutation.visibility, visibility != Visibility.locked.rawValue {
+            cached.isArchived = visibility == Visibility.archive.rawValue
+            cached.visibility = visibility
+        } else {
+            // Derived metadata is refreshed by the detail view. Other callers
+            // must not leave an obsolete detail snapshot behind.
+            LocalSnapshot.remove(key, expectedGeneration: expectedGeneration)
+            return
+        }
+        LocalSnapshot.save(cached, for: key, expectedGeneration: expectedGeneration)
     }
 
     private struct AssetMutation: Encodable {
@@ -134,13 +164,24 @@ class AssetDetailRepository {
     @MainActor
     func delete(_ ids: [String], force: Bool = false) async throws {
         let context = api.session.snapshot
+        let snapshotGeneration = LocalSnapshot.generation
         struct Body: Encodable { let ids: [String]; let force: Bool }
         try await api.sendVoid(.json("/assets", method: .delete, body: Body(ids: ids, force: force)))
         try api.checkCurrent(context)
+        guard snapshotGeneration == LocalSnapshot.generation else { throw CancellationError() }
         // Mapping backup tetap diperlukan agar foto lokal tidak di-upload ulang.
         // Penanda terpisah ini mencegah mapping tersebut membuat foto yang baru
         // dihapus muncul kembali sebagai petak lokal setelah app restart.
         DeletedServerAssetRegistry.shared.record(ids, permanently: force)
+        cacheDeletedAssets(ids, permanently: force, expectedGeneration: snapshotGeneration)
+    }
+
+    @MainActor
+    private func cacheDeletedAssets(_ ids: [String], permanently: Bool, expectedGeneration: UUID) {
+        try? (dataManager ?? .shared).purgeAssets(ids, reason: permanently ? .unavailable : .trashed)
+        for id in ids {
+            LocalSnapshot.remove(LocalSnapshot.Key.assetDetail(id), expectedGeneration: expectedGeneration)
+        }
     }
 
     func downloadOriginal(_ id: String) async throws -> Data {
@@ -159,15 +200,25 @@ class AssetDetailRepository {
         return destination
     }
 
+    @MainActor
     func applyEdits(_ edits: [AssetEditCommand], to id: String) async throws {
+        let context = api.session.snapshot
+        let snapshotGeneration = LocalSnapshot.generation
         struct Body: Encodable { let edits: [AssetEditCommand] }
         struct Response: Decodable { let assetId: String }
         let _: Response = try await api.send(.json(
             "/assets/\(id)/edits", method: .put, body: Body(edits: edits)))
+        try api.checkCurrent(context)
+        LocalSnapshot.remove(LocalSnapshot.Key.assetDetail(id), expectedGeneration: snapshotGeneration)
     }
 
+    @MainActor
     func removeEdits(from id: String) async throws {
+        let context = api.session.snapshot
+        let snapshotGeneration = LocalSnapshot.generation
         try await api.sendVoid(.init(path: "/assets/\(id)/edits", method: .delete))
+        try api.checkCurrent(context)
+        LocalSnapshot.remove(LocalSnapshot.Key.assetDetail(id), expectedGeneration: snapshotGeneration)
     }
 
     func edits(for id: String) async throws -> [AssetEditRecord] {

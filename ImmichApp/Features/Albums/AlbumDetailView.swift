@@ -205,7 +205,13 @@ struct AlbumDetailView: View {
 final class AlbumDetailViewModel {
     private let snapshotGeneration = LocalSnapshot.generation
 
-    var assets: [AssetLite] = []
+    // AssetLite equality compares IDs; this storage also publishes metadata changes.
+    private struct AssetStorage { var assets: [AssetLite] = [] }
+    private var assetStorage = AssetStorage()
+    var assets: [AssetLite] {
+        get { assetStorage.assets }
+        set { assetStorage = AssetStorage(assets: newValue) }
+    }
     var phase: LoadingPhase<Void> = .idle
 
     private let timelineRepo: TimelineRepository
@@ -448,7 +454,8 @@ final class AlbumDetailViewModel {
                 albumId,
                 expectedCount: self.expectedAssetCount)
             guard snapshotGeneration == LocalSnapshot.generation else { return }
-            if LocalSnapshot.save(fetched, for: key, expectedGeneration: snapshotGeneration) || assets.isEmpty {
+            LocalSnapshot.save(fetched, for: key, expectedGeneration: snapshotGeneration)
+            if !assets.elementsEqual(fetched, by: { $0.hasSameContent(as: $1) }) {
                 assets = fetched
             }
             phase = .loaded(())

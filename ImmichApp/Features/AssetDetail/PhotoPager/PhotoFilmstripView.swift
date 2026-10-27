@@ -161,9 +161,7 @@ final class PhotoFilmstripController: UIViewController {
     }
 
     private func isSameContent(as other: [AssetLite]) -> Bool {
-        assets.count == other.count
-            && assets.first?.id == other.first?.id
-            && assets.last?.id == other.last?.id
+        assets.elementsEqual(other) { $0.hasSameContent(as: $1) }
     }
 
     /// Menyorot ulang HANYA dua petak yang berubah, bukan seluruh strip.

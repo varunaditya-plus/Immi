@@ -101,6 +101,17 @@ extension CodingUserInfoKey {
 /// pun di dalam badan struct membuat Swift berhenti membangkitkan memberwise
 /// init. Menaruhnya di extension mengembalikan keduanya.
 extension AssetResponseDTO {
+    mutating func setDescription(_ text: String) {
+        if exifInfo == nil {
+            exifInfo = ExifDTO(make: nil, model: nil, exifImageWidth: nil, exifImageHeight: nil,
+                orientation: nil, fileSizeInByte: nil, dateTimeOriginal: nil, latitude: nil, longitude: nil,
+                city: nil, state: nil, country: nil, lensModel: nil, fNumber: nil, focalLength: nil,
+                iso: nil, exposureTime: nil, description: text)
+        } else {
+            exifInfo?.description = text
+        }
+    }
+
     init(
         id: String,
         type: String,

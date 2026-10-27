@@ -236,7 +236,7 @@ final class AssetDetailViewModel {
     func updateDescription(_ id: String, to text: String) async -> Bool {
         let mutation = beginMutation(id, kind: .description)
         do {
-            return try await performMutation(mutation, patch: { $0.exifInfo?.description = text }) {
+            return try await performMutation(mutation, patch: { $0.setDescription(text) }) {
                 try await self.repo.updateDescription(id, to: text)
             }
         } catch {

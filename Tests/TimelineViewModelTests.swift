@@ -136,7 +136,7 @@ final class TimelineViewModelTests: XCTestCase {
         XCTAssertEqual(highlights.map(\.title), ["2", "4", "5"])
         XCTAssertEqual(highlights.map(\.count), [5, 4, 3])
         XCTAssertEqual(highlights.map(\.id), ["2026-09-02", "2026-09-04", "2026-09-05"])
-        XCTAssertEqual(highlights.map(\.targetAssetID), highlights.map(\.cover.id))
+        XCTAssertEqual(highlights.map(\.targetAssetID), ["day-2-0", "day-4-0", "day-5-0"])
     }
 
     func testMonthHighlightRankingTiesChooseEarlierDatesRegardlessOfAssetOrder() {
