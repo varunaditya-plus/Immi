@@ -93,6 +93,7 @@ final class BackupUploadRequests {
         automaticEnabled: @MainActor () -> Bool,
         policy: @MainActor () -> BackupNetworkPolicy,
         canProcess: @MainActor () -> Bool,
+        hasFullPhotoAccess: @MainActor () -> Bool,
         metadata: @MainActor (String) async -> LocalPhoto?,
         staging: @MainActor () async -> (activeTasks: Int, bytes: Int),
         unavailable: @MainActor (String) -> Void,
@@ -109,10 +110,12 @@ final class BackupUploadRequests {
             else { return }
             guard isReady(item.id, automaticEnabled: automaticEnabled()) else { continue }
             if shouldYieldToUserRequest(item.id) { return }
+            let couldConfirmMissing = hasFullPhotoAccess()
             guard let photo = await metadata(item.id) else {
                 guard !Task.isCancelled, canProcess() else { return }
                 guard isReady(item.id, automaticEnabled: automaticEnabled()) else { continue }
                 if shouldYieldToUserRequest(item.id) { return }
+                guard couldConfirmMissing, hasFullPhotoAccess() else { continue }
                 unavailable(item.id)
                 didChange()
                 continue
@@ -135,6 +138,50 @@ final class BackupUploadRequests {
             guard !Task.isCancelled, canProcess() else { return }
             didChange()
         }
+    }
+
+    /// Limited access cannot distinguish a deleted original from one outside
+    /// the selected Photos scope. Failed items also may change during the scan.
+    func pruneUnavailableFailures(
+        canProcess: @MainActor () -> Bool,
+        hasFullPhotoAccess: @MainActor () -> Bool,
+        existingIdentifiers: @MainActor ([String]) async -> Set<String>,
+        preservedIdentifiers: @MainActor () -> Set<String>
+    ) async throws -> Bool {
+        guard !Task.isCancelled, canProcess(), hasFullPhotoAccess() else { return false }
+        let failed = queue.items.filter { $0.state == .failed }
+        guard !failed.isEmpty else { return false }
+        let existing = await existingIdentifiers(failed.map(\.id))
+        guard !Task.isCancelled, canProcess(), hasFullPhotoAccess() else { return false }
+        let preserved = preservedIdentifiers()
+        let missing = Set(failed.filter {
+            !existing.contains($0.id) && !preserved.contains($0.id)
+                && queue.item(id: $0.id) == $0
+        }.map(\.id))
+        guard !missing.isEmpty else { return false }
+        try queue.discard(missing)
+        return true
+    }
+
+    func markFailedOrDiscard(
+        _ id: String, error: String,
+        hasFullPhotoAccess: @MainActor () -> Bool,
+        sourceExists: @MainActor () -> Bool
+    ) throws {
+        if hasFullPhotoAccess(), !sourceExists(), hasFullPhotoAccess() {
+            try queue.discard(id)
+        } else {
+            try queue.markFailed(id, error: error)
+        }
+    }
+
+    /// The motion transfer succeeded even if Photos access disappeared before
+    /// the still could be read. Persist that handoff before waiting for access.
+    func retainCompletedMotion(_ id: String, motionAssetID: String) throws {
+        guard let current = queue.item(id: id), current.state == .uploading,
+              current.phase == .livePhotoMotion else { return }
+        try queue.markPreparing(id, phase: .primaryAsset, motionAssetID: motionAssetID)
+        try queue.markQueued(id)
     }
 
     private func isReady(_ id: String, automaticEnabled: Bool) -> Bool {

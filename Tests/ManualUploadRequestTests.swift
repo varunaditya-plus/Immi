@@ -501,6 +501,115 @@ final class ManualUploadRequestTests: XCTestCase {
         XCTAssertEqual(fixture.prepared.map(\.id), ["manual"])
     }
 
+    func testInaccessibleMetadataPreservesLivePhotoRetryAndIntentUntilAccessReturns() async throws {
+        for intent in [BackupQueueIntent.manualUpload, .retry] {
+            let fixture = try fixture()
+            fixture.policy = policy(expensive: false)
+            fixture.hasFullPhotoAccess = false
+            try fixture.queue.enqueue(["live"], intent: intent, now: timestamp)
+            try fixture.queue.markPreparing("live", phase: .primaryAsset, motionAssetID: "saved-motion", now: timestamp)
+            try fixture.queue.markUploading("live", phase: .primaryAsset, checksum: "saved-checksum",
+                taskIdentifier: 42, now: timestamp)
+            try fixture.queue.markRetry("live", state: .waitingForICloud, error: "Existing retry",
+                retryAt: timestamp.addingTimeInterval(10), now: timestamp)
+            fixture.reopen()
+            let original = fixture.queue.items
+            let bytes = try Data(contentsOf: fixture.queueURL)
+
+            try await fixture.process() // Limited scope: PhotoKit cannot return this ID.
+            fixture.hasPhotoReadAccess = false
+            try await fixture.process() // Revoked access must not consult cached metadata.
+
+            XCTAssertTrue(fixture.unavailableIDs.isEmpty)
+            XCTAssertTrue(fixture.prepared.isEmpty)
+            XCTAssertEqual(fixture.queue.items, original)
+            XCTAssertEqual(try Data(contentsOf: fixture.queueURL), bytes)
+            XCTAssertEqual(BackupQueueStore(fileURL: fixture.queueURL).items, original)
+            fixture.photos["live"] = photo("live", live: true)
+            fixture.hasPhotoReadAccess = true
+            fixture.hasFullPhotoAccess = true
+            try await fixture.process()
+
+            XCTAssertEqual(fixture.prepared.map(\.id), ["live"])
+            let resumed = try XCTUnwrap(fixture.queue.item(id: "live"))
+            XCTAssertEqual(resumed.phase, .primaryAsset)
+            XCTAssertEqual(resumed.motionAssetID, "saved-motion")
+            XCTAssertEqual(resumed.intent, intent)
+            XCTAssertEqual(resumed.attemptCount, original[0].attemptCount + 1)
+        }
+    }
+
+    func testPermissionChangesDuringAMissingLookupCannotProveDeletion() async throws {
+        for (before, after) in [(true, false), (false, true), (false, false)] {
+            let fixture = try fixture()
+            fixture.hasFullPhotoAccess = before
+            try fixture.requests.requestUploads(["manual"], uploadedIDs: [])
+            let original = fixture.queue.items
+            let held = HeldMetadata()
+            let pass = Task { try await fixture.process(metadata: { _ in await held.value() }) }
+            await fulfillment(of: [held.started], timeout: 2)
+            fixture.hasFullPhotoAccess = after
+            held.resolve(nil)
+            try await pass.value
+
+            XCTAssertTrue(fixture.unavailableIDs.isEmpty)
+            XCTAssertEqual(fixture.queue.items, original)
+            XCTAssertEqual(BackupQueueStore(fileURL: fixture.queueURL).items.map(\.intent), [.manualUpload])
+            fixture.hasFullPhotoAccess = true
+            try await fixture.process()
+            XCTAssertEqual(fixture.unavailableIDs, ["manual"], "Full access on a fresh lookup still permits deletion cleanup")
+            XCTAssertTrue(fixture.queue.items.isEmpty)
+        }
+    }
+
+    func testRevocationDuringMetadataLookupBlocksPreparationButLimitedReadablePhotosCanResume() async throws {
+        let fixture = try fixture()
+        fixture.photos["manual"] = photo("manual")
+        try fixture.requests.requestUploads(["manual"], uploadedIDs: [])
+        let original = fixture.queue.items
+        let held = HeldMetadata()
+        let pass = Task { try await fixture.process(metadata: { _ in await held.value() }) }
+        await fulfillment(of: [held.started], timeout: 2)
+        fixture.hasPhotoReadAccess = false
+        fixture.hasFullPhotoAccess = false
+        held.resolve(photo("manual"))
+        try await pass.value
+
+        XCTAssertTrue(fixture.prepared.isEmpty)
+        XCTAssertEqual(fixture.queue.items, original)
+        fixture.hasPhotoReadAccess = true
+        try await fixture.process()
+        XCTAssertEqual(fixture.prepared.map(\.id), ["manual"], "Limited access still allows an individually readable photo")
+    }
+
+    func testCompletedMotionResumesOnlyTheStillAfterAccessReturnsAndTheQueueReopens() async throws {
+        let fixture = try fixture()
+        fixture.policy = policy(expensive: false)
+        try fixture.requests.requestUploads(["live"], uploadedIDs: [])
+        try fixture.queue.markPreparing("live", phase: .livePhotoMotion, now: timestamp)
+        try fixture.queue.markUploading("live", phase: .livePhotoMotion, checksum: "motion-checksum",
+            taskIdentifier: 42, now: timestamp)
+        try fixture.requests.retainCompletedMotion("live", motionAssetID: "uploaded-motion")
+        fixture.reopen()
+        fixture.hasFullPhotoAccess = false
+        let waiting = fixture.queue.items
+        try await fixture.process()
+        XCTAssertEqual(fixture.queue.items, waiting)
+        XCTAssertTrue(fixture.unavailableIDs.isEmpty)
+
+        fixture.photos["live"] = photo("live", live: true)
+        fixture.hasFullPhotoAccess = true
+        try await fixture.process()
+
+        XCTAssertEqual(fixture.prepared.map(\.id), ["live"])
+        let prepared = try XCTUnwrap(fixture.queue.item(id: "live"))
+        XCTAssertEqual(prepared.phase, .primaryAsset, "The successful motion must not be uploaded again")
+        XCTAssertEqual(prepared.motionAssetID, "uploaded-motion")
+        XCTAssertEqual(prepared.attemptCount, 2)
+        XCTAssertEqual(prepared.intent, .manualUpload)
+        XCTAssertEqual(BackupQueueStore(fileURL: fixture.queueURL).item(id: "live")?.motionAssetID, "uploaded-motion")
+    }
+
     func testMissingMetadataCannotDiscardWorkClaimedOrCompletedDuringLookup() async throws {
         for completed in [false, true] {
             let fixture = try fixture()
@@ -717,6 +826,8 @@ private final class Fixture {
     var automaticEnabled = false
     var authenticated = true
     var storageAvailable = true
+    var hasPhotoReadAccess = true
+    var hasFullPhotoAccess = true
     var policy = BackupNetworkPolicy(isOnline: true, isExpensive: true, cellularPhotos: false, cellularVideos: false)
     var photos: [String: LocalPhoto] = [:]
     var prepared: [Preparation] = []
@@ -743,7 +854,8 @@ private final class Fixture {
         staging: (@MainActor () async -> (activeTasks: Int, bytes: Int))? = nil
     ) async throws {
         try await requests.process(automaticEnabled: { self.automaticEnabled }, policy: { self.policy },
-            canProcess: { self.authenticated && self.storageAvailable },
+            canProcess: { self.authenticated && self.storageAvailable && self.hasPhotoReadAccess },
+            hasFullPhotoAccess: { self.hasFullPhotoAccess },
             metadata: metadata ?? { id in
                 self.metadataLookups.append(id)
                 return self.photos[id]

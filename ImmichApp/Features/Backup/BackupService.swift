@@ -405,14 +405,15 @@ final class BackupService {
     /// PhotoKit memberi perubahan ketika aplikasi aktif/diberi waktu eksekusi.
     /// Digabung satu detik karena satu impor dapat menghasilkan banyak callback.
     private func handleLibraryChange() {
-        guard isEnabled else { return }
+        guard isEnabled || queue.hasPendingUserRequests else { return }
         libraryChangeTask?.cancel()
         libraryChangeTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(1))
             guard !Task.isCancelled, let self else { return }
             await self.prepare()
             guard !Task.isCancelled else { return }
-            self.start()
+            if self.isEnabled { self.start() }
+            else { self.requestNetworkWake() }
             BackupScheduler.schedule()
         }
     }
@@ -439,8 +440,6 @@ final class BackupService {
     /// dibedakan dari nol yang berarti "semuanya sudah aman". Dua keadaan yang
     /// berlawanan, angka yang sama.
     ///
-    /// Aman dipanggil berulang: `load()` hanya membaca ulang kalau pilihan
-    /// albumnya memang berubah.
     func prepare() async {
         // Izin belum pernah diberikan DAN belum ada album dipilih berarti tidak
         // ada apa pun yang bisa dibaca — dan `load()` akan memunculkan permintaan
@@ -465,22 +464,21 @@ final class BackupService {
     /// yang disentuh: transfer aktif dan item yang masih menunggu iCloud tidak
     /// boleh dianggap hilang hanya karena berkas aslinya belum tersedia lokal.
     private func pruneUnavailableFailures() async {
-        guard LocalPhotoLibrary.hasReadAccess, let ownership = uploadOwnership else { return }
-        let failedIDs = queue.failedIDs
-        guard !failedIDs.isEmpty else { return }
-
-        let existingIDs = await Task.detached(priority: .utility) {
-            LocalPhotoLibrary.existingLocalIdentifiers(failedIDs)
-        }.value
-        guard !Task.isCancelled, uploadOwnership == ownership else { return }
-        let preservedIDs = Set(BackupTemporaryFiles.recordedContexts(
-            in: BackupTemporaryFiles.recoveryDirectory)
-            .filter { $0.ownership == ownership }.map(\.localIdentifier))
-        let unavailableIDs = Set(failedIDs).subtracting(existingIDs).subtracting(preservedIDs)
-        guard !unavailableIDs.isEmpty else { return }
-
+        guard let ownership = uploadOwnership else { return }
         do {
-            try queue.discard(unavailableIDs)
+            let changed = try await uploadRequests.pruneUnavailableFailures(
+                canProcess: { self.uploadOwnership == ownership },
+                hasFullPhotoAccess: { LocalPhotoLibrary.hasFullReadAccess },
+                existingIdentifiers: { ids in
+                    await Task.detached(priority: .utility) {
+                        LocalPhotoLibrary.existingLocalIdentifiers(ids)
+                    }.value
+                },
+                preservedIdentifiers: {
+                    Set(BackupTemporaryFiles.recordedContexts(in: BackupTemporaryFiles.recoveryDirectory)
+                        .filter { $0.ownership == ownership }.map(\.localIdentifier))
+                })
+            guard changed else { return }
             // Banner lama mungkin masih memuat hitungan sebelum pembersihan.
             // Snapshot berikutnya akan menerbitkan hasil baru bila memang masih
             // ada hasil terminal yang belum pernah diberitahukan.
@@ -898,7 +896,9 @@ final class BackupService {
                 policy: { self.networkPolicy },
                 canProcess: {
                     self.uploadOwnership == ownership && self.dataManager.isPersistentStoreAvailable
+                        && LocalPhotoLibrary.hasReadAccess
                 },
+                hasFullPhotoAccess: { LocalPhotoLibrary.hasFullReadAccess },
                 metadata: { await self.photoMetadata(for: $0) },
                 staging: { await BackupUploader.shared.stagingUsage() },
                 unavailable: { id in
@@ -924,6 +924,7 @@ final class BackupService {
     }
 
     private func photoMetadata(for id: String) async -> LocalPhoto? {
+        guard LocalPhotoLibrary.hasReadAccess else { return nil }
         if let photo = LocalPhotoLibrary.shared.photos.first(where: { $0.id == id }) { return photo }
         return await LocalPhotoLibrary.shared.photoMetadata(for: id)
     }
@@ -1236,10 +1237,25 @@ final class BackupService {
                     remainingBackgroundTasks: remainingBackgroundTasks)
                 return
             }
+            let couldConfirmMissing = LocalPhotoLibrary.hasFullReadAccess
             let restoredPhoto = await LocalPhotoLibrary.shared.photoMetadata(for: localIdentifier)
             guard acceptsUpload(context, taskIdentifier: taskIdentifier) else { return }
-            guard let photo = restoredPhoto else {
-                try? queue.discard(localIdentifier)
+            if queue.item(id: localIdentifier)?.state == .cancelling {
+                finishUpload(context: context, taskIdentifier: taskIdentifier,
+                    outcome: .failure(URLError(.cancelled)), remainingBackgroundTasks: remainingBackgroundTasks)
+                return
+            }
+            guard let photo = restoredPhoto, LocalPhotoLibrary.hasReadAccess else {
+                do {
+                    if restoredPhoto == nil, couldConfirmMissing, LocalPhotoLibrary.hasFullReadAccess {
+                        try queue.discard(localIdentifier)
+                    } else {
+                        try uploadRequests.retainCompletedMotion(localIdentifier, motionAssetID: motionAssetID)
+                    }
+                } catch {
+                    lastError = error.localizedDescription
+                    acceptsUploadResults = false
+                }
                 pendingPhotos[localIdentifier] = nil
                 uploadProgressByID[localIdentifier] = nil
                 applyQueueSnapshot()
@@ -1517,11 +1533,9 @@ final class BackupService {
     /// dapat diperbaiki atau dicoba ulang. Jika fotonya sudah dihapus, record
     /// queue juga dibuang agar tidak menjadi failure abadi.
     private func markFailedIfAssetStillExists(_ localIdentifier: String, error: String) {
-        if LocalPhotoLibrary.assetExists(localIdentifier) {
-            try? queue.markFailed(localIdentifier, error: error)
-        } else {
-            try? queue.discard(localIdentifier)
-        }
+        try? uploadRequests.markFailedOrDiscard(localIdentifier, error: error,
+            hasFullPhotoAccess: { LocalPhotoLibrary.hasFullReadAccess },
+            sourceExists: { LocalPhotoLibrary.assetExists(localIdentifier) })
     }
 
     private func handleAuthenticationRequired() {
