@@ -244,6 +244,9 @@ struct TimelineView: View {
         .onChange(of: LocalPhotoLibrary.shared.revision) { _, _ in
             Task { await vm?.reloadDevicePhotos() }
         }
+        .onChange(of: LocalPhotoLibrary.shared.selectedAlbumIDs) { _, _ in
+            Task { await vm?.reloadDevicePhotos() }
+        }
         .onChange(of: SwiftDataManager.shared.assetMutationRevision) { _, _ in
             Task { await vm?.loadTimeline() }
         }

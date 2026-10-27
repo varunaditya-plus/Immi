@@ -1,3 +1,4 @@
+import Photos
 import SwiftUI
 import UIKit
 
@@ -12,8 +13,10 @@ import UIKit
 /// Immich resmi memecahkannya dengan cara yang sama: kamu memilih albumnya, dan
 /// hanya album itu yang dihitung.
 struct DeviceAlbumsView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @State private var library = LocalPhotoLibrary.shared
     @State private var albums: [LocalAlbum] = []
+    @State private var albumsRevision: Int?
     @State private var isLoading = true
     @State private var query = ""
 
@@ -28,18 +31,24 @@ struct DeviceAlbumsView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(allSelected ? "Deselect All" : "Select All") { toggleAll() }
-                        .disabled(filteredAlbums.isEmpty)
+                        .disabled(!library.isAuthorized || albumsRevision != library.revision || filteredAlbums.isEmpty)
                 }
             }
-            .task { await load() }
+            .task(id: library.revision) { await load() }
+            .onChange(of: scenePhase) { _, phase in
+                guard phase == .active else { return }
+                library.refreshAuthorizationStatus()
+            }
     }
 
     @ViewBuilder
     private var content: some View {
-        if isLoading {
+        if !library.isAuthorized && library.authorizationStatus != .notDetermined {
+            PhotoLibraryAccessUnavailableView()
+        } else if isLoading || albumsRevision != library.revision {
             ProgressView()
-        } else if !query.isEmpty && filteredAlbums.isEmpty {
-            ContentUnavailableView.search(text: query)
+        } else if !library.isAuthorized {
+            PhotoLibraryAccessUnavailableView()
         } else if albums.isEmpty {
             // DUA sebab yang berbeda, dan dua kalimat yang berbeda.
             //
@@ -48,21 +57,12 @@ struct DeviceAlbumsView: View {
             // jalan keluarnya bukan meminta izin lagi. Setelah ditolak sekali,
             // `requestAuthorization` pulang seketika tanpa memunculkan apa pun;
             // yang bisa mengubahnya cuma Settings sistem.
-            if library.isAuthorized {
-                ContentUnavailableView(
-                    "No Albums",
-                    systemImage: "photo.on.rectangle",
-                    description: Text("There are no photo albums on this device."))
-            } else {
-                ContentUnavailableView {
-                    Label("No Access to Photos", systemImage: "lock")
-                } description: {
-                    Text("SelfPhotos needs access to your photos to show what is on this device.")
-                } actions: {
-                    Button("Open Settings") { openSettings() }
-                        .buttonStyle(.borderedProminent)
-                }
-            }
+            ContentUnavailableView(
+                "No Albums",
+                systemImage: "photo.on.rectangle",
+                description: Text("There are no photo albums on this device."))
+        } else if !query.trimmingCharacters(in: .whitespaces).isEmpty && filteredAlbums.isEmpty {
+            ContentUnavailableView.search(text: query)
         } else {
             list
         }
@@ -105,6 +105,7 @@ struct DeviceAlbumsView: View {
     }
 
     private var filteredAlbums: [LocalAlbum] {
+        guard albumsRevision == library.revision else { return [] }
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return albums }
         return albums.filter { $0.title.localizedCaseInsensitiveContains(trimmed) }
@@ -121,6 +122,8 @@ struct DeviceAlbumsView: View {
     }
 
     private func toggleAll() {
+        library.refreshAuthorizationStatus()
+        guard library.isAuthorized, albumsRevision == library.revision else { return }
         let ids = filteredAlbums.map(\.id)
         if allSelected {
             library.selectedAlbumIDs.subtract(ids)
@@ -130,6 +133,8 @@ struct DeviceAlbumsView: View {
     }
 
     private func toggle(_ album: LocalAlbum) {
+        library.refreshAuthorizationStatus()
+        guard library.isAuthorized, albumsRevision == library.revision else { return }
         if library.selectedAlbumIDs.contains(album.id) {
             library.selectedAlbumIDs.remove(album.id)
         } else {
@@ -138,12 +143,35 @@ struct DeviceAlbumsView: View {
     }
 
     private func load() async {
-        albums = await library.albums()
+        library.refreshAuthorizationStatus()
+        if !library.isAuthorized {
+            albums = []
+            albumsRevision = nil
+        }
+        isLoading = albumsRevision != library.revision || albums.isEmpty
+        let revision = library.revision
+        let fetched = await library.albums()
+        guard !Task.isCancelled else { return }
+        library.refreshAuthorizationStatus()
+        guard revision == library.revision else { return }
+        albums = library.isAuthorized ? fetched : []
+        albumsRevision = revision
         isLoading = false
     }
+}
 
-    private func openSettings() {
-        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
-        UIApplication.shared.open(url)
+struct PhotoLibraryAccessUnavailableView: View {
+    var body: some View {
+        ContentUnavailableView {
+            Label("No Access to Photos", systemImage: "lock")
+        } description: {
+            Text("SelfPhotos needs access to your photos to show what is on this device.")
+        } actions: {
+            Button("Open Settings") {
+                guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                UIApplication.shared.open(url)
+            }
+            .buttonStyle(.borderedProminent)
+        }
     }
 }

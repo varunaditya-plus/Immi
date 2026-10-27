@@ -1,3 +1,4 @@
+import Photos
 import SwiftUI
 
 /// Album perangkat, disusun persis seperti daftar Albums server.
@@ -10,8 +11,10 @@ import SwiftUI
 /// yang muncul di linimasa. Menampilkan seluruh album perangkat berarti
 /// menawarkan isi yang tidak pernah dibaca aplikasi ini.
 struct DeviceAlbumsListView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @State private var library = LocalPhotoLibrary.shared
     @State private var albums: [LocalAlbum] = []
+    @State private var albumsRevision: Int?
     @State private var isLoading = true
     @Namespace private var albumNamespace
     @AppStorage("deviceAlbumsLayout") private var layout: AlbumsListView.AlbumLayout = .grid
@@ -37,10 +40,10 @@ struct DeviceAlbumsListView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { optionsMenu }
             }
-            .task { await load() }
-            // Pilihan album diubah dari layar Backup; daftarnya ikut saat kembali.
-            .onChange(of: library.selectedAlbumIDs) {
-                Task { await load() }
+            .task(id: library.revision) { await load() }
+            .onChange(of: scenePhase) { _, phase in
+                guard phase == .active else { return }
+                library.refreshAuthorizationStatus()
             }
     }
 
@@ -69,8 +72,12 @@ struct DeviceAlbumsListView: View {
 
     @ViewBuilder
     private var content: some View {
-        if isLoading && albums.isEmpty {
+        if !library.isAuthorized && library.authorizationStatus != .notDetermined {
+            PhotoLibraryAccessUnavailableView()
+        } else if isLoading || albumsRevision != library.revision {
             ProgressView()
+        } else if !library.isAuthorized {
+            PhotoLibraryAccessUnavailableView()
         } else if visibleAlbums.isEmpty {
             emptyState
         } else {
@@ -159,6 +166,7 @@ struct DeviceAlbumsListView: View {
     // MARK: - Data
 
     private var visibleAlbums: [LocalAlbum] {
+        guard library.isAuthorized, albumsRevision == library.revision else { return [] }
         let selected = albums.filter { library.selectedAlbumIDs.contains($0.id) }
         switch sort {
         case .name:
@@ -171,7 +179,19 @@ struct DeviceAlbumsListView: View {
     }
 
     private func load() async {
-        albums = await library.albums()
+        library.refreshAuthorizationStatus()
+        if !library.isAuthorized {
+            albums = []
+            albumsRevision = nil
+        }
+        isLoading = albumsRevision != library.revision || albums.isEmpty
+        let revision = library.revision
+        let fetched = await library.albums()
+        guard !Task.isCancelled else { return }
+        library.refreshAuthorizationStatus()
+        guard revision == library.revision else { return }
+        albums = library.isAuthorized ? fetched : []
+        albumsRevision = revision
         isLoading = false
     }
 }
@@ -245,12 +265,14 @@ struct DeviceAlbumCover: View {
     var placeholderFont: Font = .body
 
     @State private var image: UIImage?
+    @State private var imageRevision: Int?
+    @State private var library = LocalPhotoLibrary.shared
 
     var body: some View {
         Rectangle()
             .fill(Color(.secondarySystemBackground))
             .overlay {
-                if let image {
+                if let image, imageRevision == library.revision, library.isAuthorized {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFill()
@@ -263,13 +285,26 @@ struct DeviceAlbumCover: View {
             // WAJIB: tanpa ini `scaledToFill` melebar keluar petaknya dan
             // menabrak kartu di sebelahnya.
             .clipped()
-            .task(id: assetID) { await loadCover() }
+            .task(id: CoverRequest(assetID: assetID, revision: library.revision)) { await loadCover() }
     }
 
     private func loadCover() async {
-        guard let assetID else { return }
-        image = await LocalPhotoLibrary.shared.thumbnail(
+        image = nil
+        imageRevision = nil
+        library.refreshAuthorizationStatus()
+        guard let assetID, library.isAuthorized else { return }
+        let revision = library.revision
+        let fetched = await library.thumbnail(
             for: LocalPhotoLibrary.assetID(for: assetID),
             size: CGSize(width: 600, height: 600))
+        library.refreshAuthorizationStatus()
+        guard !Task.isCancelled, revision == library.revision, library.isAuthorized else { return }
+        image = fetched
+        imageRevision = revision
+    }
+
+    private struct CoverRequest: Hashable {
+        let assetID: String?
+        let revision: Int
     }
 }

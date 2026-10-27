@@ -1,3 +1,4 @@
+import Photos
 import SwiftUI
 
 /// Detail album perangkat — sampul besar + grid, sama seperti detail album
@@ -12,19 +13,45 @@ struct DeviceAlbumDetailView: View {
     let album: LocalAlbum
 
     @Environment(SessionManager.self) private var session
+    @Environment(\.scenePhase) private var scenePhase
     @State private var backup = BackupService.shared
+    @State private var library = LocalPhotoLibrary.shared
     @State private var photos: [LocalPhoto] = []
+    @State private var photosRevision: Int?
     @State private var uploadedIDs: Set<String> = []
     @State private var phase: LoadingPhase<Void> = .loading
     @State private var actionError: ErrorEvent?
     @State private var deviceRemoval: Task<Void, Never>?
+    @State private var loadRevision = UUID()
 
     var body: some View {
+        Group {
+            if !library.isAuthorized && library.authorizationStatus != .notDetermined {
+                PhotoLibraryAccessUnavailableView()
+                    .navigationTitle(album.title)
+            } else {
+                collection
+            }
+        }
+        .task {
+            backup.configure(session: session)
+        }
+        .task(id: library.revision) { await load() }
+        .errorToast($actionError)
+        .cancelDeviceCopyRemoval { deviceRemoval?.cancel() }
+        .onChange(of: backup.backedUp) { _, _ in refreshUploaded() }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            library.refreshAuthorizationStatus()
+        }
+    }
+
+    private var collection: some View {
         PhotoCollectionScreen(
             title: LocalizedStringKey(album.title),
             subtitle: subtitle,
             assets: assets,
-            phase: phase,
+            phase: library.isAuthorized && photosRevision != library.revision ? .loading : phase,
             onRetry: { Task { await load() } },
             // Foto ini belum tentu ada di server, jadi tidak ada yang bisa
             // difavoritkan.
@@ -37,20 +64,6 @@ struct DeviceAlbumDetailView: View {
             // milik iOS, dan itu di luar jangkauan aplikasi ini.
             deletesPermanently: true,
             selectionMenu: { selectionMenu(for: $0) })
-            .task {
-                backup.configure(session: session)
-                await load()
-            }
-            .errorToast($actionError)
-            .cancelDeviceCopyRemoval { deviceRemoval?.cancel() }
-            // Unggahan yang selesai — dari sini maupun dari pencadangan latar —
-            // mengubah lencana dan isi menunya.
-            .onChange(of: backup.backedUp) { _, _ in refreshUploaded() }
-            // Penghapusan dari Photos/aplikasi lain harus langsung membuang
-            // petaknya dan pilihan "Delete from Device" yang sudah tidak sah.
-            .onChange(of: LocalPhotoLibrary.shared.revision) { _, _ in
-                Task { await load() }
-            }
     }
 
     private var subtitle: String? {
@@ -67,7 +80,8 @@ struct DeviceAlbumDetailView: View {
     /// dengan cache server yang juga menaik. Di layar, yang terbaru harus di
     /// atas — sama seperti album mana pun.
     private var assets: [AssetLite] {
-        photos.reversed().map { photo in
+        guard library.isAuthorized, photosRevision == library.revision else { return [] }
+        return photos.reversed().map { photo in
             AssetLite(
                 id: LocalPhotoLibrary.assetID(for: photo.id),
                 isVideo: photo.isVideo,
@@ -82,10 +96,21 @@ struct DeviceAlbumDetailView: View {
     }
 
     private func load() async {
-        if photos.isEmpty { phase = .loading }
-        let fetched = await LocalPhotoLibrary.shared.photos(inAlbum: album.id)
-        guard !Task.isCancelled else { return }
-        photos = fetched
+        let request = UUID()
+        loadRevision = request
+        library.refreshAuthorizationStatus()
+        if !library.isAuthorized {
+            photos = []
+            photosRevision = nil
+        }
+        if photosRevision != library.revision || photos.isEmpty { phase = .loading }
+        let revision = library.revision
+        let fetched = await library.photos(inAlbum: album.id)
+        guard !Task.isCancelled, request == loadRevision else { return }
+        library.refreshAuthorizationStatus()
+        guard revision == library.revision else { return }
+        photos = library.isAuthorized ? fetched : []
+        photosRevision = revision
         refreshUploaded()
         phase = .loaded(())
     }

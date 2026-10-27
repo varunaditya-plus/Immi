@@ -9,6 +9,7 @@ import UIKit
 /// perlu diperhatikan. Gayanya milik kita.
 struct BackupView: View {
     @Environment(SessionManager.self) private var session
+    @Environment(\.scenePhase) private var scenePhase
     @State private var backup = BackupService.shared
     @State private var library = LocalPhotoLibrary.shared
     @State private var albums: [LocalAlbum] = []
@@ -66,6 +67,9 @@ struct BackupView: View {
                 backup.start()
                 BackupScheduler.schedule()
             }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { library.refreshAuthorizationStatus() }
         }
     }
 
@@ -267,6 +271,9 @@ struct BackupView: View {
     /// aplikasinya rusak, padahal seringkali jaringannya yang sedang tidak
     /// memenuhi syarat sendiri.
     private var statusText: String {
+        if !library.isAuthorized && (!library.selectedAlbumIDs.isEmpty || !backup.uploadItems.isEmpty) {
+            return String(localized: "No Access to Photos")
+        }
         if !backup.isEnabled {
             return """
                 New photos and videos from the selected albums are uploaded when \
