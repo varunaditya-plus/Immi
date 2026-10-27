@@ -46,26 +46,23 @@ final class ServerTransportPolicyTests: XCTestCase {
         }
     }
 
-    func testConfiguredHTTPServerRespondsOverIPv4() async throws {
-        try await assertHTTPResponse(host: "127.0.0.1", urlHost: "127.0.0.1")
-    }
-
-    func testConfiguredHTTPServerRespondsOverIPv6() async throws {
-        try await assertHTTPResponse(host: "::1", urlHost: "[::1]")
-    }
-
-    private func assertHTTPResponse(host: String, urlHost: String) async throws {
+    func testConfiguredHTTPHostnameRespondsThroughLoopbackProxy() async throws {
         let ready = expectation(description: "Loopback HTTP listener is ready")
-        let served = expectation(description: "Loopback HTTP response was sent")
-        let body = Data("SelfPhotos HTTP response from \(host)".utf8) + Data([0, 255])
-        let server = try LoopbackHTTPServer(host: host, body: body, ready: ready, served: served)
+        let body = Data("SelfPhotos HTTP response".utf8) + Data([0, 255])
+        let server = try LoopbackHTTPServer(body: body, ready: ready)
         defer { server.stop() }
         await fulfillment(of: [ready], timeout: 5)
         let port = try XCTUnwrap(server.port)
-        let url = try XCTUnwrap(URL(string: "http://\(urlHost):\(port)/api/server/ping"))
+        let url = try XCTUnwrap(URL(string: "http://configured-server.example.invalid:\(port)/api/server/ping"))
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 3
         configuration.timeoutIntervalForResource = 5
+        // The proxy avoids DNS while ATS still evaluates the request's hostname.
+        configuration.connectionProxyDictionary = [
+            "HTTPEnable": 1,
+            "HTTPProxy": "127.0.0.1",
+            "HTTPPort": Int(port),
+        ]
         let session = URLSession(configuration: configuration)
         defer { session.invalidateAndCancel() }
 
@@ -76,7 +73,6 @@ final class ServerTransportPolicyTests: XCTestCase {
         XCTAssertEqual(http.statusCode, 202)
         XCTAssertEqual(http.url, url)
         XCTAssertEqual(data, body)
-        await fulfillment(of: [served], timeout: 5)
     }
 
     private func infoDictionary(in bundle: Bundle) throws -> [String: Any] {
@@ -99,9 +95,9 @@ private final class LoopbackHTTPServer: @unchecked Sendable {
 
     var port: UInt16? { listener.port?.rawValue }
 
-    init(host: String, body: Data, ready: XCTestExpectation, served: XCTestExpectation) throws {
+    init(body: Data, ready: XCTestExpectation) throws {
         let parameters = NWParameters.tcp
-        parameters.requiredLocalEndpoint = .hostPort(host: NWEndpoint.Host(host), port: .any)
+        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
         listener = try NWListener(using: parameters)
         let response = Data((
             "HTTP/1.1 202 Accepted\r\n"
@@ -136,7 +132,6 @@ private final class LoopbackHTTPServer: @unchecked Sendable {
                 }
                 connection.send(content: response, completion: .contentProcessed { error in
                     if let error { XCTFail("Loopback response failed: \(error)") }
-                    else { served.fulfill() }
                     connection.cancel()
                 })
             }
