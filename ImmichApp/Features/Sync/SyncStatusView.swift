@@ -2,7 +2,7 @@ import Observation
 import SwiftUI
 import UIKit
 
-private enum SyncStatusJob: String, CaseIterable, Identifiable, Hashable {
+enum SyncStatusJob: String, CaseIterable, Identifiable, Hashable {
     case syncLocal
     case syncRemote
     case syncCloudIDs
@@ -29,7 +29,7 @@ private enum SyncStatusJob: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
-private enum SyncStatusJobState: Equatable {
+enum SyncStatusJobState: Equatable {
     case idle
     case running
     case succeeded(Date?, String)
@@ -43,7 +43,7 @@ private struct SyncStatusJobError: LocalizedError {
 
 @MainActor
 @Observable
-private final class SyncStatusViewModel {
+final class SyncStatusViewModel {
     var localAssets: Int?
     var remoteAssets: Int?
     var localAlbums: Int?
@@ -66,23 +66,34 @@ private final class SyncStatusViewModel {
     private let memoriesRepo: MemoriesRepository
     private let syncRepo: SyncRepository
     private let matcher: DeviceAssetMatcher
-    private let dataManager = SwiftDataManager.shared
-    private let library = LocalPhotoLibrary.shared
+    private let dataManager: SwiftDataManager
+    private let library: LocalPhotoLibrary
+    private let prepareLocal: @MainActor () async -> Void
     private var didLoad = false
 
     var storageStartupState: LocalStoreStartupState {
         dataManager.startupState
     }
 
-    init(session: SessionManager) {
-        let api = APIClient(session: session)
+    init(
+        session: SessionManager,
+        library: LocalPhotoLibrary? = nil,
+        dataManager: SwiftDataManager? = nil,
+        api: APIClient? = nil,
+        prepareLocal: @escaping @MainActor () async -> Void = { await BackupService.shared.prepare() }
+    ) {
+        let dataManager = dataManager ?? .shared
+        self.library = library ?? .shared
+        self.dataManager = dataManager
+        self.prepareLocal = prepareLocal
+        let api = api ?? APIClient(session: session)
         settingsRepo = SettingsRepository(api: api)
         albumRepo = AlbumRepository(api: api)
         memoriesRepo = MemoriesRepository(api: api)
-        syncRepo = SyncRepository(api: api, dataManager: .shared)
+        syncRepo = SyncRepository(api: api, dataManager: dataManager)
         matcher = DeviceAssetMatcher(
             repo: BackupRepository(api: api),
-            dataManager: .shared)
+            dataManager: dataManager)
 
         for job in SyncStatusJob.allCases { jobStates[job] = .idle }
     }
@@ -102,18 +113,20 @@ private final class SyncStatusViewModel {
         // Local storage remains available even if server requests are slow.
         await refreshStorageUsage()
 
-        async let localTask = try? library.statusCounts()
         async let statsTask: AssetStatsDTO? = try? settingsRepo.getAssetStats()
         async let remoteAlbumsTask: [AlbumResponseDTO]? = try? albumRepo.all()
         async let memoriesTask: [MemoryDTO]? = try? memoriesRepo.getMemories()
-        let (local, stats, albums, memoryItems) = await (
-            localTask,
+        let local = try? await library.statusCounts()
+        let localRevision = library.revision
+        let (stats, albums, memoryItems) = await (
             statsTask,
             remoteAlbumsTask,
             memoriesTask)
 
-        localAssets = local?.assets
-        localAlbums = local?.albums
+        library.refreshAuthorizationStatus()
+        let localIsCurrent = !Task.isCancelled && library.isAuthorized && localRevision == library.revision
+        localAssets = localIsCurrent ? local?.assets : nil
+        localAlbums = localIsCurrent ? local?.albums : nil
         remoteAssets = stats?.total
         remoteAlbums = albums?.count
         memories = memoryItems?.count
@@ -129,8 +142,14 @@ private final class SyncStatusViewModel {
             let result: String
             switch job {
             case .syncLocal:
+                try Task.checkCancellation()
+                let hasAccess = await library.requestAccess()
+                try Task.checkCancellation()
+                guard hasAccess else {
+                    throw SyncStatusJobError(message: "Allow Photos access before syncing local assets.")
+                }
+                await prepareLocal()
                 let counts = try await library.statusCounts()
-                await BackupService.shared.prepare()
                 result = counts.assets == 1
                     ? "Scanned 1 local asset"
                     : "Scanned \(counts.assets.formatted()) local assets"
