@@ -493,6 +493,246 @@
         }
       }
     },
+    "NSLocalNetworkUsageDescription" : {
+      "comment" : "Reason shown by iOS when connecting to an Immich server on the local network.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "يتصل SelfPhotos بخادم Immich عبر الشبكة المحلية لعرض الصور والفيديوهات ورفعها."
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos се свързва с вашия Immich сървър в локалната мрежа, за да преглеждате и качвате снимки и видеоклипове."
+          }
+        },
+        "bn" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos ছবি ও ভিডিও দেখতে এবং আপলোড করতে স্থানীয় নেটওয়ার্কে আপনার Immich সার্ভারের সঙ্গে সংযোগ করে।"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos es connecta al vostre servidor Immich a la xarxa local per veure i pujar fotos i vídeos."
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos se připojuje k vašemu serveru Immich v místní síti, abyste mohli prohlížet a nahrávat fotografie a videa."
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos opretter forbindelse til din Immich-server på det lokale netværk for at vise og overføre billeder og videoer."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos verbindet sich über das lokale Netzwerk mit deinem Immich-Server, um Fotos und Videos anzuzeigen und hochzuladen."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Το SelfPhotos συνδέεται στον διακομιστή Immich στο τοπικό δίκτυο για προβολή και μεταφόρτωση φωτογραφιών και βίντεο."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos connects to your Immich server on the local network to view and upload photos and videos."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos se conecta a tu servidor Immich en la red local para ver y subir fotos y vídeos."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos برای نمایش و بارگذاری عکس‌ها و ویدیوها، از طریق شبکهٔ محلی به سرور Immich شما متصل می‌شود."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos muodostaa yhteyden Immich-palvelimeesi lähiverkossa kuvien ja videoiden katselua ja lähettämistä varten."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos se connecte à votre serveur Immich sur le réseau local pour afficher et téléverser des photos et des vidéos."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos מתחבר לשרת Immich שלכם ברשת המקומית כדי להציג ולהעלות תמונות וסרטונים."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos फ़ोटो और वीडियो देखने और अपलोड करने के लिए स्थानीय नेटवर्क पर आपके Immich सर्वर से जुड़ता है।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos se povezuje s vašim Immich poslužiteljem na lokalnoj mreži radi pregledavanja i prijenosa fotografija i videozapisa."
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A SelfPhotos a helyi hálózaton csatlakozik az Immich-kiszolgálójához a fotók és videók megtekintéséhez és feltöltéséhez."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos terhubung ke server Immich Anda di jaringan lokal untuk melihat dan mengunggah foto serta video."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos si connette al tuo server Immich sulla rete locale per visualizzare e caricare foto e video."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotosはローカルネットワーク上のImmichサーバーに接続し、写真やビデオの表示とアップロードを行います。"
+          }
+        },
+        "kk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos фотосуреттер мен бейнелерді көру және жүктеп салу үшін жергілікті желідегі Immich серверіңізге қосылады."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos는 로컬 네트워크의 Immich 서버에 연결하여 사진과 비디오를 보고 업로드합니다."
+          }
+        },
+        "lt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos prisijungia prie jūsų Immich serverio vietiniame tinkle, kad galėtumėte peržiūrėti ir įkelti nuotraukas bei vaizdo įrašus."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos bersambung ke pelayan Immich anda pada rangkaian setempat untuk melihat dan memuat naik foto serta video."
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos kobler til Immich-serveren din på lokalnettverket for å vise og laste opp bilder og videoer."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos maakt via het lokale netwerk verbinding met je Immich-server om foto's en video's te bekijken en te uploaden."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos łączy się z Twoim serwerem Immich w sieci lokalnej, aby wyświetlać i przesyłać zdjęcia oraz filmy."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O SelfPhotos liga-se ao seu servidor Immich na rede local para ver e carregar fotografias e vídeos."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos se conectează la serverul dvs. Immich din rețeaua locală pentru a vizualiza și încărca fotografii și videoclipuri."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos подключается к вашему серверу Immich в локальной сети для просмотра и загрузки фотографий и видео."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos sa pripája k vášmu serveru Immich v miestnej sieti, aby ste mohli prezerať a nahrávať fotografie a videá."
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos se poveže z vašim strežnikom Immich v lokalnem omrežju za ogled in nalaganje fotografij in videoposnetkov."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos ansluter till din Immich-server på det lokala nätverket för att visa och ladda upp bilder och videor."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos เชื่อมต่อกับเซิร์ฟเวอร์ Immich ของคุณบนเครือข่ายภายในเพื่อดูและอัปโหลดรูปภาพและวิดีโอ"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos, fotoğraf ve videoları görüntülemek ve yüklemek için yerel ağdaki Immich sunucunuza bağlanır."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos підключається до вашого сервера Immich у локальній мережі для перегляду та завантаження фотографій і відео."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos kết nối với máy chủ Immich của bạn trên mạng cục bộ để xem và tải ảnh cũng như video lên."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos 连接到本地网络中的 Immich 服务器，以查看和上传照片及视频。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos 連線至區域網路中的 Immich 伺服器，以檢視和上傳照片及影片。"
+          }
+        }
+      }
+    },
     "NSPhotoLibraryUsageDescription" : {
       "comment" : "Reason shown by iOS when requesting access to the photo library.",
       "extractionState" : "manual",
