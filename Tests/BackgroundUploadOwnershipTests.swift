@@ -6,7 +6,7 @@ import XCTest
 final class BackgroundUploadOwnershipTests: XCTestCase {
     private let owner = BackupQueueOwner(server: "https://immich.test/api", userID: "user-a")
     private var savedDefaults: [String: Any] = [:]
-    private let defaultsKeys = ["backup.enabled", "backup.syncAlbums", "backup.manualQueueRefill"]
+    private let defaultsKeys = ["backup.enabled", "backup.syncAlbums"]
 
     override func setUp() async throws {
         try await super.setUp()
@@ -124,13 +124,15 @@ final class BackgroundUploadOwnershipTests: XCTestCase {
     }
 
     func testOldCredential401RetriesWithoutExpiringRenewedSameAccountSession() async throws {
-        UserDefaults.standard.set(true, forKey: "backup.manualQueueRefill")
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
+        let requests = BackupUploadRequests(queue: fixture.queue)
         let context = try fixture.startUpload()
+        let uploading = try XCTUnwrap(fixture.queue.item(id: "local-a"))
         fixture.service.pauseForAuthentication()
         fixture.session.uploadAuthHeaders = ["Authorization": "Bearer renewed-token"]
         fixture.service.configure(session: fixture.session)
+        try requests.requestUploads(["local-a"], uploadedIDs: [])
         XCTAssertEqual(context.ownership, fixture.queue.ownership)
         let unexpectedExpiration = expectation(description: "Renewed session must remain signed in")
         unexpectedExpiration.isInverted = true
@@ -143,9 +145,20 @@ final class BackgroundUploadOwnershipTests: XCTestCase {
         await fulfillment(of: [unexpectedExpiration], timeout: 0.1)
         XCTAssertTrue(fixture.session.isLoggedIn)
         XCTAssertEqual(fixture.session.expirationCount, 0)
-        XCTAssertEqual(fixture.queue.item(id: "local-a")?.state, .queued)
-        XCTAssertEqual(fixture.queue.readyItems().map(\.id), ["local-a"])
-        XCTAssertTrue(UserDefaults.standard.bool(forKey: "backup.manualQueueRefill"))
+        let retried = try XCTUnwrap(fixture.queue.item(id: "local-a"))
+        XCTAssertEqual(retried.state, .queued)
+        XCTAssertEqual(retried.intent, .manualUpload)
+        XCTAssertEqual(retried.phase, uploading.phase)
+        XCTAssertEqual(retried.checksum, uploading.checksum)
+        XCTAssertEqual(retried.attemptCount, uploading.attemptCount)
+        XCTAssertNil(retried.taskIdentifier)
+        XCTAssertNil(retried.nextAttemptAt)
+        XCTAssertNil(retried.lastError)
+        XCTAssertEqual(requests.readyItems(automaticEnabled: false).map(\.id), ["local-a"])
+        let restored = BackupQueueStore(fileURL: fixture.queueURL)
+        XCTAssertEqual(restored.ownership, context.ownership)
+        XCTAssertEqual(restored.item(id: "local-a")?.intent, .manualUpload)
+        XCTAssertEqual(BackupUploadRequests(queue: restored).readyItems(automaticEnabled: false).map(\.id), ["local-a"])
         XCTAssertNil(fixture.service.lastError)
         XCTAssertNil(fixture.dataManager.getBackupRecord(localIdentifier: "local-a"))
     }
