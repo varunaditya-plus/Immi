@@ -68,11 +68,13 @@ enum BackupTemporaryFiles {
             }
         }
         if manager.fileExists(atPath: receipt.path) { try manager.removeItem(at: receipt) }
-        if succeeded {
+        if succeeded, let ownership = context.ownership {
             // A later retry may recreate the body after Photos access returns.
-            // Only retire recovery copies of the exact confirmed content/phase.
+            // Recovery copies must belong to this account and queue generation.
+            // Legacy receipts without ownership cannot prove that relationship.
             for saved in recordedContexts(in: recovery)
-            where saved.localIdentifier == context.localIdentifier
+            where saved.ownership == ownership
+                && saved.localIdentifier == context.localIdentifier
                 && saved.checksum == context.checksum && saved.phase == context.phase {
                 guard let savedBody = bodyURL(for: saved.bodyPath, in: recovery) else { continue }
                 if manager.fileExists(atPath: savedBody.path) { try manager.removeItem(at: savedBody) }

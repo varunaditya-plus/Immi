@@ -7,6 +7,8 @@ final class BackupStorageTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("completion-cleanup-\(UUID())")
         let tmp = root.appendingPathComponent("tmp")
         let recovery = root.appendingPathComponent("recovery")
+        let ownership = BackupUploadOwnership(
+            owner: BackupQueueOwner(server: "https://backup.example/api", userID: "current"), generation: UUID())
         try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
 
@@ -14,7 +16,7 @@ final class BackupStorageTests: XCTestCase {
             let body = tmp.appendingPathComponent("upload-\(index).multipart")
             let context = BackupUploadTaskContext(
                 phase: .primaryAsset, localIdentifier: "photo-\(index)", checksum: "sha",
-                bodyPath: body.path)
+                bodyPath: body.path, ownership: ownership)
             let bytes = Data(repeating: UInt8(index), count: 1024)
             try bytes.write(to: body)
             try BackupTemporaryFiles.record(context, in: tmp)
@@ -40,16 +42,124 @@ final class BackupStorageTests: XCTestCase {
         for (checksum, phase) in [("other", BackupUploadPhase.primaryAsset), ("sha", .livePhotoMotion)] {
             let unrelated = BackupUploadTaskContext(
                 phase: phase, localIdentifier: "photo-2", checksum: checksum,
-                bodyPath: tmp.appendingPathComponent("upload-retry.multipart").path)
+                bodyPath: tmp.appendingPathComponent("upload-retry.multipart").path, ownership: ownership)
             try BackupTemporaryFiles.finish(unrelated, succeeded: true, sourceAvailable: true, in: tmp, recovery: recovery)
             XCTAssertTrue(FileManager.default.fileExists(atPath: savedBody.path))
         }
         let retry = BackupUploadTaskContext(
             phase: .primaryAsset, localIdentifier: "photo-2", checksum: "sha",
-            bodyPath: tmp.appendingPathComponent("upload-retry.multipart").path)
+            bodyPath: tmp.appendingPathComponent("upload-retry.multipart").path, ownership: ownership)
         try BackupTemporaryFiles.finish(retry, succeeded: true, sourceAvailable: true, in: tmp, recovery: recovery)
         XCTAssertFalse(FileManager.default.fileExists(atPath: savedBody.path))
         XCTAssertTrue(BackupTemporaryFiles.recordedContexts(in: recovery).isEmpty)
+    }
+
+    func testLateSuccessCannotRemoveAnotherAccountOrGenerationRecoveryCopy() throws {
+        let current = BackupUploadOwnership(
+            owner: BackupQueueOwner(server: "https://backup.example/api", userID: "current"), generation: UUID())
+        let staleOwnerships = [
+            BackupUploadOwnership(owner: BackupQueueOwner(server: current.owner.server, userID: "other"),
+                generation: current.generation),
+            BackupUploadOwnership(owner: BackupQueueOwner(server: "https://other.example/api", userID: current.owner.userID),
+                generation: current.generation),
+            BackupUploadOwnership(owner: current.owner, generation: UUID()),
+        ]
+
+        for phase in [BackupUploadPhase.primaryAsset, .livePhotoMotion] {
+            for staleOwnership in staleOwnerships {
+                let root = FileManager.default.temporaryDirectory.appendingPathComponent("recovery-owner-\(UUID())")
+                let temporary = root.appendingPathComponent("tmp")
+                let recovery = root.appendingPathComponent("recovery")
+                try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+                defer { try? FileManager.default.removeItem(at: root) }
+                let bytes = Data("only remaining original".utf8)
+                let preserved = try recoveryContext(in: temporary, phase: phase, ownership: current, bytes: bytes)
+                XCTAssertTrue(try BackupTemporaryFiles.finish(preserved, succeeded: false, sourceAvailable: false,
+                    in: temporary, recovery: recovery))
+                let saved = recovery.appendingPathComponent(URL(fileURLWithPath: preserved.bodyPath).lastPathComponent)
+                let receipt = saved.appendingPathExtension("json")
+                let savedReceipt = try Data(contentsOf: receipt)
+                XCTAssertEqual(BackupTemporaryFiles.recordedContexts(in: recovery), [preserved])
+
+                let stale = try recoveryContext(in: temporary, phase: phase, ownership: staleOwnership, bytes: bytes)
+                XCTAssertFalse(try BackupTemporaryFiles.finish(stale, succeeded: true, sourceAvailable: false,
+                    in: temporary, recovery: recovery))
+
+                XCTAssertFalse(FileManager.default.fileExists(atPath: stale.bodyPath),
+                    "An old callback may still release its own unique temporary body")
+                XCTAssertFalse(FileManager.default.fileExists(atPath: stale.bodyPath + ".json"))
+                XCTAssertEqual(try Data(contentsOf: saved), bytes,
+                    "Another owner or generation cannot delete this account's only recovery copy")
+                XCTAssertEqual(try Data(contentsOf: receipt), savedReceipt)
+                XCTAssertEqual(BackupTemporaryFiles.recordedContexts(in: recovery), [preserved])
+
+                let matching = try recoveryContext(in: temporary, phase: phase, ownership: current, bytes: bytes)
+                try BackupTemporaryFiles.finish(matching, succeeded: true, sourceAvailable: true,
+                    in: temporary, recovery: recovery)
+
+                XCTAssertFalse(FileManager.default.fileExists(atPath: saved.path),
+                    "A confirmed upload for the same ownership and content must retire its recovery copy")
+                XCTAssertFalse(FileManager.default.fileExists(atPath: receipt.path))
+                XCTAssertFalse(FileManager.default.fileExists(atPath: matching.bodyPath))
+                XCTAssertTrue(BackupTemporaryFiles.recordedContexts(in: recovery).isEmpty)
+            }
+        }
+    }
+
+    func testUnownedRecoveryReceiptsCannotBeRetiredByLegacyOrOwnedSuccesses() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("legacy-recovery-\(UUID())")
+        let temporary = root.appendingPathComponent("tmp")
+        let recovery = root.appendingPathComponent("recovery")
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let ownership = BackupUploadOwnership(
+            owner: BackupQueueOwner(server: "https://backup.example/api", userID: "current"), generation: UUID())
+        let bytes = Data("unattributed original".utf8)
+        let unowned = try recoveryContext(in: temporary, phase: .primaryAsset, ownership: nil, bytes: bytes)
+        let owned = try recoveryContext(in: temporary, phase: .primaryAsset, ownership: ownership, bytes: bytes)
+        for context in [unowned, owned] {
+            XCTAssertTrue(try BackupTemporaryFiles.finish(context, succeeded: false, sourceAvailable: false,
+                in: temporary, recovery: recovery))
+        }
+        let legacyBody = recovery.appendingPathComponent(URL(fileURLWithPath: unowned.bodyPath).lastPathComponent)
+        let ownedBody = recovery.appendingPathComponent(URL(fileURLWithPath: owned.bodyPath).lastPathComponent)
+        let legacyReceipt = try Data(contentsOf: legacyBody.appendingPathExtension("json"))
+        let ownedReceipt = try Data(contentsOf: ownedBody.appendingPathExtension("json"))
+        XCTAssertEqual(Set(BackupTemporaryFiles.recordedContexts(in: recovery).map(\.bodyPath)),
+            Set([unowned.bodyPath, owned.bodyPath]))
+
+        let legacySuccess = try recoveryContext(in: temporary, phase: .primaryAsset, ownership: nil, bytes: bytes)
+        try BackupTemporaryFiles.finish(legacySuccess, succeeded: true, sourceAvailable: true,
+            in: temporary, recovery: recovery)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacySuccess.bodyPath))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacySuccess.bodyPath + ".json"))
+        XCTAssertEqual(try Data(contentsOf: legacyBody), bytes)
+        XCTAssertEqual(try Data(contentsOf: legacyBody.appendingPathExtension("json")), legacyReceipt)
+        XCTAssertEqual(try Data(contentsOf: ownedBody), bytes,
+            "An unidentified callback cannot clear a receipt with a known owner")
+        XCTAssertEqual(try Data(contentsOf: ownedBody.appendingPathExtension("json")), ownedReceipt)
+
+        let currentSuccess = try recoveryContext(in: temporary, phase: .primaryAsset, ownership: ownership, bytes: bytes)
+        try BackupTemporaryFiles.finish(currentSuccess, succeeded: true, sourceAvailable: true,
+            in: temporary, recovery: recovery)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: ownedBody.path))
+        XCTAssertEqual(try Data(contentsOf: legacyBody), bytes,
+            "A current account's success cannot claim an unattributed legacy copy")
+        XCTAssertEqual(try Data(contentsOf: legacyBody.appendingPathExtension("json")), legacyReceipt)
+        XCTAssertEqual(BackupTemporaryFiles.recordedContexts(in: recovery), [unowned])
+    }
+
+    private func recoveryContext(
+        in directory: URL, phase: BackupUploadPhase, ownership: BackupUploadOwnership?, bytes: Data
+    ) throws -> BackupUploadTaskContext {
+        let body = directory.appendingPathComponent("upload-\(UUID()).multipart")
+        try bytes.write(to: body)
+        let context = BackupUploadTaskContext(phase: phase, localIdentifier: "same-photo", checksum: "same-checksum",
+            bodyPath: body.path, ownership: ownership)
+        try BackupTemporaryFiles.record(context, in: directory)
+        return context
     }
 
     func testReceiptsProtectMediaDuringColdLaunchAndFailedCleanup() throws {
