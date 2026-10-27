@@ -3,6 +3,16 @@ import XCTest
 
 @MainActor
 final class WidgetPrivacyInvalidationTests: XCTestCase {
+    override func setUp() async throws {
+        RemovedAssets.shared.clear()
+        DeletedServerAssetRegistry.shared.clear()
+    }
+
+    override func tearDown() async throws {
+        RemovedAssets.shared.clear()
+        DeletedServerAssetRegistry.shared.clear()
+    }
+
     func testClearingPublishedWidgetsRemovesSnapshotAndImageFiles() throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -155,6 +165,103 @@ final class WidgetPrivacyInvalidationTests: XCTestCase {
         XCTAssertTrue(try imageNames(in: directory).isEmpty)
     }
 
+    func testPurgePreventsLateThumbnailFromReplacingTheCurrentWidget() async throws {
+        let directory = try temporaryDirectory()
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let store = SwiftDataManager(storeURL: directory.appendingPathComponent("test.store"),
+            backupJournalURL: directory.appendingPathComponent("backup.json"))
+        let started = expectation(description: "Deleted photo thumbnail started")
+        let gate = WidgetPrivacyGate(started: started)
+        let oldAPI = try makeAPI(imageGate: gate, assetID: "deleted-photo")
+        let export = Task {
+            await WidgetSnapshotExporter.refresh(api: oldAPI, imageAPI: oldAPI,
+                container: directory, selectedAlbumIDs: [], dataManager: store)
+        }
+        addTeardownBlock {
+            await gate.close()
+            await export.value
+        }
+        await fulfillment(of: [started], timeout: 2)
+
+        try store.purgeAssets(["deleted-photo"], reason: .trashed)
+        XCTAssertTrue(RemovedAssets.shared.ids.contains("deleted-photo"))
+        let currentAPI = try makeAPI(assetID: "current-photo")
+        await WidgetSnapshotExporter.refresh(api: currentAPI, imageAPI: currentAPI,
+            container: directory, selectedAlbumIDs: [], dataManager: store)
+        let snapshotURL = directory.appendingPathComponent("Widgets/snapshot.json")
+        let currentSnapshot = try Data(contentsOf: snapshotURL)
+        await gate.release()
+        await export.value
+
+        XCTAssertEqual(try Data(contentsOf: snapshotURL), currentSnapshot)
+        let names = try imageNames(in: directory)
+        XCTAssertEqual(names.count, 1)
+        let image = directory.appendingPathComponent("Widgets")
+            .appendingPathComponent(try XCTUnwrap(names.first))
+        XCTAssertEqual(try Data(contentsOf: image), Data([1, 2, 3]))
+        let generations = try FileManager.default.contentsOfDirectory(
+            at: directory.appendingPathComponent("Widgets"), includingPropertiesForKeys: nil)
+            .filter(\.hasDirectoryPath)
+        XCTAssertEqual(generations.count, 1, "An invalidated export must remove its staged images")
+    }
+
+    func testSyncDeletionPreventsHeldMetadataFromStartingAnExport() async throws {
+        let directory = try temporaryDirectory()
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let store = SwiftDataManager(storeURL: directory.appendingPathComponent("test.store"),
+            backupJournalURL: directory.appendingPathComponent("backup.json"))
+        let started = expectation(description: "Deleted photo metadata started")
+        let gate = WidgetPrivacyGate(started: started)
+        let api = try makeAPI(metadataGate: gate, assetID: "deleted-photo")
+        let export = Task {
+            await WidgetSnapshotExporter.refresh(api: api, imageAPI: api,
+                container: directory, selectedAlbumIDs: [], dataManager: store)
+        }
+        addTeardownBlock {
+            await gate.close()
+            await export.value
+        }
+        await fulfillment(of: [started], timeout: 2)
+
+        try store.applySyncBatch(upserts: [], deletedIds: ["deleted-photo"])
+        XCTAssertTrue(RemovedAssets.shared.ids.contains("deleted-photo"))
+        await gate.release()
+        await export.value
+
+        let count = await api.thumbnailCount.value
+        XCTAssertEqual(count, 0)
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: directory.appendingPathComponent("Widgets").path))
+    }
+
+    func testRemovedIDsCannotReturnThroughStaleFavoritesAlbumsOrMemoryCovers() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = SwiftDataManager(storeURL: directory.appendingPathComponent("test.store"),
+            backupJournalURL: directory.appendingPathComponent("backup.json"))
+        RemovedAssets.shared.remove(["unavailable-photo"])
+        DeletedServerAssetRegistry.shared.record(["trashed-photo"], permanently: false)
+        DeletedServerAssetRegistry.shared.record(["deleted-photo"], permanently: true)
+        let api = try makeAPI(assetID: "unavailable-photo",
+            additionalAssetIDs: ["trashed-photo", "deleted-photo", "current-photo"],
+            includesCollections: true)
+
+        await WidgetSnapshotExporter.refresh(api: api, imageAPI: api, container: directory,
+            selectedAlbumIDs: ["widget-album"], dataManager: store)
+
+        let requestedIDs = await api.thumbnailCount.assetIDs
+        XCTAssertEqual(requestedIDs.count, 3, "Current favorites, album photos, and memory covers still export")
+        XCTAssertTrue(requestedIDs.allSatisfy { $0 == "current-photo" })
+        let data = try Data(contentsOf: directory.appendingPathComponent("Widgets/snapshot.json"))
+        let snapshot = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let albums = try XCTUnwrap(snapshot["albums"] as? [[String: Any]])
+        XCTAssertEqual(albums.count, 2)
+        XCTAssertEqual(albums.compactMap { ($0["imageNames"] as? [String])?.count }, [1, 1])
+        let memories = try XCTUnwrap(snapshot["memories"] as? [[String: Any]])
+        XCTAssertEqual(memories.count, 1)
+        XCTAssertNotNil(memories.first?["imageName"] as? String)
+    }
+
     private func temporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("widget-invalidation-\(UUID())")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -163,11 +270,13 @@ final class WidgetPrivacyInvalidationTests: XCTestCase {
 
     private func makeAPI(
         imageGate: WidgetPrivacyGate? = nil, metadataGate: WidgetPrivacyGate? = nil,
-        assetID: String = "was-visible"
+        assetID: String = "was-visible", additionalAssetIDs: [String] = [],
+        includesCollections: Bool = false
     ) throws -> WidgetPrivacyAPI {
         let session = MockSessionManager()
         try session.setServer("https://widget-privacy.test")
-        return WidgetPrivacyAPI(session: session, imageGate: imageGate, metadataGate: metadataGate, assetID: assetID)
+        return WidgetPrivacyAPI(session: session, imageGate: imageGate, metadataGate: metadataGate,
+            assetIDs: [assetID] + additionalAssetIDs, includesCollections: includesCollections)
     }
 
     private func imageNames(in directory: URL) throws -> [String] {
@@ -203,37 +312,58 @@ private actor WidgetPrivacyGate {
 }
 
 private actor WidgetThumbnailCount {
-    private(set) var value = 0
-    func increment() { value += 1 }
+    private(set) var assetIDs: [String] = []
+    var value: Int { assetIDs.count }
+    func record(_ assetID: String) { assetIDs.append(assetID) }
 }
 
 private final class WidgetPrivacyAPI: APIClient {
     let thumbnailCount = WidgetThumbnailCount()
     private let imageGate: WidgetPrivacyGate?
     private let metadataGate: WidgetPrivacyGate?
-    private let assetID: String
+    private let assetIDs: [String]
+    private let includesCollections: Bool
     @MainActor
-    init(session: SessionManager, imageGate: WidgetPrivacyGate?, metadataGate: WidgetPrivacyGate?, assetID: String) {
+    init(session: SessionManager, imageGate: WidgetPrivacyGate?, metadataGate: WidgetPrivacyGate?,
+         assetIDs: [String], includesCollections: Bool) {
         self.imageGate = imageGate
         self.metadataGate = metadataGate
-        self.assetID = assetID
+        self.assetIDs = assetIDs
+        self.includesCollections = includesCollections
         super.init(session: session)
     }
     override func send<T: Decodable>(_ endpoint: Endpoint) async throws -> T {
-        let data: Data
+        let assets: [[String: Any]] = assetIDs.map { id in [
+            "id": id, "type": "IMAGE", "originalFileName": "photo.jpg",
+            "fileCreatedAt": "2020-01-01T00:00:00Z", "localDateTime": "2020-01-01T00:00:00Z",
+            "isFavorite": true, "isArchived": false, "isTrashed": false, "visibility": "timeline",
+        ] }
+        let object: Any
         switch endpoint.path {
-        case "/albums", "/memories": data = Data("[]".utf8)
+        case "/albums":
+            object = includesCollections
+                ? [["id": "widget-album", "albumName": "Album", "assetCount": assetIDs.count]] : []
+        case "/memories":
+            let today = Calendar.current.dateComponents([.month, .day], from: Date())
+            let memoryAt = String(format: "2020-%02d-%02dT00:00:00Z",
+                try XCTUnwrap(today.month), try XCTUnwrap(today.day))
+            object = includesCollections
+                ? [["id": "widget-memory", "type": "on_this_day", "memoryAt": memoryAt, "assets": assets]] : []
         case "/search/metadata":
             await metadataGate?.wait()
-            data = Data(#"{"assets":{"items":[{"id":"was-visible","type":"IMAGE","originalFileName":"photo.jpg","fileCreatedAt":"2020-01-01T00:00:00Z","localDateTime":"2020-01-01T00:00:00Z","isFavorite":true,"isArchived":false,"isTrashed":false,"visibility":"timeline"}],"total":1,"nextPage":null}}"#
-                .replacingOccurrences(of: "was-visible", with: assetID).utf8)
+            object = ["assets": ["items": assets, "total": assets.count, "nextPage": NSNull()]]
         default: throw URLError(.unsupportedURL)
         }
+        let data = try JSONSerialization.data(withJSONObject: object)
         return try JSONDecoder.immich.decode(T.self, from: data)
     }
     override func rawData(_ endpoint: Endpoint) async throws -> Data {
+        let components = endpoint.path.split(separator: "/")
+        guard components.count == 3 else { throw URLError(.unsupportedURL) }
+        let assetID = String(components[1])
         XCTAssertEqual(endpoint.path, "/assets/\(assetID)/thumbnail")
-        await thumbnailCount.increment()
+        XCTAssertTrue(assetIDs.contains(assetID))
+        await thumbnailCount.record(assetID)
         await imageGate?.wait()
         return Data([1, 2, 3])
     }

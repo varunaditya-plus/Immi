@@ -51,11 +51,17 @@ enum WidgetSnapshotExporter {
         dataManager: SwiftDataManager? = nil
     ) async {
         let dataManager = dataManager ?? .shared
+        let isEligible: (String) -> Bool = { id in
+            !dataManager.nonTimelineAssetIDs.contains(id)
+                && !RemovedAssets.shared.ids.contains(id)
+                && !DeletedServerAssetRegistry.shared.isTrashed(id)
+                && !DeletedServerAssetRegistry.shared.isPermanentlyDeleted(id)
+        }
         let expectedRevision = visibilityRevision
         let context = api.session.snapshot
-        async let fetchedAlbums = try? AlbumRepository(api: api).all()
-        async let fetchedMemories = try? MemoriesRepository(api: api).getMemories()
-        async let fetchedFavorites = try? SearchRepository(api: api).metadataSearch(
+        async let fetchedAlbums = try? AlbumRepository(api: api, recordsVisibility: false).all()
+        async let fetchedMemories = try? MemoriesRepository(api: api, recordsVisibility: false).getMemories()
+        async let fetchedFavorites = try? SearchRepository(api: api, recordsVisibility: false).metadataSearch(
             SearchRequestDTO(
                 page: 1,
                 isFavorite: true,
@@ -76,23 +82,23 @@ enum WidgetSnapshotExporter {
             MemoryStory.build(from: entries.map { memory in
                 MemoryDTO(id: memory.id, type: memory.type, memoryAt: memory.memoryAt,
                     assets: memory.assets.filter {
-                        !dataManager.nonTimelineAssetIDs.contains($0.id)
+                        isEligible($0.id)
                     }, data: memory.data)
             }, limit: 15)
         } ?? []
 
-        let albumRepo = AlbumRepository(api: api)
+        let albumRepo = AlbumRepository(api: api, recordsVisibility: false)
         let albumAssetIDs = await albumAssetIDs(
             for: selectedAlbumIDs, repository: albumRepo,
             isCurrent: {
                 expectedRevision == visibilityRevision && (try? api.checkCurrent(context)) != nil
             })
-            .mapValues { $0.filter { !dataManager.nonTimelineAssetIDs.contains($0) } }
+            .mapValues { $0.filter(isEligible) }
 
         guard expectedRevision == visibilityRevision,
               (try? api.checkCurrent(context)) != nil else { return }
         let favoriteAssetIDs = favoritesResponse?.assets.items.filter {
-            $0.isTimelineVisible && !dataManager.nonTimelineAssetIDs.contains($0.id)
+            $0.isTimelineVisible && isEligible($0.id)
         }.map(\.id) ?? []
         let favoriteCount = favoritesResponse?.assets.total ?? favoriteAssetIDs.count
 
