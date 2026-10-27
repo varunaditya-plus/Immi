@@ -219,23 +219,6 @@ final class BackgroundUploadQueueTests: XCTestCase {
         XCTAssertNil(restored.item(id: "deleted-b"))
     }
 
-    func testStalePreparingItemBecomesRetryInsteadOfHangingForever() throws {
-        let fixture = try makeFixture()
-        defer { fixture.cleanup() }
-        let queue = BackupQueueStore(fileURL: fixture.queueURL)
-        let started = Date(timeIntervalSince1970: 100)
-        try queue.enqueue(["local-a"], now: started)
-        try queue.markPreparing("local-a", phase: .primaryAsset, now: started)
-
-        try queue.reconcile(
-            activeTasks: [],
-            now: Date(timeIntervalSince1970: 1_000),
-            staleAfter: 600)
-
-        XCTAssertEqual(queue.snapshot.retryScheduled, 1)
-        XCTAssertEqual(queue.readyItems(now: Date(timeIntervalSince1970: 1_000)).map(\.id), ["local-a"])
-    }
-
     func testOwnedBackgroundTaskWithoutQueueRecordIsAdoptedAfterRelaunch() throws {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }

@@ -160,6 +160,7 @@ final class BackupService {
     private var refillRequested = false
     private var libraryChangeTask: Task<Void, Never>?
     private var retryWakeTask: Task<Void, Never>?
+    private var missingTransfers: (ownership: BackupUploadOwnership, items: [BackupQueueItem])?
     private var notificationRevision = 0
     private static let automaticBatchSize = 100
     /// Nama album server → id-nya, supaya album yang sama tidak dicari ulang
@@ -282,6 +283,7 @@ final class BackupService {
             if let owner = session.backupQueueOwner {
                 _ = try queue.bind(to: owner)
             }
+            if missingTransfers?.ownership != queue.ownership { missingTransfers = nil }
             try queue.releaseAuthenticationWaits()
             // Notifikasi terminal ditunda sampai failure lama sempat divalidasi
             // terhadap PhotoKit oleh `prepare()`/restore lifecycle.
@@ -624,7 +626,15 @@ final class BackupService {
     private func reconcileBackgroundTasks(ownership: BackupUploadOwnership) async throws -> Bool {
         let activeTasks = await BackupUploader.shared.activeTasks(ownership: ownership)
         guard !Task.isCancelled, uploadOwnership == ownership else { return false }
-        try queue.reconcile(activeTasks: activeTasks)
+        try queue.reconcile(
+            activeTasks: activeTasks,
+            livePreparationIDs: Set(preparationClaims.compactMap {
+                $0.value.ownership == ownership ? $0.key : nil
+            }))
+        let activeIDs = Set(activeTasks.map(\.context.localIdentifier))
+        missingTransfers = (ownership, queue.items.filter {
+            $0.state == .uploading && !activeIDs.contains($0.id)
+        })
         await BackupUploader.shared.reclaimExcessStaging()
         guard !Task.isCancelled, uploadOwnership == ownership else { return false }
         for item in queue.items where item.state == .cancelling {
@@ -1588,13 +1598,39 @@ final class BackupService {
     private func scheduleRetryWake() {
         retryWakeTask?.cancel()
         retryWakeTask = nil
-        guard (isEnabled || queue.hasPendingUserRequests), hasAuthenticatedSession,
+        guard hasAuthenticatedSession,
               acceptsUploadResults, dataManager.isPersistentStoreAvailable,
-              let delay = uploadRequests.retryWakeDelay(automaticEnabled: isEnabled) else { return }
+              let ownership = uploadOwnership else { return }
+        let now = Date.now
+        let missing = missingTransfers.flatMap { $0.ownership == ownership ? $0.items : nil } ?? []
+        let reconciliationDelay = missing.compactMap { previous -> TimeInterval? in
+            guard let current = queue.item(id: previous.id), current.state == .uploading,
+                  current.taskIdentifier == previous.taskIdentifier,
+                  current.updatedAt == previous.updatedAt else { return nil }
+            return max(0, current.updatedAt
+                .addingTimeInterval(BackupQueueStore.staleTransferInterval).timeIntervalSince(now))
+        }.min()
+        let retryDelay = isEnabled || queue.hasPendingUserRequests
+            ? uploadRequests.retryWakeDelay(automaticEnabled: isEnabled, now: now) : nil
+        guard let delay = [reconciliationDelay, retryDelay].compactMap({ $0 }).min() else { return }
         retryWakeTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
-            guard !Task.isCancelled else { return }
-            self?.requestNetworkWake()
+            guard let self, !Task.isCancelled, self.uploadOwnership == ownership else { return }
+            do {
+                guard try await self.reconcileBackgroundTasks(ownership: ownership) else { return }
+            } catch {
+                guard !Task.isCancelled, self.uploadOwnership == ownership else { return }
+                self.lastError = error.localizedDescription
+                self.acceptsUploadResults = false
+                self.applyQueueSnapshot()
+                return
+            }
+            guard !Task.isCancelled, self.uploadOwnership == ownership else { return }
+            // Keep the handle cancellable through reconciliation, then clear
+            // it before the snapshot schedules the next wake.
+            self.retryWakeTask = nil
+            self.applyQueueSnapshot()
+            self.requestNetworkWake()
         }
     }
 

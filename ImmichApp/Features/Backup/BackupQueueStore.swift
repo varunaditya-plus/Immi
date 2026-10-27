@@ -186,6 +186,7 @@ enum BackupQueueStoreError: LocalizedError {
 @Observable
 final class BackupQueueStore {
     static let shared = BackupQueueStore()
+    nonisolated static let staleTransferInterval: TimeInterval = 10 * 60
 
     private struct Ledger: Codable {
         var version = 1
@@ -603,12 +604,13 @@ final class BackupQueueStore {
     }
 
     /// Memadankan queue dengan task yang benar-benar masih dimiliki
-    /// `nsurlsessiond`. State preparation/upload yang kehilangan task lebih dari
-    /// batas stale dilepas kembali ke retry; task lawas tanpa record diadopsi.
+    /// `nsurlsessiond`. Preparation tanpa pemilik lokal langsung dilepas kembali;
+    /// upload tanpa task menunggu batas stale. Task tanpa record diadopsi.
     func reconcile(
         activeTasks: [BackupActiveTask],
+        livePreparationIDs: Set<String> = [],
         now: Date = .now,
-        staleAfter: TimeInterval = 10 * 60
+        staleAfter: TimeInterval = BackupQueueStore.staleTransferInterval
     ) throws {
         let activeTasks = activeTasks.filter { accepts($0.context) }
         let activeByID = activeTasks.reduce(into: [String: BackupActiveTask]()) {
@@ -659,10 +661,12 @@ final class BackupQueueStore {
                 changed = true
                 continue
             }
-            guard (item.state == .uploading || item.state == .preparing),
-                  activeByID[item.id] == nil,
-                  now.timeIntervalSince(item.updatedAt) >= staleAfter
-            else { continue }
+            guard activeByID[item.id] == nil else { continue }
+            let interruptedPreparation = item.state == .preparing
+                && !livePreparationIDs.contains(item.id)
+            let staleUpload = item.state == .uploading
+                && now.timeIntervalSince(item.updatedAt) >= staleAfter
+            guard interruptedPreparation || staleUpload else { continue }
             proposed.items[index].state = .retryScheduled
             proposed.items[index].taskIdentifier = nil
             proposed.items[index].nextAttemptAt = now
