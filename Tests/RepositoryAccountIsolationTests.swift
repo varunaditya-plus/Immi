@@ -7,11 +7,13 @@ final class RepositoryAccountIsolationTests: XCTestCase {
     override func setUp() async throws {
         LocalSnapshot.clearAll()
         DeletedServerAssetRegistry.shared.clear()
+        RemovedAssets.shared.clear()
     }
 
     override func tearDown() async throws {
         LocalSnapshot.clearAll()
         DeletedServerAssetRegistry.shared.clear()
+        RemovedAssets.shared.clear()
     }
 
     func testDeleteCannotRecordIntoNextAccountsRegistryAfterResponseWasValidated() async throws {
@@ -49,22 +51,33 @@ final class RepositoryAccountIsolationTests: XCTestCase {
     func testResolvedDuplicatesCannotRecordIntoNextAccountsRegistry() async throws {
         let fixture = try MutationResultFixture()
         defer { fixture.cleanup() }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("duplicate-account-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let manager = SwiftDataManager(storeURL: directory.appendingPathComponent("test.store"),
+            backupJournalURL: directory.appendingPathComponent("backup.json"))
+        XCTAssertTrue(manager.isPersistentStoreAvailable)
         let group = try duplicateGroup()
         let model = DuplicatesViewModel(
-            repository: DuplicateRepository(api: fixture.client),
+            repository: DuplicateRepository(api: fixture.client, dataManager: manager),
             assetRepository: AssetDetailRepository(api: fixture.client),
-            usesResolveEndpoint: true)
+            usesResolveEndpoint: true, dataManager: manager)
         model.groups = [group]
         let resolution = Task { await model.resolve(group, keeping: ["kept-photo"]) }
         await fulfillment(of: [fixture.validated], timeout: 2)
 
         LocalSnapshot.clearAll()
         DeletedServerAssetRegistry.shared.record(["next-account-photo"], permanently: false)
+        try manager.insertOrUpdateCachedAsset(CachedAsset(id: "trashed-photo", assetId: "trashed-photo", type: "IMAGE"))
+        LocalSnapshot.save(makeTestAsset(id: "trashed-photo"), for: LocalSnapshot.Key.assetDetail("trashed-photo"))
+        let revision = manager.assetMutationRevision
         fixture.gate.release()
         await resolution.value
 
         XCTAssertEqual(DeletedServerAssetRegistry.shared.suppressedIDs, ["next-account-photo"])
-        XCTAssertEqual(model.groups.map(\.id), [group.id])
+        XCTAssertNotNil(manager.getCachedAsset(id: "trashed-photo"))
+        XCTAssertEqual(manager.assetMutationRevision, revision)
+        XCTAssertNotNil(LocalSnapshot.load(AssetResponseDTO.self, for: LocalSnapshot.Key.assetDetail("trashed-photo")))
+        XCTAssertTrue(model.groups.isEmpty, "An old account's groups must no longer be visible")
     }
 
     func testCurrentDuplicateResolutionRecordsTrashedAssets() async throws {

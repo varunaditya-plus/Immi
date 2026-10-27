@@ -6,7 +6,20 @@ import Observation
 final class DuplicatesViewModel {
     private let accountGeneration = LocalSnapshot.generation
 
-    var groups: [DuplicateGroupDTO] = []
+    private var loadedGroups: [DuplicateGroupDTO] = []
+    var groups: [DuplicateGroupDTO] {
+        get {
+            guard accountGeneration == LocalSnapshot.generation else { return [] }
+            let policy = AssetVisibilityPolicy(scope: .collection, dataManager: dataManager)
+            return loadedGroups.compactMap { group in
+                let assets = group.assets.filter { $0.isVisibleInAlbum && policy.allows(id: $0.id) }
+                guard assets.count > 1 else { return nil }
+                return DuplicateGroupDTO(duplicateId: group.id, assets: assets,
+                                         suggestedKeepAssetIds: group.suggestedKeepAssetIds)
+            }
+        }
+        set { loadedGroups = newValue }
+    }
     var phase: LoadingPhase<Void> = .idle
     var actionError: String?
     private(set) var workingGroupIDs: Set<String> = []
@@ -14,23 +27,37 @@ final class DuplicatesViewModel {
     private let repository: DuplicateRepository
     private let assetRepository: AssetDetailRepository
     private let usesResolveEndpoint: Bool
+    private let dataManager: SwiftDataManager
+    private var loadRevision = UUID()
 
     init(
         repository: DuplicateRepository,
         assetRepository: AssetDetailRepository,
-        usesResolveEndpoint: Bool
+        usesResolveEndpoint: Bool,
+        dataManager: SwiftDataManager? = nil
     ) {
         self.repository = repository
         self.assetRepository = assetRepository
         self.usesResolveEndpoint = usesResolveEndpoint
+        self.dataManager = dataManager ?? .shared
     }
 
     func load() async {
+        let revision = UUID()
+        loadRevision = revision
         if groups.isEmpty { phase = .loading }
         do {
-            groups = try await repository.all().filter { $0.assets.count > 1 }
+            let loaded = try await repository.all()
+            try Task.checkCancellation()
+            guard revision == loadRevision, accountGeneration == LocalSnapshot.generation else { return }
+            loadedGroups = loaded
             phase = .loaded(())
         } catch {
+            guard revision == loadRevision, accountGeneration == LocalSnapshot.generation else { return }
+            if Task.isCancelled || error is CancellationError {
+                if groups.isEmpty { phase = .idle }
+                return
+            }
             let message = Self.message(for: error, fallback: "Failed to load duplicates")
             if groups.isEmpty {
                 phase = .failed(message)
@@ -57,12 +84,6 @@ final class DuplicatesViewModel {
                     duplicateId: group.id,
                     keepAssetIds: kept.sorted(),
                     trashAssetIds: trashed.sorted()))
-                guard accountGeneration == LocalSnapshot.generation else { return }
-                // Server memindahkan aset ke Trash di luar AssetDetailRepository,
-                // jadi registry lokal harus diberi tahu agar backup tidak segera
-                // mengunggah salinan perangkatnya lagi.
-                DeletedServerAssetRegistry.shared.record(
-                    Array(trashed), permanently: false)
             } else {
                 // API v2 belum punya /duplicates/resolve. Perilaku yang paling
                 // dekat adalah memindahkan pilihan ke Trash lalu melepas grup.
@@ -73,6 +94,7 @@ final class DuplicatesViewModel {
                 // berikutnya juga membersihkan grup yang tinggal satu aset.
                 try? await repository.dismiss(group.id)
             }
+            guard accountGeneration == LocalSnapshot.generation else { return }
             remove(group.id)
         } catch {
             actionError = Self.message(for: error, fallback: "Failed to resolve duplicates")
@@ -86,6 +108,7 @@ final class DuplicatesViewModel {
 
         do {
             try await repository.dismiss(group.id)
+            guard accountGeneration == LocalSnapshot.generation else { return }
             remove(group.id)
         } catch {
             actionError = Self.message(for: error, fallback: "Failed to keep all items")
@@ -93,7 +116,8 @@ final class DuplicatesViewModel {
     }
 
     private func remove(_ id: String) {
-        groups.removeAll { $0.id == id }
+        loadRevision = UUID()
+        loadedGroups.removeAll { $0.id == id }
         phase = .loaded(())
     }
 

@@ -17,6 +17,12 @@ struct DuplicateGroupDTO: Decodable, Identifiable {
         case duplicateId, assets, suggestedKeepAssetIds
     }
 
+    init(duplicateId: String, assets: [AssetResponseDTO], suggestedKeepAssetIds: [String] = []) {
+        self.duplicateId = duplicateId
+        self.assets = assets
+        self.suggestedKeepAssetIds = suggestedKeepAssetIds
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         duplicateId = try container.decode(String.self, forKey: .duplicateId)
