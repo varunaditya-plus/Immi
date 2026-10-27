@@ -24,7 +24,7 @@ final class ShareExtensionModel: ObservableObject {
 
     @Published private(set) var phase: Phase = .loading
     @Published private(set) var items: [SharePreviewItem] = []
-    @Published private(set) var session = SharedSessionStore.load()
+    @Published private(set) var session = SharedSessionStore.shared.load()
     private let submission = SharedUploadSubmission()
     private weak var shareContext: NSExtensionContext?
     private var hasLoaded = false

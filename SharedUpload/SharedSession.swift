@@ -21,6 +21,29 @@ enum SelfPhotosSharedContainer {
 /// saat aplikasi utama pertama kali dibuka setelah pembaruan; extension tidak
 /// pernah menerima salinan token di UserDefaults atau berkas App Group.
 enum SharedKeychainStore {
+    /// Publish the complete extension credential as one Keychain value.
+    static func saveData(_ data: Data, for key: String) -> Bool {
+        let query = baseQuery(key, shared: true)
+        let attributes: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+        ]
+        let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if status == errSecSuccess { return true }
+        guard status == errSecItemNotFound else { return false }
+        var item = query
+        item.merge(attributes) { _, value in value }
+        let added = SecItemAdd(item as CFDictionary, nil)
+        if added == errSecDuplicateItem {
+            return SecItemUpdate(query as CFDictionary, attributes as CFDictionary) == errSecSuccess
+        }
+        return added == errSecSuccess
+    }
+
+    static func readData(_ key: String) -> Data? {
+        data(for: key, shared: true)
+    }
+
     static func save(_ value: String, for key: String) {
         let data = Data(value.utf8)
         let query = baseQuery(key, shared: true)
@@ -60,6 +83,11 @@ enum SharedKeychainStore {
     }
 
     private static func read(_ key: String, shared: Bool) -> String? {
+        guard let data = data(for: key, shared: shared) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private static func data(for key: String, shared: Bool) -> Data? {
         var query = baseQuery(key, shared: shared)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -67,7 +95,7 @@ enum SharedKeychainStore {
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
               let data = result as? Data
         else { return nil }
-        return String(data: data, encoding: .utf8)
+        return data
     }
 
     private static func saveLegacy(_ data: Data, for key: String) {
@@ -96,44 +124,80 @@ struct SharedImmichSession: Codable, Equatable, Sendable {
     }
 
     func credential() -> SharedUploadCredential? {
-        guard let token = SharedKeychainStore.read("token"), !token.isEmpty else {
-            return nil
-        }
-        let headers = authMode == "apiKey"
-            ? ["x-api-key": token]
-            : ["Authorization": "Bearer \(token)"]
-        return SharedUploadCredential(
-            apiURL: apiURL,
-            owner: owner,
-            authHeaders: headers)
+        SharedSessionStore.shared.credential(for: self)
     }
 }
 
-enum SharedSessionStore {
-    private static let key = "share.session.v1"
+final class SharedSessionStore {
+    static let shared = SharedSessionStore()
 
-    static func save(apiURL: URL, userID: String, authMode: String) {
-        let snapshot = SharedImmichSession(
-            apiURL: apiURL,
-            userID: userID,
-            authMode: authMode)
-        guard let data = try? JSONEncoder().encode(snapshot) else { return }
-        SelfPhotosSharedContainer.defaults.set(data, forKey: key)
-    }
+    private static let credentialKey = "share.credential.v1"
+    private static let legacySessionKey = "share.session.v1"
 
-    static func load() -> SharedImmichSession? {
-        guard let data = SelfPhotosSharedContainer.defaults.data(forKey: key) else {
-            return nil
+    private struct Record: Codable {
+        let session: SharedImmichSession
+        let token: String
+
+        var isValid: Bool {
+            !token.isEmpty && !session.userID.isEmpty
+                && session.apiURL.host != nil
+                && ["http", "https"].contains(session.apiURL.scheme?.lowercased() ?? "")
+                && ["bearer", "apiKey"].contains(session.authMode)
         }
-        return try? JSONDecoder().decode(SharedImmichSession.self, from: data)
     }
 
-    static func credential() -> SharedUploadCredential? {
-        load()?.credential()
+    private let read: () -> Data?
+    private let write: (Data) -> Bool
+    private let remove: () -> Void
+
+    private convenience init() {
+        self.init(
+            read: { SharedKeychainStore.readData(Self.credentialKey) },
+            write: { SharedKeychainStore.saveData($0, for: Self.credentialKey) },
+            remove: { SharedKeychainStore.delete(Self.credentialKey) })
     }
 
-    static func clear() {
-        SelfPhotosSharedContainer.defaults.removeObject(forKey: key)
+    init(read: @escaping () -> Data?, write: @escaping (Data) -> Bool, remove: @escaping () -> Void) {
+        self.read = read
+        self.write = write
+        self.remove = remove
+    }
+
+    @discardableResult
+    func save(apiURL: URL, userID: String, authMode: String, token: String) -> Bool {
+        let record = Record(session: SharedImmichSession(
+            apiURL: apiURL, userID: userID, authMode: authMode), token: token)
+        guard record.isValid, let data = try? JSONEncoder().encode(record), write(data) else {
+            clear()
+            return false
+        }
+        SelfPhotosSharedContainer.defaults.removeObject(forKey: Self.legacySessionKey)
+        return true
+    }
+
+    func load() -> SharedImmichSession? {
+        record()?.session
+    }
+
+    func credential(for expected: SharedImmichSession) -> SharedUploadCredential? {
+        guard let record = record(), record.session == expected else { return nil }
+        return SharedUploadCredential(
+            apiURL: record.session.apiURL,
+            owner: record.session.owner,
+            authHeaders: record.session.authMode == "apiKey"
+                ? ["x-api-key": record.token]
+                : ["Authorization": "Bearer \(record.token)"])
+    }
+
+    func clear() {
+        remove()
+        SelfPhotosSharedContainer.defaults.removeObject(forKey: Self.legacySessionKey)
+    }
+
+    private func record() -> Record? {
+        guard let data = read(), let record = try? JSONDecoder().decode(Record.self, from: data),
+              record.isValid else { return nil }
+        return record
     }
 }
 

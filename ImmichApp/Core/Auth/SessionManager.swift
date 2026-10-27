@@ -20,6 +20,7 @@ class SessionManager {
     private let defaults: UserDefaults
     private let dataManager: SwiftDataManager
     private let credentialStore: any SessionCredentialStore
+    private let sharedSessionStore: SharedSessionStore
     private let urlSession: URLSession?
     private var cleanupTask: Task<Void, Error>?
     private var authenticationAttempt: UUID?
@@ -73,12 +74,14 @@ class SessionManager {
         defaults: UserDefaults = .standard,
         dataManager: SwiftDataManager? = nil,
         credentialStore: any SessionCredentialStore = KeychainStore(),
+        sharedSessionStore: SharedSessionStore = .shared,
         restoresSession: Bool = true
     ) {
         self.urlSession = urlSession
         self.defaults = defaults
         self.dataManager = dataManager ?? .shared
         self.credentialStore = credentialStore
+        self.sharedSessionStore = sharedSessionStore
         if restoresSession { loadStoredSession() }
     }
 
@@ -98,9 +101,15 @@ class SessionManager {
         if let data = defaults.data(forKey: Self.userKey) {
             currentUser = try? JSONDecoder().decode(UserResponseDTO.self, from: data)
         }
-        guard var server = credentialStore.read("serverURL") else { return }
+        guard var server = credentialStore.read("serverURL") else {
+            sharedSessionStore.clear()
+            return
+        }
         if server.hasSuffix("/api") { server.removeLast(4) }
-        guard (try? setServer(server)) != nil else { return }
+        guard (try? setServer(server)) != nil else {
+            sharedSessionStore.clear()
+            return
+        }
         // Migrate ownership before an expired token sends the user to onboarding.
         if accountOwner == nil, let owner = backupQueueOwner {
             accountOwner = owner
@@ -109,15 +118,14 @@ class SessionManager {
         guard let accountOwner, let currentUser,
               accountOwner.server == baseURL?.absoluteString,
               accountOwner.userID == currentUser.id else {
-            SharedSessionStore.clear()
+            sharedSessionStore.clear()
             return
         }
         guard let token = credentialStore.read("token"),
               let mode = credentialStore.read("mode").flatMap(AuthMode.init)
-        else { return }
+        else { sharedSessionStore.clear(); return }
         applyAuth(token: token, mode: mode)
         isLoggedIn = true
-        persistSharedSessionIfPossible()
     }
 
     func setServer(_ raw: String) throws {
@@ -129,8 +137,8 @@ class SessionManager {
             if isLoggedIn {
                 isLoggedIn = false
                 authenticationAttempt = nil
+                sharedSessionStore.clear()
                 ["token", "mode"].forEach(credentialStore.delete)
-                SharedSessionStore.clear()
                 BackupService.shared.pauseForAuthentication()
                 SharedUploadService.shared.cancel()
             }
@@ -296,6 +304,7 @@ class SessionManager {
         }
         currentUser = user
         storeUser(user)
+        persistSharedSessionIfPossible()
     }
 
     // MARK: - Profil tersimpan
@@ -370,8 +379,8 @@ class SessionManager {
            storedToken != token || credentialStore.read("mode") != mode.rawValue { return }
         let ownership = BackupService.shared.uploadOwnership
         let headers = authHeaders
+        sharedSessionStore.clear()
         ["token", "mode"].forEach(credentialStore.delete)
-        SharedSessionStore.clear()
         AppLaunchState.shared.reset()
         self.token = nil
         isLoggedIn = false
@@ -449,13 +458,13 @@ class SessionManager {
         if let cleanupTask { return try await cleanupTask.value }
         let ownership = BackupQueueStore.shared.ownership
         let headers = authHeaders
+        sharedSessionStore.clear()
         ["token", "mode"].forEach(credentialStore.delete)
         token = nil
         isLoggedIn = false
         cachedImageAPI = nil
         invalidateRequests()
         AppLaunchState.shared.reset()
-        SharedSessionStore.clear()
         LocalSnapshot.clearAll()
         AlbumCoverStore.shared.clear()
         WidgetSnapshotExporter.clear()
@@ -496,13 +505,13 @@ class SessionManager {
         persistSharedSessionIfPossible()
     }
 
-    /// Extension hanya menerima URL API, id pemilik antrean, dan jenis header
-    /// lewat App Group. Token tetap berada di shared Keychain.
     private func persistSharedSessionIfPossible() {
-        guard let baseURL, let userID = currentUser?.id else { return }
-        SharedSessionStore.save(
+        guard hasCurrentCredentials, let baseURL, let userID = currentUser?.id, let token,
+              accountOwner == BackupQueueOwner(server: baseURL.absoluteString, userID: userID) else { return }
+        sharedSessionStore.save(
             apiURL: baseURL,
             userID: userID,
-            authMode: mode.rawValue)
+            authMode: mode.rawValue,
+            token: token)
     }
 }

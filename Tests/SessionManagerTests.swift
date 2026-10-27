@@ -571,6 +571,121 @@ final class SessionManagerTests: XCTestCase {
         }
     }
 
+    func testLoginPublishesItsValidatedTokenWithoutReadingAnotherGlobalToken() async throws {
+        let fixture = try SessionFixture()
+        defer { fixture.cleanup() }
+        try await fixture.signIn()
+        let captured = try XCTUnwrap(fixture.sharedSessionStore.load())
+
+        fixture.credentials.save("unrelated-global-token", for: "token")
+
+        let credential = try XCTUnwrap(fixture.sharedSessionStore.credential(for: captured))
+        XCTAssertEqual(credential.owner.userID, "initial-user")
+        XCTAssertEqual(credential.apiURL, fixture.session.baseURL)
+        XCTAssertEqual(credential.authHeaders, fixture.session.authHeaders)
+        XCTAssertEqual(credential.authHeaders, ["Authorization": "Bearer initial-token"])
+    }
+
+    func testSharedCredentialExpiryRenewalAuthModeChangeAndLogoutFollowTheValidatedSession() async throws {
+        let fixture = try SessionFixture()
+        defer { fixture.cleanup() }
+        try await fixture.signIn()
+        let bearer = try XCTUnwrap(fixture.sharedSessionStore.load())
+        await fixture.expireSession()
+        XCTAssertNil(fixture.sharedSessionStore.credential(for: bearer))
+
+        fixture.server.token = "renewed-token"
+        try await fixture.session.loginPassword(email: "person@example.com", password: "password")
+
+        XCTAssertEqual(fixture.sharedSessionStore.load(), bearer)
+        XCTAssertEqual(fixture.sharedSessionStore.credential(for: bearer)?.authHeaders,
+            ["Authorization": "Bearer renewed-token"])
+        await fixture.expireSession()
+        try await fixture.session.loginApiKey("candidate-api-key")
+        XCTAssertNil(fixture.sharedSessionStore.credential(for: bearer))
+        let keySession = try XCTUnwrap(fixture.sharedSessionStore.load())
+        XCTAssertEqual(keySession.authMode, "apiKey")
+        XCTAssertEqual(fixture.sharedSessionStore.credential(for: keySession)?.authHeaders,
+            ["x-api-key": "candidate-api-key"])
+
+        await fixture.session.logout()
+
+        XCTAssertNil(fixture.sharedSessionStore.load())
+        XCTAssertNil(fixture.sharedSessionStore.credential(for: keySession))
+    }
+
+    func testChangingServerClearsThePublishedSharedCredential() async throws {
+        let fixture = try SessionFixture()
+        defer { fixture.cleanup() }
+        try await fixture.signIn()
+        let captured = try XCTUnwrap(fixture.sharedSessionStore.load())
+
+        try fixture.session.setServer("https://another-share.example")
+
+        XCTAssertNil(fixture.sharedSessionStore.load())
+        XCTAssertNil(fixture.sharedSessionStore.credential(for: captured))
+    }
+
+    func testLateRestoredProfileCannotReplaceRenewedSharedCredentials() async throws {
+        let fixture = try SessionFixture()
+        defer { fixture.cleanup() }
+        try await fixture.signIn()
+        let captured = try XCTUnwrap(fixture.sharedSessionStore.load())
+        let restored = fixture.makeSession(restoresSession: true)
+        let started = expectation(description: "Older restored session is awaiting its profile")
+        fixture.server.hold("/users/me", started: started)
+        let restoration = Task { await restored.restore(configureBackup: false) }
+        await fulfillment(of: [started], timeout: 2)
+        XCTAssertEqual(fixture.server.header("Authorization", for: "/users/me"), "Bearer initial-token")
+        fixture.server.respond(to: "/users/me", status: 200, json: fixture.server.profileJSON)
+        await fixture.expireSession()
+        fixture.server.token = "renewed-token"
+        try await fixture.session.loginPassword(email: "person@example.com", password: "password")
+        XCTAssertEqual(fixture.sharedSessionStore.credential(for: captured)?.authHeaders,
+            ["Authorization": "Bearer renewed-token"])
+
+        fixture.server.release("/users/me", status: 200, json: fixture.server.profileJSON)
+        await restoration.value
+
+        XCTAssertEqual(restored.authHeaders, ["Authorization": "Bearer initial-token"],
+            "The older instance still carries its original credentials")
+        XCTAssertEqual(fixture.credentials.read("token"), "renewed-token")
+        XCTAssertEqual(fixture.sharedSessionStore.credential(for: captured)?.authHeaders,
+            ["Authorization": "Bearer renewed-token"])
+    }
+
+    func testLegacyRestoreWaitsForTheServerToConfirmTheCredentialOwner() async throws {
+        let fixture = try SessionFixture()
+        defer { fixture.cleanup() }
+        try await fixture.signIn()
+        fixture.sharedSessionStore.clear()
+        let restored = fixture.makeSession(restoresSession: true)
+        XCTAssertTrue(restored.isLoggedIn)
+        XCTAssertNil(fixture.sharedSessionStore.load(), "Cached identity cannot verify a legacy token's owner")
+
+        await restored.restore(configureBackup: false)
+
+        let snapshot = try XCTUnwrap(fixture.sharedSessionStore.load())
+        XCTAssertEqual(snapshot.userID, "initial-user")
+        XCTAssertEqual(fixture.sharedSessionStore.credential(for: snapshot)?.authHeaders, restored.authHeaders)
+    }
+
+    func testLegacyRestoreCannotPublishATokenForAnotherCachedOwner() async throws {
+        let fixture = try SessionFixture()
+        defer { fixture.cleanup() }
+        try await fixture.signIn()
+        fixture.sharedSessionStore.clear()
+        fixture.credentials.save("other-user-token", for: "token")
+        fixture.server.userID = "other-user"
+        let restored = fixture.makeSession(restoresSession: true)
+        XCTAssertNil(fixture.sharedSessionStore.load())
+
+        await restored.restore(configureBackup: false)
+
+        XCTAssertFalse(restored.isLoggedIn)
+        XCTAssertNil(fixture.sharedSessionStore.load())
+    }
+
     private func assertFails<T>(_ task: Task<T, Error>, file: StaticString = #filePath, line: UInt = #line) async {
         do {
             _ = try await task.value
@@ -585,6 +700,8 @@ private final class SessionFixture {
     let defaultsName = "SessionManagerTests.\(UUID().uuidString)"
     let defaults: UserDefaults
     let credentials = MemorySessionCredentials()
+    let sharedCredentials = SharedSessionTestStorage()
+    lazy var sharedSessionStore = sharedCredentials.store()
     let dataManager: SwiftDataManager
     let server = SessionTestServer()
     let urlSession: URLSession
@@ -609,6 +726,7 @@ private final class SessionFixture {
             defaults: defaults,
             dataManager: dataManager,
             credentialStore: credentials,
+            sharedSessionStore: sharedSessionStore,
             restoresSession: restoresSession)
     }
 
