@@ -64,7 +64,7 @@ enum BackupScheduler {
     /// { @MainActor in … }`, bukan langsung.
     @MainActor
     static func schedule() {
-        guard BackupService.shared.isEnabled else { return }
+        guard BackupService.shared.isEnabled || BackupService.shared.hasPendingRequestedUploads else { return }
 
         let processing = BGProcessingTaskRequest(identifier: processingIdentifier)
         processing.requiresNetworkConnectivity = true

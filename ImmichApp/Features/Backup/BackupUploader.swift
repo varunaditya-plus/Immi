@@ -188,14 +188,7 @@ final class BackupUploader: NSObject {
         ownership: BackupUploadOwnership,
         phase: BackupUploadPhase = .primaryAsset
     ) throws -> URLSessionUploadTask {
-        var request = prepared.request
-        // Ditegakkan PER PERMINTAAN, bukan per sesi: satu sesi latar melayani
-        // foto dan video sekaligus, sedangkan aturannya berbeda untuk keduanya.
-        request.allowsCellularAccess = allowsCellular
-        request.allowsExpensiveNetworkAccess = allowsCellular
-        // Low Data Mode selalu dihormati; pengguna hanya memilih seluler biasa,
-        // bukan memberi izin mengabaikan pembatasan data sistem.
-        request.allowsConstrainedNetworkAccess = false
+        let request = Self.uploadRequest(prepared.request, allowsCellular: allowsCellular)
 
         let context = BackupUploadTaskContext(
             phase: phase,
@@ -209,6 +202,16 @@ final class BackupUploader: NSObject {
         let task = session.uploadTask(with: request, fromFile: prepared.bodyFile)
         task.taskDescription = context.encoded
         return task
+    }
+
+    /// Permissions belong to each transfer; a manual cellular grant still
+    /// respects Low Data Mode. The session serves photos and videos together.
+    static func uploadRequest(_ original: URLRequest, allowsCellular: Bool) -> URLRequest {
+        var request = original
+        request.allowsCellularAccess = allowsCellular
+        request.allowsExpensiveNetworkAccess = allowsCellular
+        request.allowsConstrainedNetworkAccess = false
+        return request
     }
 
     /// Melanjutkan sesi yang mungkin masih punya transfer berjalan.
@@ -363,6 +366,28 @@ final class BackupUploader: NSObject {
             else { continue }
             task.resume()
         }
+    }
+
+    /// Recreate only policy-blocked transfers that still have a readable source.
+    /// The existing cancellation callback releases their slot before any retry.
+    @MainActor
+    func requeueBlockedTasks(eligibleIDs: Set<String>, ownership: BackupUploadOwnership) async {
+        guard !eligibleIDs.isEmpty, LocalPhotoLibrary.hasReadAccess,
+              BackupService.shared.uploadOwnership == ownership else { return }
+        let tasks = await session.allTasks
+        guard !Task.isCancelled, BackupService.shared.uploadOwnership == ownership else { return }
+        let localIDs = tasks.compactMap { task -> String? in
+            guard let context = BackupUploadTaskContext.decode(task.taskDescription),
+                  context.ownership == ownership,
+                  eligibleIDs.contains(context.localIdentifier) else { return nil }
+            return context.localIdentifier
+        }
+        let originals = await Task.detached(priority: .utility) {
+            LocalPhotoLibrary.existingLocalIdentifiers(localIDs)
+        }.value
+        guard !Task.isCancelled, BackupService.shared.uploadOwnership == ownership else { return }
+        BackupNetworkUpgrade.requeue(tasks: tasks, eligibleIDs: eligibleIDs,
+            availableOriginalIDs: originals, queue: .shared)
     }
 
     /// Membatalkan transfer untuk satu aset tanpa menyentuh item lain di sesi

@@ -27,6 +27,11 @@ enum BackupQueueItemState: String, Codable, Sendable {
     }
 }
 
+enum BackupQueueIntent: String, Codable, Sendable {
+    case manualUpload
+    case retry
+}
+
 struct BackupQueueItem: Codable, Equatable, Identifiable, Sendable {
     let id: String
     var phase: BackupUploadPhase
@@ -39,6 +44,22 @@ struct BackupQueueItem: Codable, Equatable, Identifiable, Sendable {
     var motionAssetID: String?
     let createdAt: Date
     var updatedAt: Date
+    /// Missing on older ledgers, which retain automatic network restrictions.
+    var intent: BackupQueueIntent? = nil
+
+    var isUserRequested: Bool { intent != nil }
+    var allowsCellularOverride: Bool { intent == .manualUpload }
+
+    func isReady(now: Date = .now) -> Bool {
+        switch state {
+        case .queued:
+            true
+        case .retryScheduled, .waitingForNetwork, .waitingForICloud:
+            nextAttemptAt.map { $0 <= now } ?? true
+        default:
+            false
+        }
+    }
 }
 
 struct BackupQueueOwner: Codable, Equatable, Sendable {
@@ -228,6 +249,9 @@ final class BackupQueueStore {
     var failedIDs: [String] {
         ledger.items.filter { $0.state == .failed }.map(\.id)
     }
+    var hasPendingUserRequests: Bool {
+        ledger.items.contains { $0.isUserRequested && $0.state != .failed }
+    }
 
     /// Mengikat queue ke akun. Queue akun lain tidak pernah diteruskan dengan
     /// header sesi baru.
@@ -246,22 +270,45 @@ final class BackupQueueStore {
         return replacedExistingOwner
     }
 
-    /// Automatic discovery can append a window after fast transfers drain the
-    /// queue. Keep that run's progress; an ordinary new batch starts at zero.
+    /// Discovery windows retain progress until the current automatic run ends.
     func enqueue(
         _ localIdentifiers: [String],
+        intent: BackupQueueIntent? = nil,
         continuingBatch: Bool = false,
         now: Date = .now
     ) throws {
         guard !localIdentifiers.isEmpty else { return }
-        if !continuingBatch, ledger.items.isEmpty, ledger.completed > 0 {
-            ledger.completed = 0
+        var proposed = ledger
+        if !continuingBatch, proposed.items.isEmpty, proposed.completed > 0 {
+            proposed.completed = 0
         }
-        var known = Set(ledger.items.map(\.id))
-        var insertedNewItem = false
-        for id in localIdentifiers where known.insert(id).inserted {
-            insertedNewItem = true
-            ledger.items.append(BackupQueueItem(
+        var indexes: [String: Int] = [:]
+        for (index, item) in proposed.items.enumerated() where indexes[item.id] == nil {
+            indexes[item.id] = index
+        }
+        var requestedWork = false
+        for id in localIdentifiers {
+            if let index = indexes[id] {
+                guard let intent else { continue }
+                if proposed.items[index].intent != .manualUpload {
+                    proposed.items[index].intent = intent
+                }
+                // Preserve transfer/cancellation identity and the authentication
+                // gate. Only idle work is released during admission.
+                let state = proposed.items[index].state
+                if !state.isActive, state != .waitingForAuthentication {
+                    proposed.items[index].state = .queued
+                    proposed.items[index].nextAttemptAt = nil
+                    proposed.items[index].lastError = nil
+                    proposed.items[index].taskIdentifier = nil
+                    proposed.items[index].updatedAt = now
+                }
+                requestedWork = true
+                continue
+            }
+            indexes[id] = proposed.items.count
+            requestedWork = true
+            proposed.items.append(BackupQueueItem(
                 id: id,
                 phase: .primaryAsset,
                 state: .queued,
@@ -272,26 +319,27 @@ final class BackupQueueStore {
                 taskIdentifier: nil,
                 motionAssetID: nil,
                 createdAt: now,
-                updatedAt: now))
+                updatedAt: now,
+                intent: intent))
         }
-        if insertedNewItem {
-            ledger.completionNotificationPending = true
+        if requestedWork {
+            proposed.completionNotificationPending = true
         }
-        try persist()
+        try persist(proposed)
     }
 
-    func readyItems(now: Date = .now, limit: Int = 100) -> [BackupQueueItem] {
+    func readyItems(
+        now: Date = .now,
+        limit: Int = 100,
+        userRequestedOnly: Bool = false
+    ) -> [BackupQueueItem] {
         ledger.items.filter { item in
-            switch item.state {
-            case .queued:
-                true
-            case .retryScheduled, .waitingForNetwork, .waitingForICloud:
-                item.nextAttemptAt.map { $0 <= now } ?? true
-            default:
-                false
-            }
+            (!userRequestedOnly || item.isUserRequested) && item.isReady(now: now)
         }
-        .sorted { $0.createdAt < $1.createdAt }
+        .sorted { lhs, rhs in
+            if lhs.isUserRequested != rhs.isUserRequested { return lhs.isUserRequested }
+            return lhs.createdAt < rhs.createdAt
+        }
         .prefix(limit)
         .map { $0 }
     }
@@ -453,16 +501,36 @@ final class BackupQueueStore {
         return removedCount
     }
 
-    func releaseNetworkWaits(now: Date = .now) throws {
+    func releaseNetworkWaits(_ ids: Set<String>? = nil, now: Date = .now) throws {
+        var proposed = ledger
         var changed = false
-        for index in ledger.items.indices
-        where ledger.items[index].state == .waitingForNetwork {
-            ledger.items[index].state = .queued
-            ledger.items[index].nextAttemptAt = nil
-            ledger.items[index].updatedAt = now
+        for index in proposed.items.indices
+        where proposed.items[index].state == .waitingForNetwork
+            && (ids?.contains(proposed.items[index].id) ?? true) {
+            proposed.items[index].state = .queued
+            proposed.items[index].nextAttemptAt = nil
+            proposed.items[index].updatedAt = now
             changed = true
         }
-        if changed { try persist() }
+        if changed { try persist(proposed) }
+    }
+
+    /// Requeues only exports owned by a stopped preparation loop.
+    /// Other preparation and handed-off URLSession transfers retain ownership.
+    func releasePreparations(_ ids: Set<String>, now: Date = .now) throws {
+        guard !ids.isEmpty else { return }
+        var proposed = ledger
+        var changed = false
+        for index in proposed.items.indices
+        where proposed.items[index].state == .preparing && ids.contains(proposed.items[index].id) {
+            proposed.items[index].state = .queued
+            proposed.items[index].nextAttemptAt = nil
+            proposed.items[index].lastError = nil
+            proposed.items[index].taskIdentifier = nil
+            proposed.items[index].updatedAt = now
+            changed = true
+        }
+        if changed { try persist(proposed) }
     }
 
     func releaseAuthenticationWaits(now: Date = .now) throws {
@@ -495,33 +563,36 @@ final class BackupQueueStore {
         if changed { try persist() }
     }
 
-    func retryFailed(now: Date = .now) throws {
+    func retryFailed(userRequested: Bool = false, now: Date = .now) throws {
+        var proposed = ledger
         var changed = false
-        for index in ledger.items.indices where ledger.items[index].state == .failed {
-            ledger.items[index].state = .queued
-            ledger.items[index].lastError = nil
-            ledger.items[index].nextAttemptAt = nil
-            ledger.items[index].updatedAt = now
+        for index in proposed.items.indices where proposed.items[index].state == .failed {
+            Self.prepareRetry(&proposed.items[index], userRequested: userRequested, now: now)
             changed = true
         }
         if changed {
-            ledger.completionNotificationPending = true
-            try persist()
+            proposed.completionNotificationPending = true
+            try persist(proposed)
         }
     }
 
-    func retryFailed(_ id: String, now: Date = .now) throws {
-        guard ledger.items.first(where: { $0.id == id })?.state == .failed else {
+    func retryFailed(_ id: String, userRequested: Bool = false, now: Date = .now) throws {
+        guard let index = ledger.items.firstIndex(where: { $0.id == id }),
+              ledger.items[index].state == .failed else {
             throw BackupQueueStoreError.invalidTransition
         }
-        try update(id) { item in
-            item.state = .queued
-            item.lastError = nil
-            item.nextAttemptAt = nil
-            item.updatedAt = now
-        }
-        ledger.completionNotificationPending = true
-        try persist()
+        var proposed = ledger
+        Self.prepareRetry(&proposed.items[index], userRequested: userRequested, now: now)
+        proposed.completionNotificationPending = true
+        try persist(proposed)
+    }
+
+    private static func prepareRetry(_ item: inout BackupQueueItem, userRequested: Bool, now: Date) {
+        item.state = .queued
+        item.lastError = nil
+        item.nextAttemptAt = nil
+        item.updatedAt = now
+        if userRequested, item.intent != .manualUpload { item.intent = .retry }
     }
 
     /// Memadankan queue dengan task yang benar-benar masih dimiliki
@@ -619,7 +690,8 @@ final class BackupQueueStore {
         try persist()
     }
 
-    private func persist() throws {
+    private func persist(_ proposed: Ledger? = nil) throws {
+        let value = proposed ?? ledger
         do {
             let directory = fileURL.deletingLastPathComponent()
             try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -631,12 +703,13 @@ final class BackupQueueStore {
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
             encoder.outputFormatting = [.sortedKeys]
-            let data = try encoder.encode(ledger)
+            let data = try encoder.encode(value)
             try data.write(to: fileURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
             var mutableFile = fileURL
             try? mutableFile.setResourceValues(values)
             persistenceWarning = nil
-            snapshot = Self.makeSnapshot(from: ledger)
+            if proposed != nil { ledger = value }
+            snapshot = Self.makeSnapshot(from: value)
         } catch {
             let message = error.localizedDescription
             persistenceWarning = message
