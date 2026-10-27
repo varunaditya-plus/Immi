@@ -169,12 +169,32 @@ struct AssetDetailView: View {
             }
         }
         .onChange(of: visibilityPolicy.state, initial: true) { _, _ in discardDisallowedPages() }
+        .onChange(of: LocalPhotoLibrary.shared.revision, initial: true) { _, _ in
+            discardInaccessibleDevicePages()
+            if !DeviceCopyDeletion.hasDeviceCopy(for: currentAsset) {
+                showRemoveDeviceConfirm = false
+            }
+        }
     }
 
     private func discardDisallowedPages() {
         let removesCurrent = !visibilityPolicy.allows(id: currentAsset.id)
         guard viewer.removeDisallowedPages(using: visibilityPolicy) else { return }
-        if removesCurrent {
+        finishPageAccessChange(currentChanged: removesCurrent)
+    }
+
+    private func discardInaccessibleDevicePages() {
+        guard viewer.pages.contains(where: { LocalPhotoLibrary.isLocal($0.id) }) else { return }
+        let visit = viewer.visit
+        guard viewer.refreshLocalAccess(
+            hasReadAccess: LocalPhotoLibrary.shared.isAuthorized,
+            existingLocalIDs: LocalPhotoLibrary.existingLocalIdentifiers,
+            serverIDsByLocalIdentifier: SwiftDataManager.shared.serverAssetIDsByLocalIdentifier()) else { return }
+        finishPageAccessChange(currentChanged: visit != viewer.visit)
+    }
+
+    private func finishPageAccessChange(currentChanged: Bool) {
+        if currentChanged {
             pagerController?.stopAllPlayback()
             vm?.invalidateSelection()
             photoEditorTarget = nil
@@ -190,7 +210,7 @@ struct AssetDetailView: View {
         if viewer.isEmpty {
             viewer.deactivate()
             dismiss()
-        } else if removesCurrent {
+        } else if currentChanged {
             loadCurrentMetadata()
         }
     }
@@ -251,14 +271,6 @@ struct AssetDetailView: View {
             }
             .cancelDeviceCopyRemoval { deviceRemoval?.cancel() }
             .task { await start() }
-            // Memaksa toolbar mengevaluasi ulang keberadaan salinan lokal saat
-            // PhotoKit berubah. Sekaligus tutup dialog yang keburu terbuka bila
-            // asetnya dihapus dari tempat lain.
-            .onChange(of: LocalPhotoLibrary.shared.revision) { _, _ in
-                if !DeviceCopyDeletion.hasDeviceCopy(for: currentAsset) {
-                    showRemoveDeviceConfirm = false
-                }
-            }
             // Untuk pemanggil yang mendorong lewat navigationDestination
             // (People, Album) — jalur fullScreenCover menolaknya di akar scene
             // yang dipresentasikan, lihat TimelineView dan SearchResultsGrid.

@@ -281,6 +281,130 @@ final class AssetViewerStateTests: XCTestCase {
         XCTAssertEqual(state.pages.first { $0.id == "B" }?.isFavorite, true)
     }
 
+    func testRevokedPhotosAccessRemovesLocalPagesAndKeepsServerPages() {
+        let local = asset(LocalPhotoLibrary.assetID(for: "local"), origin: .device)
+        let state = viewer([local, asset("server")])
+        let old = state.target(serverID: nil, detail: nil)
+
+        XCTAssertTrue(state.refreshLocalAccess(hasReadAccess: false, existingLocalIDs: { _ in
+            XCTFail("Denied access must not be used to enumerate local assets")
+            return ["local"]
+        }, serverIDsByLocalIdentifier: [:]))
+
+        XCTAssertEqual(state.pages.map(\.id), ["server"])
+        XCTAssertEqual(state.currentAsset.id, "server")
+        XCTAssertEqual(state.currentAsset.origin, .server)
+        XCTAssertFalse(state.isCurrent(old))
+        XCTAssertFalse(state.select(local.id))
+    }
+
+    func testLimitedSubsetChangeKeepsReadableCurrentPageAndItsActiveVisit() {
+        let hidden = asset(LocalPhotoLibrary.assetID(for: "outside-subset"), origin: .device)
+        let allowed = asset(LocalPhotoLibrary.assetID(for: "readable"), origin: .device)
+        let state = AssetViewerState(currentAsset: allowed, assets: [hidden, allowed, asset("server")])
+        let target = state.target(serverID: nil, detail: nil)
+
+        XCTAssertTrue(state.refreshLocalAccess(hasReadAccess: true, existingLocalIDs: {
+            XCTAssertEqual(Set($0), ["outside-subset", "readable"])
+            return ["readable"]
+        }, serverIDsByLocalIdentifier: [:]))
+
+        XCTAssertEqual(state.pages.map(\.id), [allowed.id, "server"])
+        XCTAssertEqual(state.currentAsset.id, allowed.id)
+        XCTAssertEqual(state.currentIndex, 0)
+        XCTAssertTrue(state.isCurrent(target), "A still-readable page must not lose its active visit")
+        XCTAssertFalse(state.refreshLocalAccess(hasReadAccess: true,
+            existingLocalIDs: { Set($0) }, serverIDsByLocalIdentifier: [:]))
+        XCTAssertTrue(state.isCurrent(target))
+    }
+
+    func testInaccessibleMappedVideoSwitchesToItsServerSourceAndPreservesMetadata() async throws {
+        let local = AssetLite(id: LocalPhotoLibrary.assetID(for: "video"), isVideo: true,
+            ratio: 1.7, thumbhash: "hash", createdAt: .distantPast,
+            isFavorite: true, duration: 23, livePhotoVideoID: "motion", origin: .both)
+        let state = viewer([local, asset("other")])
+        let old = state.target(serverID: "uploaded", detail: nil)
+
+        XCTAssertTrue(state.refreshLocalAccess(hasReadAccess: false,
+            existingLocalIDs: { _ in XCTFail("Revoked access cannot enumerate"); return [] },
+            serverIDsByLocalIdentifier: ["video": "uploaded"]))
+
+        XCTAssertEqual(state.pages.map(\.id), ["uploaded", "other"])
+        let current = state.currentAsset
+        XCTAssertEqual(current.origin, .server)
+        XCTAssertTrue(current.isVideo)
+        XCTAssertTrue(current.isFavorite)
+        XCTAssertEqual(current.ratio, local.ratio)
+        XCTAssertEqual(current.thumbhash, local.thumbhash)
+        XCTAssertEqual(current.createdAt, local.createdAt)
+        XCTAssertEqual(current.duration, local.duration)
+        XCTAssertEqual(current.livePhotoVideoID, local.livePhotoVideoID)
+        XCTAssertFalse(state.isCurrent(old))
+        XCTAssertFalse(state.select(local.id))
+        var presented = false
+        let fresh = try XCTUnwrap(state.prepare(state.target(serverID: "uploaded", detail: nil), kind: .share,
+            operation: { "server-file" }, completion: { _ in presented = true }))
+        await fresh.value
+        XCTAssertTrue(presented, "The allowed server source must remain usable")
+    }
+
+    func testMappedFallbackUsesExistingServerPageOnceAndKeepsItsCurrentMetadata() {
+        let local = asset(LocalPhotoLibrary.assetID(for: "local"), origin: .both)
+        var server = asset("server", origin: .both)
+        server.isFavorite = true
+        for pages in [[asset("other"), local, server], [asset("other"), server, local]] {
+            let state = AssetViewerState(currentAsset: local, assets: pages)
+
+            XCTAssertTrue(state.refreshLocalAccess(hasReadAccess: true, existingLocalIDs: { _ in [] },
+                serverIDsByLocalIdentifier: ["local": server.id]))
+
+            XCTAssertEqual(state.pages.map(\.id), ["other", "server"])
+            XCTAssertEqual(state.currentAsset.id, "server")
+            XCTAssertEqual(state.currentIndex, 1)
+            XCTAssertEqual(state.currentAsset.origin, .server)
+            XCTAssertTrue(state.currentAsset.isFavorite)
+        }
+    }
+
+    func testRemovingSeveralInaccessiblePagesAdvancesToTheNextSurvivingPage() {
+        let first = asset(LocalPhotoLibrary.assetID(for: "first"), origin: .device)
+        let selected = asset(LocalPhotoLibrary.assetID(for: "selected"), origin: .device)
+        let state = AssetViewerState(currentAsset: selected, assets: [first, selected, asset("next"), asset("last")])
+
+        XCTAssertTrue(state.refreshLocalAccess(hasReadAccess: false,
+            existingLocalIDs: { _ in [] }, serverIDsByLocalIdentifier: [:]))
+
+        XCTAssertEqual(state.pages.map(\.id), ["next", "last"])
+        XCTAssertEqual(state.currentAsset.id, "next")
+        XCTAssertEqual(state.currentIndex, 0)
+    }
+
+    func testLosingTheOnlyLocalPageDiscardsItsHeldShareFileAndLeavesTheViewerEmpty() async throws {
+        let local = asset(LocalPhotoLibrary.assetID(for: "local"), origin: .device)
+        let state = viewer([local])
+        let target = state.target(serverID: nil, detail: nil)
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try Data("local share".utf8).write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let held = HeldViewerResult<URL?>()
+        var presented = false
+        let task = try XCTUnwrap(state.prepare(target, kind: .share,
+            operation: { await held.value() },
+            discard: { try? FileManager.default.removeItem(at: $0) },
+            completion: { _ in presented = true }))
+        await fulfillment(of: [held.started], timeout: 2)
+
+        XCTAssertTrue(state.refreshLocalAccess(hasReadAccess: false,
+            existingLocalIDs: { _ in [] }, serverIDsByLocalIdentifier: [:]))
+        held.resolve(file)
+        await task.value
+
+        XCTAssertTrue(state.isEmpty, "The view dismisses when its last readable page is removed")
+        XCTAssertFalse(state.isCurrent(target))
+        XCTAssertFalse(presented)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+    }
+
     private func viewer(_ assets: [AssetLite]) -> AssetViewerState {
         AssetViewerState(currentAsset: assets[0], assets: assets)
     }

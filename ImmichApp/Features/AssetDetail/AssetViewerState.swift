@@ -153,6 +153,67 @@ final class AssetViewerState {
         return !removed.isEmpty
     }
 
+    /// Frozen viewer pages must follow the currently readable Photos subset.
+    /// A mapped copy can keep displaying through its server ID instead.
+    @discardableResult
+    func refreshLocalAccess(
+        hasReadAccess: Bool,
+        existingLocalIDs: ([String]) -> Set<String>,
+        serverIDsByLocalIdentifier: [String: String]
+    ) -> Bool {
+        let localIDs = pages.filter { LocalPhotoLibrary.isLocal($0.id) }
+            .map { LocalPhotoLibrary.localIdentifier(from: $0.id) }
+        guard !localIDs.isEmpty else { return false }
+        let accessible = hasReadAccess ? existingLocalIDs(localIDs) : []
+        let selected = currentAsset
+        var selectedID = selected.id
+        var nextIndex = 0
+        var serverPages: [String: AssetLite] = [:]
+        for page in pages where !LocalPhotoLibrary.isLocal(page.id) {
+            serverPages[page.id] = page
+        }
+        var positions: [String: Int] = [:]
+        var updated: [AssetLite] = []
+        var changed = false
+        for page in pages {
+            if page.id == selected.id { nextIndex = updated.count }
+            var retained = page
+            if LocalPhotoLibrary.isLocal(page.id) {
+                let localID = LocalPhotoLibrary.localIdentifier(from: page.id)
+                if !accessible.contains(localID) {
+                    changed = true
+                    guard let serverID = serverIDsByLocalIdentifier[localID], !serverID.isEmpty,
+                          !LocalPhotoLibrary.isLocal(serverID) else { continue }
+                    retained = serverPages[serverID] ?? AssetLite(
+                        id: serverID, isVideo: page.isVideo, ratio: page.ratio,
+                        thumbhash: page.thumbhash, createdAt: page.createdAt,
+                        isFavorite: page.isFavorite, duration: page.duration,
+                        livePhotoVideoID: page.livePhotoVideoID, origin: .server)
+                    retained.origin = .server
+                    if page.id == selected.id { selectedID = serverID }
+                }
+            }
+            if let index = positions[retained.id] {
+                if retained.id != page.id { updated[index].origin = .server }
+            } else {
+                positions[retained.id] = updated.count
+                updated.append(retained)
+            }
+        }
+        guard changed else { return false }
+        storage.assets = updated
+        if let index = updated.firstIndex(where: { $0.id == selectedID }) {
+            if selectedID == selected.id { selection.index = index }
+            else { selection = Selection(index: index, fallback: updated[index]) }
+        } else if !updated.isEmpty {
+            let next = min(nextIndex, updated.count - 1)
+            selection = Selection(index: next, fallback: updated[next])
+        } else {
+            selection = Selection(index: 0, fallback: selected)
+        }
+        return true
+    }
+
     func setFavorite(_ value: Bool, for id: String) {
         guard let index = storage.assets.firstIndex(where: { $0.id == id }) else { return }
         storage.assets[index].isFavorite = value
