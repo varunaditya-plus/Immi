@@ -89,10 +89,11 @@ class ServerCopyVerifier {
     }
 
     private func originalMatches(_ id: String, sha1: String) async throws -> Bool {
-        let file = try await api.rawFile(.init(
+        let download = try await api.rawFile(.init(
             path: "/assets/\(id)/original",
             query: [.init(name: "edited", value: "false")],
             extraHeaders: headers))
+        let file = download.url
         defer { try? FileManager.default.removeItem(at: file) }
         try Task.checkCancellation()
         guard let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > 0 else { return false }

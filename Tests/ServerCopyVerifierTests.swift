@@ -338,13 +338,14 @@ final class TrackingServerCopyAPI: APIClient {
     private var files: [URL] = []
     private let gate: ServerFileGate?
     var downloads: [URL] { lock.withLock { files } }
+    @MainActor
     init(session: SessionManager, urlSession: URLSession, gate: ServerFileGate?) {
         self.gate = gate
         super.init(session: session, urlSession: urlSession)
     }
-    override func rawFile(_ endpoint: Endpoint) async throws -> URL {
+    override func rawFile(_ endpoint: Endpoint) async throws -> DownloadedFile {
         let file = try await super.rawFile(endpoint)
-        lock.withLock { files.append(file) }
+        lock.withLock { files.append(file.url) }
         await gate?.wait()
         return file
     }
