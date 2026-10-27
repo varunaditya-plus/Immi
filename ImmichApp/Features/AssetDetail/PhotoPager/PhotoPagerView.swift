@@ -95,6 +95,7 @@ final class PhotoPagerController: UIViewController {
     private var assets: [AssetLite] = []
     private var assetIndex: [String: Int] = [:]
     private var currentIndex = 0
+    private var imageReloadRequests: [String: UUID] = [:]
     private var layoutRules = PhotoPagerLayout()
     /// Izin dari layar induk (panel info/edit/keadaan SwiftUI). Status zoom
     /// digabungkan terpisah supaya pager dapat dikunci langsung di UIKit tanpa
@@ -373,13 +374,22 @@ final class PhotoPagerController: UIViewController {
     func toggleMute() { currentCell?.toggleMute() }
     func seek(toFraction fraction: Double) { currentCell?.seek(toFraction: fraction) }
 
-    /// Meminta ulang preview halaman aktif setelah server menyelesaikan edit.
-    func reloadCurrentImage() async {
-        guard assets.indices.contains(currentIndex) else { return }
-        let asset = assets[currentIndex]
-        await loader.invalidate(asset.id)
-        guard assets.indices.contains(currentIndex), assets[currentIndex].id == asset.id else { return }
-        currentCell?.configure(with: asset, loader: loader)
+    /// Hasil edit tetap milik aset asal walau pengguna sudah berganti halaman.
+    func reloadImage(for assetID: String) async {
+        let request = UUID()
+        imageReloadRequests[assetID] = request
+        defer {
+            if imageReloadRequests[assetID] == request {
+                imageReloadRequests[assetID] = nil
+            }
+        }
+        await loader.invalidate(assetID)
+        guard !Task.isCancelled,
+              imageReloadRequests[assetID] == request,
+              assets.indices.contains(currentIndex),
+              assets[currentIndex].id == assetID
+        else { return }
+        currentCell?.configure(with: assets[currentIndex], loader: loader)
         currentCell?.apply(layoutRules)
     }
 

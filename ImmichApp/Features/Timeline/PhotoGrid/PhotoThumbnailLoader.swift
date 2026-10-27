@@ -6,7 +6,7 @@ import UIKit
 /// lewat objek ini — sekaligus menjaga agar kunci cache dan ukuran decode-nya
 /// hanya ditulis di SATU tempat.
 @MainActor
-final class PhotoThumbnailLoader {
+class PhotoThumbnailLoader {
     /// Sisi terpanjang yang dibutuhkan petak grid. Thumbnail Immich sendiri
     /// biasanya lebih kecil dari ini, jadi umumnya tidak ada penyusutan sama
     /// sekali — batasnya cuma penjaga kalau server dikonfigurasi lain.

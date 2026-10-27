@@ -8,7 +8,7 @@ import UIKit
 /// endpoint, dan urutan cadangannya berbeda — dan menyatukannya hanya melahirkan
 /// parameter yang harus dibaca ulang setiap kali.
 @MainActor
-final class PhotoPreviewLoader {
+class PhotoPreviewLoader {
     /// Sisi terpanjang untuk layar detail.
     ///
     /// 2048px sudah melampaui resolusi layar mana pun, sementara membongkar
@@ -18,13 +18,36 @@ final class PhotoPreviewLoader {
 
     private let session: SessionManager
     private let accountGeneration = LocalSnapshot.generation
+    private let imageCache: ImageCache
+    private let serverIDForLocalAsset: @MainActor (String) -> String?
+    private let localPreview: @MainActor (String) async -> UIImage?
 
-    init(session: SessionManager) {
+    init(
+        session: SessionManager,
+        imageCache: ImageCache = .shared,
+        serverIDForLocalAsset: @escaping @MainActor (String) -> String? = {
+            SwiftDataManager.shared.getBackupRecord(localIdentifier: $0)?.assetId
+        },
+        localPreview: @escaping @MainActor (String) async -> UIImage? = {
+            await LocalPhotoLibrary.shared.preview(for: $0,
+                size: CGSize(width: PhotoPreviewLoader.maxPixelSize, height: PhotoPreviewLoader.maxPixelSize))
+        }
+    ) {
         self.session = session
+        self.imageCache = imageCache
+        self.serverIDForLocalAsset = serverIDForLocalAsset
+        self.localPreview = localPreview
     }
 
     private func cacheKey(for assetId: String) -> String {
         "\(assetId)-preview"
+    }
+
+    private func serverPreviewID(for assetID: String) -> String? {
+        guard LocalPhotoLibrary.isLocal(assetID) else { return assetID }
+        let localID = LocalPhotoLibrary.localIdentifier(from: assetID)
+        guard let serverID = serverIDForLocalAsset(localID), !serverID.isEmpty else { return nil }
+        return serverID
     }
 
     /// Gambar terbaik yang SUDAH ada di memori, tanpa `await`.
@@ -35,10 +58,16 @@ final class PhotoPreviewLoader {
     /// resmi terasa tanpa loading.
     func cachedImage(for assetId: String) -> UIImage? {
         guard accountGeneration == LocalSnapshot.generation else { return nil }
+        let sourceID = serverPreviewID(for: assetId) ?? assetId
         if let preview = ImageMemoryCache.shared.image(
-            for: ImageCache.memoryKey(cacheKey(for: assetId), Self.maxPixelSize)) {
+            for: ImageCache.memoryKey(cacheKey(for: sourceID), Self.maxPixelSize)) {
             return preview
         }
+        if let thumbnail = ImageMemoryCache.shared.image(
+            for: ImageCache.memoryKey("\(sourceID)-thumbnail", PhotoThumbnailLoader.maxPixelSize)) {
+            return thumbnail
+        }
+        guard sourceID != assetId else { return nil }
         return ImageMemoryCache.shared.image(
             for: ImageCache.memoryKey("\(assetId)-thumbnail", PhotoThumbnailLoader.maxPixelSize))
     }
@@ -46,28 +75,24 @@ final class PhotoPreviewLoader {
     /// true kalau yang ada di memori sudah versi tajamnya, jadi tidak perlu
     /// mengambil apa pun.
     func hasPreview(for assetId: String) -> Bool {
-        ImageMemoryCache.shared.image(
-            for: ImageCache.memoryKey(cacheKey(for: assetId), Self.maxPixelSize)) != nil
+        guard accountGeneration == LocalSnapshot.generation else { return false }
+        let sourceID = serverPreviewID(for: assetId) ?? assetId
+        return ImageMemoryCache.shared.image(
+            for: ImageCache.memoryKey(cacheKey(for: sourceID), Self.maxPixelSize)) != nil
     }
 
     func image(for assetId: String) async -> UIImage? {
-        guard accountGeneration == LocalSnapshot.generation else { return nil }
-        // Aset PERANGKAT tidak punya alamat di server.
-        //
-        // Memintanya ke sana berakhir 400/404, dan itu dibaca `UnreadableAssets`
-        // sebagai "aset ini sudah tidak bisa dibaca" — lalu petaknya DIBUANG
-        // dari linimasa. Foto yang masih ada di perangkat hilang dari grid
-        // hanya karena dibuka.
-        if LocalPhotoLibrary.isLocal(assetId) {
-            let image = await LocalPhotoLibrary.shared.preview(
-                for: assetId,
-                size: CGSize(width: Self.maxPixelSize, height: Self.maxPixelSize))
-            return accountGeneration == LocalSnapshot.generation ? image : nil
+        guard accountGeneration == LocalSnapshot.generation, !Task.isCancelled else { return nil }
+        // Display ID lokal tetap stabil setelah upload, tetapi edit server
+        // berada pada preview server. Foto yang belum tertaut tetap lokal.
+        guard let sourceID = serverPreviewID(for: assetId) else {
+            let image = await localPreview(assetId)
+            return accountGeneration == LocalSnapshot.generation && !Task.isCancelled ? image : nil
         }
 
         let api = session.imageAPI
         let endpoint = Endpoint(
-            path: "/assets/\(assetId)/thumbnail",
+            path: "/assets/\(sourceID)/thumbnail",
             query: [
                 .init(name: "size", value: "preview"),
                 // Kalau aset punya crop/rotate/mirror, tampilkan hasilnya.
@@ -76,15 +101,19 @@ final class PhotoPreviewLoader {
             ])
 
         do {
-            let image = try await ImageCache.shared.image(
-                key: cacheKey(for: assetId),
+            let image = try await imageCache.image(
+                key: cacheKey(for: sourceID),
                 maxPixelSize: Self.maxPixelSize,
                 fetch: { try await api.rawData(endpoint) })
             guard accountGeneration == LocalSnapshot.generation else { return nil }
             UnreadableAssets.shared.noteSuccess()
             return image
         } catch {
-            guard accountGeneration == LocalSnapshot.generation else { return nil }
+            guard accountGeneration == LocalSnapshot.generation, !Task.isCancelled else { return nil }
+            if LocalPhotoLibrary.isLocal(assetId) {
+                let image = await localPreview(assetId)
+                return accountGeneration == LocalSnapshot.generation && !Task.isCancelled ? image : nil
+            }
             // Aset yang ditolak server dibuang dari linimasa — lihat
             // `UnreadableAssets`.
             UnreadableAssets.shared.report(assetId, error: error)
@@ -96,15 +125,17 @@ final class PhotoPreviewLoader {
     /// kemudian mengirim koordinatnya terhadap original membuat crop kedua
     /// meleset setelah foto pernah diedit sekali.
     func originalImageForEditing(_ assetId: String) async -> UIImage? {
+        guard accountGeneration == LocalSnapshot.generation, !Task.isCancelled else { return nil }
         if LocalPhotoLibrary.isLocal(assetId) {
-            return await LocalPhotoLibrary.shared.preview(
+            let image = await LocalPhotoLibrary.shared.preview(
                 for: assetId,
                 size: CGSize(width: Self.maxPixelSize, height: Self.maxPixelSize))
+            return accountGeneration == LocalSnapshot.generation && !Task.isCancelled ? image : nil
         }
 
         let api = session.imageAPI
         do {
-            return try await ImageCache.shared.image(
+            let image = try await ImageCache.shared.image(
                 key: "\(assetId)-preview-original",
                 maxPixelSize: Self.maxPixelSize,
                 fetch: {
@@ -115,6 +146,7 @@ final class PhotoPreviewLoader {
                             .init(name: "edited", value: "false"),
                         ]))
                 })
+            return accountGeneration == LocalSnapshot.generation && !Task.isCancelled ? image : nil
         } catch {
             return nil
         }
@@ -141,6 +173,7 @@ final class PhotoPreviewLoader {
     /// round-trip dan transcoding server. Bila berkas lokal sudah dihapus atau
     /// hanya ada di iCloud, endpoint playback server menjadi fallback.
     func playbackAsset(for assetId: String) async -> AVAsset? {
+        guard accountGeneration == LocalSnapshot.generation, !Task.isCancelled else { return nil }
         let localAssetID: String?
         if LocalPhotoLibrary.isLocal(assetId) {
             localAssetID = assetId
@@ -153,7 +186,7 @@ final class PhotoPreviewLoader {
 
         if let localAssetID,
            let localAsset = await LocalPhotoLibrary.shared.videoAsset(for: localAssetID) {
-            guard !Task.isCancelled else {
+            guard accountGeneration == LocalSnapshot.generation, !Task.isCancelled else {
                 localAsset.cancelLoading()
                 return nil
             }
@@ -184,29 +217,31 @@ final class PhotoPreviewLoader {
     /// `livePhotoVideoId` server, bukan menggantikannya: foto yang baru diambil
     /// atau cache server lama tetap dikenali dari metadata PhotoKit.
     func localLivePhotoAssetID(for assetId: String) -> String? {
+        guard accountGeneration == LocalSnapshot.generation else { return nil }
         guard let localID = localAssetID(for: assetId) else { return nil }
         return LocalPhotoLibrary.shared.isLivePhoto(localID) ? localID : nil
     }
 
     func matchingLocalLivePhoto(for hint: LocalLivePhotoMatchHint) async -> String? {
-        await LocalPhotoLibrary.shared.matchingLivePhoto(for: hint)
+        guard accountGeneration == LocalSnapshot.generation, !Task.isCancelled else { return nil }
+        let localID = await LocalPhotoLibrary.shared.matchingLivePhoto(for: hint)
+        return accountGeneration == LocalSnapshot.generation && !Task.isCancelled ? localID : nil
     }
 
     func localLivePhoto(forLocalAssetID localID: String, targetSize: CGSize) async -> PHLivePhoto? {
-        return await LocalPhotoLibrary.shared.livePhoto(
-            for: localID, targetSize: targetSize)
+        guard accountGeneration == LocalSnapshot.generation, !Task.isCancelled else { return nil }
+        let image = await LocalPhotoLibrary.shared.livePhoto(for: localID, targetSize: targetSize)
+        return accountGeneration == LocalSnapshot.generation && !Task.isCancelled ? image : nil
     }
 
     /// Menghangatkan halaman tetangga sebelum diusap ke sana.
     func prefetch(_ assetIds: [String]) {
         guard accountGeneration == LocalSnapshot.generation else { return }
-        // Id perangkat tidak punya alamat di server; menembakkannya ke sana
-        // hanya menghasilkan 404 untuk setiap tetangga halaman.
-        let serverIDs = assetIds.filter { !LocalPhotoLibrary.isLocal($0) }
+        let serverIDs = assetIds.compactMap(serverPreviewID(for:))
         guard !serverIDs.isEmpty else { return }
 
         let api = session.imageAPI
-        ImageCache.shared.prefetch(
+        imageCache.prefetch(
             keys: serverIDs.map(cacheKey(for:)),
             maxPixelSize: Self.maxPixelSize,
             fetch: { key in
@@ -221,7 +256,9 @@ final class PhotoPreviewLoader {
     }
 
     func invalidate(_ assetId: String) async {
-        await ImageCache.shared.remove(
-            key: cacheKey(for: assetId), maxPixelSize: Self.maxPixelSize)
+        guard accountGeneration == LocalSnapshot.generation else { return }
+        let sourceID = serverPreviewID(for: assetId) ?? assetId
+        await imageCache.remove(
+            key: cacheKey(for: sourceID), maxPixelSize: Self.maxPixelSize)
     }
 }

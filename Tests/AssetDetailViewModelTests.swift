@@ -8,13 +8,24 @@ final class AssetDetailViewModelTests: XCTestCase {
 
     override func setUp() async throws {
         try await super.setUp()
+        clearSnapshots()
         mockRepo = MockAssetDetailRepository(api: makeStubAPIClient())
         viewModel = AssetDetailViewModel(repo: mockRepo)
     }
 
+    override func tearDown() async throws {
+        clearSnapshots()
+        try await super.tearDown()
+    }
+
+    private func clearSnapshots() {
+        for id in ["asset-123", "invalid-id"] {
+            LocalSnapshot.remove(LocalSnapshot.Key.assetDetail(id))
+        }
+    }
+
     func testInitialState() {
         XCTAssertNil(viewModel.detail)
-        XCTAssertFalse(viewModel.showInfoPanel)
         XCTAssertNil(viewModel.actionError)
         if case .idle = viewModel.phase {
             // Success
@@ -57,10 +68,13 @@ final class AssetDetailViewModelTests: XCTestCase {
 
         XCTAssertTrue(viewModel.detail?.isFavorite ?? false)
         XCTAssertTrue(mockRepo.mockAsset?.isFavorite ?? false)
+        XCTAssertEqual(mockRepo.favoriteRequests.map(\.id), ["asset-123"])
+        XCTAssertEqual(mockRepo.favoriteRequests.map(\.value), [true])
         XCTAssertNil(viewModel.actionError)
 
         await viewModel.toggleFavorite("asset-123")
         XCTAssertFalse(viewModel.detail?.isFavorite ?? true)
+        XCTAssertEqual(mockRepo.favoriteRequests.map(\.value), [true, false])
     }
 
     func testToggleFavoriteFailureSetsActionErrorAndKeepsState() async {
@@ -72,6 +86,9 @@ final class AssetDetailViewModelTests: XCTestCase {
 
         XCTAssertNotNil(viewModel.actionError)
         XCTAssertFalse(viewModel.detail?.isFavorite ?? true)
+        XCTAssertEqual(mockRepo.favoriteRequests.map(\.id), ["asset-123"])
+        XCTAssertEqual(mockRepo.favoriteRequests.map(\.value), [true])
+        XCTAssertEqual(mockRepo.mockAsset?.isFavorite, false)
     }
 
     func testToggleArchive() async {
@@ -130,12 +147,6 @@ final class AssetDetailViewModelTests: XCTestCase {
         XCTAssertNotNil(viewModel.actionError)
     }
 
-    func testInfoPanelToggle() {
-        XCTAssertFalse(viewModel.showInfoPanel)
-        viewModel.showInfoPanel = true
-        XCTAssertTrue(viewModel.showInfoPanel)
-    }
-
     func testRetry() async {
         mockRepo.shouldFail = true
         await viewModel.load("asset-123")
@@ -165,6 +176,7 @@ class MockAssetDetailRepository: AssetDetailRepository {
     var mockDownloadData = Data()
     var deletedIds: [String] = []
     var lastVisibility: String?
+    private(set) var favoriteRequests: [(id: String, value: Bool)] = []
 
     override func fetchAsset(_ id: String) async throws -> AssetResponseDTO {
         if shouldFail {
@@ -177,9 +189,11 @@ class MockAssetDetailRepository: AssetDetailRepository {
     }
 
     override func toggleFavorite(_ id: String, to value: Bool) async throws {
+        favoriteRequests.append((id, value))
         if shouldFail {
             throw APIError.unknown
         }
+        guard mockAsset?.id == id else { throw APIError.unknown }
         mockAsset?.isFavorite = value
     }
 
@@ -187,6 +201,7 @@ class MockAssetDetailRepository: AssetDetailRepository {
         if shouldFail {
             throw APIError.unknown
         }
+        guard mockAsset?.id == id else { throw APIError.unknown }
         lastVisibility = value ? "archive" : "timeline"
         mockAsset?.isArchived = value
     }

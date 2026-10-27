@@ -3,8 +3,7 @@ import LinkPresentation
 import SwiftUI
 
 struct AssetDetailView: View {
-    @State var currentAsset: AssetLite
-    let assets: [AssetLite]
+    @State private var viewer: AssetViewerState
     // true saat ditampilkan sebagai fullScreenCover (perlu tombol tutup sendiri).
     var isModal = false
     // Memberi tahu pemanggil foto mana yang sedang tampil, supaya
@@ -25,10 +24,6 @@ struct AssetDetailView: View {
     @State private var vm: AssetDetailViewModel?
     @State private var isSharePresented = false
     @State private var sharedLink: SharedLinkPresentation?
-    /// true selama file asli masih diunduh, sebelum share sheet dibuka.
-    @State private var isPreparingShare = false
-    @State private var isDownloadingToDevice = false
-    @State private var isUploadingLocalAsset = false
     @State private var isSettingProfilePhoto = false
     @State private var downloadedFileURL: URL?
     /// Pratinjau untuk header share sheet, diambil dari cache preview.
@@ -36,6 +31,7 @@ struct AssetDetailView: View {
     @State private var showToolbar = true
     @State private var isZoomed = false
     @State private var showDeleteConfirm = false
+    @State private var deleteTarget: AssetViewerState.Target?
     /// Naik satu setiap toggle favorit yang berhasil; dipakai sebagai pemicu
     /// animasi simbol dan haptic.
     @State private var favoriteFeedback = 0
@@ -80,23 +76,14 @@ struct AssetDetailView: View {
     /// Cermin dari `descriptionFocused`. Toolbar builder tidak andal membaca
     /// @FocusState langsung, jadi disalin seperti status toolbar lainnya.
     @State private var isEditingDescription = false
-    @State private var isEditingDate = false
-    @State private var isEditingLocation = false
-    @State private var isPickingAlbum = false
-    @State private var isEditingPhoto = false
-    @State private var isPreparingEditor = false
-    @State private var existingPhotoEdits: [AssetEditRecord] = []
+    @State private var dateTarget: AssetViewerState.Target?
+    @State private var locationTarget: AssetViewerState.Target?
+    @State private var albumTarget: AssetViewerState.Target?
+    @State private var photoEditorTarget: PhotoEditorTarget?
+    @State private var descriptionTarget: AssetViewerState.Target?
+    @State private var removeDeviceTarget: AssetViewerState.Target?
     @State private var showRemoveDeviceConfirm = false
     @State private var deviceRemoval: Task<Void, Never>?
-    /// Salinan kerja dari `assets`, milik layar ini.
-    ///
-    /// `assets` dimiliki pemanggil dan tidak bisa diubah dari sini. Dulu
-    /// penghapusan disimpan sebagai kumpulan id lalu disaring ulang setiap kali
-    /// dibaca — pada puluhan ribu foto itu penyalinan array penuh, berkali-kali
-    /// per frame. Sekarang daftarnya diubah langsung.
-    @State private var pages: [AssetLite] = []
-    /// Posisi `currentAsset` di `pages`, dipelihara alih-alih dicari ulang.
-    @State private var currentIndex = 0
     /// Panel tetap terpasang sampai animasi menutup benar-benar selesai.
     ///
     /// Tanpa ini, `panelHeight` menyentuh 0 di awal `withAnimation` sehingga
@@ -115,14 +102,43 @@ struct AssetDetailView: View {
     /// Menjaga metadata async tidak pernah dipasang ke halaman yang berbeda
     /// selama satu frame transisi pager.
     @State private var currentLivePhotoContextAssetID: String? = nil
+    @State private var metadataKey: MetadataKey?
 
-    /// Daftar yang benar-benar dipakai untuk menggambar.
-    ///
-    /// `pages` baru terisi di `start()`, yang berjalan SETELAH body pertama.
-    /// Membiarkan strip menunggu sampai saat itu membuatnya muncul terlambat —
-    /// dan karena strip mengubah safe area, fotonya sempat tergambar lebih tinggi
-    /// lalu tersentak naik begitu strip datang.
-    private var visibleAssets: [AssetLite] { pages.isEmpty ? assets : pages }
+    init(
+        currentAsset: AssetLite,
+        assets: [AssetLite],
+        isModal: Bool = false,
+        onAssetChange: ((AssetLite) -> Void)? = nil,
+        onAssetRemoved: ((String) -> Void)? = nil,
+        onAssetUpdated: ((String) -> Void)? = nil,
+        onFavoriteChanged: ((String, Bool) -> Void)? = nil
+    ) {
+        _viewer = State(initialValue: AssetViewerState(currentAsset: currentAsset, assets: assets))
+        self.isModal = isModal
+        self.onAssetChange = onAssetChange
+        self.onAssetRemoved = onAssetRemoved
+        self.onAssetUpdated = onAssetUpdated
+        self.onFavoriteChanged = onFavoriteChanged
+    }
+
+    private var currentAsset: AssetLite {
+        get { viewer.currentAsset }
+        nonmutating set {
+            if viewer.select(newValue.id) { loadCurrentMetadata() }
+        }
+    }
+    private var visibleAssets: [AssetLite] { viewer.pages }
+    private var isPreparingShare: Bool { viewer.isPreparing(.share) }
+    private var isPreparingEditor: Bool { viewer.isPreparing(.editor) }
+    private var isDownloadingToDevice: Bool { viewer.isDownloading(currentAsset.id) }
+    private var isUploadingLocalAsset: Bool { viewer.isUploading(currentAsset.id) }
+    private var matchingDetail: AssetResponseDTO? {
+        guard vm?.detail?.id == currentServerAssetID else { return nil }
+        return vm?.detail
+    }
+    private var currentTarget: AssetViewerState.Target {
+        viewer.target(serverID: currentServerAssetID, detail: matchingDetail)
+    }
 
     private var isPanelDragging: Bool { panelDragStart != nil }
     private var isPanelAtMax: Bool { panelHeight >= panelMaxHeight - 1 }
@@ -184,9 +200,16 @@ struct AssetDetailView: View {
             // menyita ruang dari satu-satunya hal yang sedang dilihat. Layar ini
             // punya caranya sendiri untuk berterus terang: aksi yang gagal
             // memunculkan toast, dan panel info tetap terisi dari potret lokal.
-            .onAppear { OfflineBannerSuppression.shared.begin() }
+            .onAppear {
+                viewer.activate()
+                OfflineBannerSuppression.shared.begin()
+            }
             .onDisappear {
                 OfflineBannerSuppression.shared.end()
+                if photoEditorTarget == nil {
+                    viewer.deactivate()
+                    vm?.invalidateSelection()
+                }
             }
             .cancelDeviceCopyRemoval { deviceRemoval?.cancel() }
             .task { await start() }
@@ -203,28 +226,19 @@ struct AssetDetailView: View {
             // yang dipresentasikan, lihat TimelineView dan SearchResultsGrid.
             .ignoresSafeArea(.keyboard, edges: .bottom)
             .onChange(of: currentAsset) { oldAsset, newAsset in
-                deviceRemoval?.cancel()
+                if isEditingDescription { saveDescriptionEdit(for: serverAssetID(for: oldAsset)) }
                 onAssetChange?(newAsset)
-                currentLivePhotoContextAssetID = newAsset.id
-                currentLivePhotoVideoID = newAsset.livePhotoVideoID
-                currentLivePhotoHint = nil
-                // Foto lain = metadata lain = tinggi isi lain. Nilai maksimum
-                // yang tersimpan harus dilupakan, bukan dibawa-bawa.
                 panelContentHeight = 0
-                // Deskripsi milik foto sebelumnya: simpan dulu, lalu lepas
-                // fokusnya. Tanpa ini keyboard dan toolbar mode edit bertahan
-                // di foto baru sambil menyunting teks milik foto lama.
-                if isEditingDescription {
-                    saveDescriptionEdit(for: serverAssetID(for: oldAsset))
-                }
-                Task {
-                    let detailAssetID = serverAssetID(for: newAsset) ?? newAsset.id
-                    await vm?.load(detailAssetID)
-                    syncLivePhotoContextFromDetail()
-                    if let serverID = serverAssetID(for: newAsset) {
-                        await vm?.loadContainingAlbums(serverID)
-                    }
-                }
+                dateTarget = nil
+                locationTarget = nil
+                albumTarget = nil
+                photoEditorTarget = nil
+                showDeleteConfirm = false
+                showRemoveDeviceConfirm = false
+                loadCurrentMetadata()
+            }
+            .onChange(of: SwiftDataManager.shared.backupMappingRevision) { _, _ in
+                refreshUploadedCopies()
             }
     }
 
@@ -263,21 +277,21 @@ struct AssetDetailView: View {
         stateSync
             .sheet(isPresented: $isSharePresented, onDismiss: cleanupSharedFile) { shareSheet }
             .sheet(item: $sharedLink) { ShareSheet(url: $0.url) }
-            .sheet(isPresented: $isEditingDate) { dateEditor }
-            .sheet(isPresented: $isEditingLocation) { locationEditor }
-            .sheet(isPresented: $isPickingAlbum) { albumPicker }
-            .fullScreenCover(isPresented: $isEditingPhoto) { photoEditor }
+            .sheet(item: $dateTarget) { dateEditor($0) }
+            .sheet(item: $locationTarget) { locationEditor($0) }
+            .sheet(item: $albumTarget) { albumPicker($0) }
+            .fullScreenCover(item: $photoEditorTarget, onDismiss: { viewer.activate() }) { photoEditor($0) }
             .confirmationDialog(
-                currentAsset.needsUpload ? "Remove This Photo?" : "Remove from Device",
+                (removeDeviceTarget?.asset.needsUpload ?? currentAsset.needsUpload) ? "Remove This Photo?" : "Remove from Device",
                 isPresented: $showRemoveDeviceConfirm,
                 titleVisibility: .visible
             ) {
                 Button("Remove from Device", role: .destructive) {
-                    removeFromDevice()
+                    if let target = removeDeviceTarget { removeFromDevice(target) }
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                if currentAsset.needsUpload {
+                if removeDeviceTarget?.asset.needsUpload == true {
                     Text("This is the only copy and it has not been uploaded yet.")
                 } else {
                     Text("The local copy will be removed. The photo stays on your server.")
@@ -285,61 +299,51 @@ struct AssetDetailView: View {
             }
     }
 
-    @ViewBuilder
-    private var photoEditor: some View {
-        if let serverID = currentServerAssetID,
-           let pixelSize = editablePixelSize {
-            PhotoCropEditor(
-                assetID: serverID,
-                originalPixelSize: pixelSize,
-                existingEdits: existingPhotoEdits,
-                onSave: { edits in
-                    guard await vm?.applyEdits(edits, to: serverID) == true else { return false }
-                    await pagerController?.reloadCurrentImage()
-                    onAssetUpdated?(serverID)
-                    return true
-                })
-        }
+    private func photoEditor(_ context: PhotoEditorTarget) -> some View {
+        PhotoCropEditor(
+            assetID: context.serverID,
+            originalPixelSize: context.pixelSize,
+            existingEdits: context.edits,
+            onSave: { edits in
+                let serverID = context.serverID
+                guard await vm?.applyEdits(edits, to: serverID) == true else { return false }
+                await pagerController?.reloadImage(for: context.target.asset.id)
+                onAssetUpdated?(serverID)
+                return true
+            })
     }
 
-    private var albumPicker: some View {
+    private func albumPicker(_ target: AssetViewerState.Target) -> some View {
         AlbumPickerSheet(albums: albums) { album in
-            guard let serverID = currentServerAssetID else { return }
+            guard let serverID = target.serverID else { return }
             Task { await vm?.addToAlbum(serverID, album: album) }
         }
     }
 
     @ViewBuilder
-    private var dateEditor: some View {
-        if let detail = vm?.detail {
+    private func dateEditor(_ target: AssetViewerState.Target) -> some View {
+        if let detail = target.detail, let serverID = target.serverID {
             AssetDateEditor(initialDate: detail.fileCreatedAt) { newDate in
-                guard let id = currentServerAssetID else { return }
                 Task {
-                    await vm?.updateDate(id, to: newDate)
-                    onAssetUpdated?(id)
+                    if await vm?.updateDate(serverID, to: newDate) == true { onAssetUpdated?(serverID) }
                 }
             }
         }
     }
 
-    @ViewBuilder
-    private var locationEditor: some View {
-        AssetLocationEditor(initialCoordinate: currentCoordinate) { coordinate in
-            guard let id = currentServerAssetID else { return }
+    private func locationEditor(_ target: AssetViewerState.Target) -> some View {
+        AssetLocationEditor(initialCoordinate: coordinate(for: target.detail)) { coordinate in
+            guard let serverID = target.serverID else { return }
             Task {
-                await vm?.updateLocation(
-                    id,
-                    latitude: coordinate.latitude,
-                    longitude: coordinate.longitude)
-                onAssetUpdated?(id)
+                if await vm?.updateLocation(serverID, latitude: coordinate.latitude, longitude: coordinate.longitude) == true {
+                    onAssetUpdated?(serverID)
+                }
             }
         }
     }
 
-    private var currentCoordinate: CLLocationCoordinate2D? {
-        guard let exif = vm?.detail?.exifInfo,
-              let lat = exif.latitude,
-              let lon = exif.longitude,
+    private func coordinate(for detail: AssetResponseDTO?) -> CLLocationCoordinate2D? {
+        guard let exif = detail?.exifInfo, let lat = exif.latitude, let lon = exif.longitude,
               lat != 0 || lon != 0 else { return nil }
         return CLLocationCoordinate2D(latitude: lat, longitude: lon)
     }
@@ -362,6 +366,7 @@ struct AssetDetailView: View {
             // toolbar sendiri sudah punya animasi bawaan.
             .onChange(of: descriptionFocused) { _, focused in
                 isEditingDescription = focused
+                if focused { descriptionTarget = currentTarget }
                 // Panel dinaikkan ke detent tertinggi begitu mulai menyunting.
                 //
                 // Keyboard menutupi bagian bawah layar tanpa menggeser panel —
@@ -385,16 +390,34 @@ struct AssetDetailView: View {
     private var vmStateSync: some View {
         Color.clear
             .allowsHitTesting(false)
-            .onChange(of: favoriteValue) { _, newValue in
-                isFavorite = newValue == true
+            .onChange(of: favoriteValue, initial: true) { _, newValue in
+                isFavorite = newValue.value
             }
             .onChange(of: detailID, initial: true) { _, newValue in
-                hasDetail = newValue != nil
+                hasDetail = newValue.assetID != nil
+            }
+            .onChange(of: livePhotoValue, initial: true) { _, newValue in
+                currentLivePhotoVideoID = newValue.videoID
+                currentLivePhotoHint = newValue.hint
+                currentLivePhotoContextAssetID = newValue.assetID
             }
     }
 
-    private var favoriteValue: Bool? { vm?.detail?.isFavorite }
-    private var detailID: String? { vm?.detail?.id }
+    private var favoriteValue: FavoriteDisplay {
+        FavoriteDisplay(visit: viewer.visit, value: matchingDetail?.isFavorite ?? currentAsset.isFavorite)
+    }
+    private var detailID: DetailDisplay { DetailDisplay(visit: viewer.visit, assetID: matchingDetail?.id) }
+    private var livePhotoValue: LivePhotoDisplay {
+        let detail = matchingDetail
+        let hint = detail.map {
+            LocalLivePhotoMatchHint(createdAt: $0.fileCreatedAt,
+                pixelWidth: $0.exifInfo?.exifImageWidth,
+                pixelHeight: $0.exifInfo?.exifImageHeight,
+                originalFileName: $0.originalFileName)
+        }
+        return LivePhotoDisplay(visit: viewer.visit, assetID: currentAsset.id,
+            videoID: detail?.livePhotoVideoId ?? currentAsset.livePhotoVideoID, hint: hint)
+    }
 
     private var favoriteHaptic: SensoryFeedback {
         isFavorite ? .success : .impact(flexibility: .soft)
@@ -450,7 +473,7 @@ struct AssetDetailView: View {
     /// lalu panel menutupinya secara bertahap.
     @ViewBuilder
     private var infoPanel: some View {
-        if isPanelMounted, let detail = vm?.detail {
+        if isPanelMounted, let detail = matchingDetail {
             panelBody(for: detail)
                 // Tinggi viewport panel TETAP selama drag. Yang bergerak hanya
                 // transform layer-nya lewat `offset` di bawah.
@@ -518,8 +541,8 @@ struct AssetDetailView: View {
             },
             descriptionDraft: $descriptionDraft,
             descriptionFocus: $descriptionFocused,
-            onAdjustDate: { isEditingDate = true },
-            onAdjustLocation: { isEditingLocation = true },
+            onAdjustDate: { dateTarget = currentTarget },
+            onAdjustLocation: { locationTarget = currentTarget },
             containingAlbums: vm?.containingAlbums ?? [])
     }
 
@@ -671,7 +694,7 @@ struct AssetDetailView: View {
     }
 
     private var savedDescription: String {
-        vm?.detail?.exifInfo?.description ?? ""
+        matchingDetail?.exifInfo?.description ?? ""
     }
 
     private func cancelDescriptionEdit() {
@@ -686,8 +709,10 @@ struct AssetDetailView: View {
         let trimmed = descriptionDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         descriptionDraft = trimmed
         descriptionFocused = false
-        guard trimmed != savedDescription else { return }
-        guard let id = assetID ?? currentServerAssetID else { return }
+        let target = descriptionTarget ?? currentTarget
+        descriptionTarget = nil
+        guard trimmed != (target.detail?.exifInfo?.description ?? "") else { return }
+        guard let id = assetID ?? target.serverID else { return }
         Task { await vm?.updateDescription(id, to: trimmed) }
     }
 
@@ -707,40 +732,50 @@ struct AssetDetailView: View {
     // MARK: - Jendela halaman
 
     private func start() async {
-        if pages.isEmpty {
-            pages = assets
-            currentIndex = assets.firstIndex(of: currentAsset) ?? 0
-        }
         if vm == nil {
             let api = APIClient(session: session)
-            let repo = AssetDetailRepository(api: api)
-            vm = AssetDetailViewModel(repo: repo, albumRepo: AlbumRepository(api: api))
+            vm = AssetDetailViewModel(repo: AssetDetailRepository(api: api), albumRepo: AlbumRepository(api: api))
         }
-        let detailAssetID = currentServerAssetID ?? currentAsset.id
-        await vm?.load(detailAssetID)
-        syncLivePhotoContextFromDetail()
-        if let serverID = currentServerAssetID {
-            await vm?.loadContainingAlbums(serverID)
-        }
+        refreshUploadedCopies(loadMetadata: false)
+        await loadCurrentMetadataTask()
         await vm?.loadAlbumsIfNeeded()
     }
 
-    /// Menyalin metadata hasil fetch ke state view dan menyiapkan fallback
-    /// PhotoKit. Nama file + waktu + dimensi dipakai bersama supaya pencocokan
-    /// tidak salah memilih Live Photo lain yang kebetulan berdekatan waktunya.
-    private func syncLivePhotoContextFromDetail() {
-        guard let detail = vm?.detail,
-              detail.id == currentServerAssetID
-        else { return }
+    private func loadCurrentMetadata() {
+        guard let vm else { return }
+        guard !viewer.isEmpty else {
+            metadataKey = nil
+            vm.invalidateSelection()
+            return
+        }
+        let target = currentTarget
+        let key = MetadataKey(visit: target.visit, assetID: target.serverID ?? target.asset.id)
+        guard metadataKey != key else { return }
+        metadataKey = key
+        let selection = vm.selectAsset(target.serverID ?? target.asset.id)
+        Task { await loadMetadata(target, selection: selection, model: vm) }
+    }
 
-        currentLivePhotoVideoID = detail.livePhotoVideoId
-            ?? currentAsset.livePhotoVideoID
-        currentLivePhotoHint = LocalLivePhotoMatchHint(
-            createdAt: detail.fileCreatedAt,
-            pixelWidth: detail.exifInfo?.exifImageWidth,
-            pixelHeight: detail.exifInfo?.exifImageHeight,
-            originalFileName: detail.originalFileName)
-        currentLivePhotoContextAssetID = currentAsset.id
+    private func loadCurrentMetadataTask() async {
+        guard let vm else { return }
+        let target = currentTarget
+        metadataKey = MetadataKey(visit: target.visit, assetID: target.serverID ?? target.asset.id)
+        let selection = vm.selectAsset(target.serverID ?? target.asset.id)
+        await loadMetadata(target, selection: selection, model: vm)
+    }
+
+    private func loadMetadata(_ target: AssetViewerState.Target,
+        selection: AssetDetailViewModel.Selection, model: AssetDetailViewModel) async {
+        await model.load(selection)
+        guard viewer.isCurrent(target), model.isCurrent(selection) else { return }
+        if target.serverID != nil { await model.loadContainingAlbums(selection) }
+    }
+
+    private func refreshUploadedCopies(loadMetadata: Bool = true) {
+        viewer.refreshUploadedCopies(using: SwiftDataManager.shared)
+        if loadMetadata, let serverID = currentServerAssetID, matchingDetail?.id != serverID {
+            loadCurrentMetadata()
+        }
     }
 
     private var pager: some View {
@@ -762,13 +797,6 @@ struct AssetDetailView: View {
             let stableViewport = cardViewport ?? liveViewport
 
             PhotoPagerView(
-                // `assets` dipakai sampai salinan kerjanya terisi.
-                //
-                // `pages` baru diisi di `start()`, yang berjalan SETELAH body
-                // pertama. Artinya pada evaluasi pertama pagernya kosong — dan
-                // animator transisi membaca kotak foto tujuan tepat di saat itu,
-                // lalu menemukan tidak ada apa-apa. Itulah kenapa membukanya tidak
-                // berangkat dari sel yang ditekan.
                 assets: visibleAssets,
                 currentAssetID: currentAsset.id,
                 // Detail lengkap adalah sumber paling baru; fallback menjaga
@@ -788,7 +816,6 @@ struct AssetDetailView: View {
                 isPagingEnabled: !showInfo && !isEditingDescription,
                 onPageChanged: { asset in
                     currentAsset = asset
-                    currentIndex = pages.firstIndex(of: asset) ?? currentIndex
                 },
                 onZoomChanged: { handleZoomChange($0) },
                 onTap: { toggleToolbar() },
@@ -942,7 +969,7 @@ struct AssetDetailView: View {
 
                 Section("Add to") {
                     Button {
-                        isPickingAlbum = true
+                        albumTarget = currentTarget
                     } label: {
                         Label("Album", systemImage: "rectangle.stack.badge.plus")
                     }
@@ -955,6 +982,7 @@ struct AssetDetailView: View {
             if DeviceCopyDeletion.hasDeviceCopy(for: currentAsset) {
                 Divider()
                 Button(role: .destructive) {
+                    removeDeviceTarget = currentTarget
                     showRemoveDeviceConfirm = true
                 } label: {
                     Label("Remove from Device", systemImage: "iphone.slash")
@@ -1021,7 +1049,7 @@ struct AssetDetailView: View {
 
     private var shareButton: some View {
         Button {
-            Task { await shareFile() }
+            shareFile()
         } label: {
             shareIcon
         }
@@ -1039,11 +1067,17 @@ struct AssetDetailView: View {
 
     private var favoriteButton: some View {
         Button {
-            guard let id = currentServerAssetID else { return }
+            let target = currentTarget
+            guard let id = target.serverID else { return }
+            let value = !(target.detail?.isFavorite ?? target.asset.isFavorite)
             Task {
-                if await vm?.toggleFavorite(id) == true {
-                    favoriteFeedback += 1
-                    onFavoriteChanged?(id, vm?.detail?.isFavorite == true)
+                if await vm?.toggleFavorite(id, to: value) == true {
+                    viewer.setFavorite(value, for: target.asset.id)
+                    if viewer.isCurrent(target) {
+                        isFavorite = value
+                        favoriteFeedback += 1
+                    }
+                    onFavoriteChanged?(id, value)
                 }
             }
         } label: {
@@ -1093,13 +1127,10 @@ struct AssetDetailView: View {
     }
 
     private func preparePhotoEditor() {
-        guard let serverID = currentServerAssetID, !isPreparingEditor else { return }
-        isPreparingEditor = true
-        Task {
-            defer { isPreparingEditor = false }
-            guard let edits = await vm?.edits(for: serverID) else { return }
-            existingPhotoEdits = edits
-            isEditingPhoto = true
+        let target = currentTarget
+        guard let serverID = target.serverID, let size = editablePixelSize else { return }
+        viewer.prepareEditor(target, operation: { await vm?.edits(for: serverID) }) { edits in
+            photoEditorTarget = PhotoEditorTarget(target: target, serverID: serverID, pixelSize: size, edits: edits)
         }
     }
 
@@ -1117,36 +1148,15 @@ struct AssetDetailView: View {
     }
 
     private func moveAsset(to visibility: AssetDetailRepository.Visibility) {
-        guard let serverID = currentServerAssetID else { return }
-        Task {
-            if await vm?.move(serverID, to: visibility) == true {
-                removeCurrentAsset()
+        let target = currentTarget
+        guard let serverID = target.serverID else { return }
+        viewer.remove(target, operation: { await vm?.move(serverID, to: visibility) == true }) { isPresented in
+            onAssetRemoved?(target.asset.id)
+            if isPresented {
+                loadCurrentMetadata()
+                if viewer.isEmpty { dismiss() }
             }
         }
-    }
-
-    /// Aset yang dipindah keluar dari timeline tidak lagi ada di daftar ini.
-    /// Lanjut ke foto berikutnya; kalau sudah di ujung, mundur ke sebelumnya;
-    /// kalau memang tidak ada sisa, tutup layarnya.
-    private func removeCurrentAsset() {
-        guard pages.indices.contains(currentIndex),
-              pages[currentIndex].id == currentAsset.id
-        else {
-            dismiss()
-            return
-        }
-
-        onAssetRemoved?(currentAsset.id)
-        pages.remove(at: currentIndex)
-
-        guard !pages.isEmpty else {
-            dismiss()
-            return
-        }
-
-        // Lanjut ke foto berikutnya; kalau tadi yang terakhir, mundur satu.
-        currentIndex = min(currentIndex, pages.count - 1)
-        currentAsset = pages[currentIndex]
     }
 
     private var albums: [AlbumResponseDTO] {
@@ -1156,6 +1166,7 @@ struct AssetDetailView: View {
     /// Trash dengan konfirmasi yang menempel ke tombolnya.
     private var deleteButton: some View {
         Button(role: .destructive) {
+            deleteTarget = currentTarget
             showDeleteConfirm = true
         } label: {
             Image(systemName: "trash")
@@ -1165,19 +1176,24 @@ struct AssetDetailView: View {
             isPresented: $showDeleteConfirm,
             titleVisibility: .visible
         ) {
-            Button("Delete", role: .destructive) { performDelete() }
+            Button("Delete", role: .destructive) { if let target = deleteTarget { performDelete(target) } }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Are you sure you want to delete this photo?")
         }
     }
 
-    private func performDelete() {
-        guard let serverID = currentServerAssetID else { return }
-        Task {
-            if await vm?.delete(serverID) == true {
-                deleteFeedback += 1
-                removeCurrentAsset()
+    private func performDelete(_ target: AssetViewerState.Target) {
+        guard let serverID = target.serverID else { return }
+        viewer.remove(target, operation: {
+            guard await vm?.delete(serverID) == true else { return false }
+            if viewer.isCurrent(target) { deleteFeedback += 1 }
+            return true
+        }) { isPresented in
+            onAssetRemoved?(target.asset.id)
+            if isPresented {
+                loadCurrentMetadata()
+                if viewer.isEmpty { dismiss() }
             }
         }
     }
@@ -1191,16 +1207,16 @@ struct AssetDetailView: View {
         showToolbar && !isZoomed
     }
 
-    private func shareFile() async {
-        guard !isPreparingShare else { return }
-
-        isPreparingShare = true
-        defer { isPreparingShare = false }
-
-        guard let file = await currentFileURL() else { return }
-        downloadedFileURL = file
-        sharePreviewImage = currentAsset.isVideo ? nil : UIImage(contentsOfFile: file.path)
-        isSharePresented = true
+    private func shareFile() {
+        let target = currentTarget
+        viewer.prepare(target, kind: .share,
+            operation: { await fileURL(for: target) },
+            discard: { try? FileManager.default.removeItem(at: $0) }) { file in
+                cleanupSharedFile()
+                downloadedFileURL = file
+                sharePreviewImage = target.asset.isVideo ? nil : UIImage(contentsOfFile: file.path)
+                isSharePresented = true
+            }
     }
 
     private var currentServerAssetID: String? {
@@ -1212,11 +1228,11 @@ struct AssetDetailView: View {
             return asset.origin == .device ? nil : asset.id
         }
         let localID = LocalPhotoLibrary.localIdentifier(from: asset.id)
-        return SwiftDataManager.shared.serverAssetIDsByLocalIdentifier()[localID]
+        return SwiftDataManager.shared.getBackupRecord(localIdentifier: localID)?.assetId
     }
 
     private var editablePixelSize: CGSize? {
-        guard let exif = vm?.detail?.exifInfo,
+        guard let exif = matchingDetail?.exifInfo,
               let width = exif.exifImageWidth,
               let height = exif.exifImageHeight,
               width > 0, height > 0
@@ -1233,99 +1249,87 @@ struct AssetDetailView: View {
 
     /// Memilih salinan lokal lebih dulu; server hanya disentuh kalau aset belum
     /// ada di perangkat. Ini membuat Share pada foto lokal benar-benar lokal.
-    private func currentFileURL() async -> URL? {
-        if currentAsset.isOnDevice {
-            let localIdentifier: String?
-            if LocalPhotoLibrary.isLocal(currentAsset.id) {
-                localIdentifier = LocalPhotoLibrary.localIdentifier(from: currentAsset.id)
-            } else {
-                localIdentifier = SwiftDataManager.shared.localIdentifier(
-                    forServerAsset: currentAsset.id)
-            }
-
-            if let localIdentifier,
-               let file = await LocalPhotoLibrary.shared.originalFile(
-                   for: LocalPhotoLibrary.assetID(for: localIdentifier)) {
-                return file.url
-            }
+    private func fileURL(for target: AssetViewerState.Target) async -> URL? {
+        guard viewer.isCurrent(target) else { return nil }
+        if target.asset.isOnDevice {
+            let localID = LocalPhotoLibrary.isLocal(target.asset.id)
+                ? LocalPhotoLibrary.localIdentifier(from: target.asset.id)
+                : SwiftDataManager.shared.localIdentifier(forServerAsset: target.asset.id)
+            if let localID, let file = await LocalPhotoLibrary.shared.originalFile(
+                for: LocalPhotoLibrary.assetID(for: localID)) { return file.url }
         }
-
-        guard let serverID = currentServerAssetID, let vm else { return nil }
-        let filename = vm.detail?.originalFileName
-            ?? (currentAsset.isVideo ? "video.mov" : "photo.jpg")
+        guard viewer.isCurrent(target), let serverID = target.serverID, let vm else { return nil }
+        let filename = target.detail?.originalFileName ?? (target.asset.isVideo ? "video.mov" : "photo.jpg")
         return await vm.downloadOriginalFile(serverID, filename: filename)
     }
 
     private func createSharedLink(for serverID: String) {
+        let target = currentTarget
+        guard target.serverID == serverID else { return }
         let repo = SharedLinkRepository(api: APIClient(session: session))
-        Task {
+        let baseURL = session.baseURL
+        viewer.prepare(target, kind: .sharedLink, operation: {
             do {
                 let link = try await repo.create(assetIds: [serverID])
-                guard let url = link.publicURL(base: session.baseURL) else {
-                    throw APIError.invalidURL
-                }
-                sharedLink = SharedLinkPresentation(url: url)
+                guard let url = link.publicURL(base: baseURL) else { throw APIError.invalidURL }
+                return url
             } catch {
-                vm?.actionError = ErrorEvent(error.localizedDescription)
+                if viewer.isCurrent(target) { vm?.actionError = ErrorEvent(error.localizedDescription) }
+                return nil
             }
-        }
+        }) { url in sharedLink = SharedLinkPresentation(url: url) }
     }
 
     private func uploadLocalAsset() {
-        guard currentAsset.needsUpload else { return }
-        isUploadingLocalAsset = true
-        let id = currentAsset.id
+        let target = currentTarget
+        guard target.asset.needsUpload, viewer.beginUpload(target.asset.id) else { return }
         Task {
-            await BackupService.shared.uploadNow([id])
-            isUploadingLocalAsset = false
+            defer { viewer.finishUpload(target.asset.id) }
+            await BackupService.shared.uploadNow([target.asset.id])
+            refreshUploadedCopies()
         }
     }
 
     private func downloadToDevice() {
-        guard currentAsset.origin == .server,
-              let serverID = currentServerAssetID,
-              let vm,
-              !isDownloadingToDevice
-        else { return }
-
+        let target = currentTarget
+        guard target.asset.origin == .server, let serverID = target.serverID, let vm else { return }
+        let filename = target.detail?.originalFileName ?? (target.asset.isVideo ? "video.mov" : "photo.jpg")
         let accountGeneration = LocalSnapshot.generation
-        isDownloadingToDevice = true
-        let filename = vm.detail?.originalFileName
-            ?? (currentAsset.isVideo ? "video.mov" : "photo.jpg")
-        let isVideo = currentAsset.isVideo
-        Task {
-            defer { isDownloadingToDevice = false }
-            guard let file = await vm.downloadOriginalFile(serverID, filename: filename)
-            else { return }
+        viewer.download(target, operation: {
+            guard let file = await vm.downloadOriginalFile(serverID, filename: filename) else { return false }
             defer { try? FileManager.default.removeItem(at: file) }
-
-            guard let localID = await LocalPhotoLibrary.shared.saveDownloadedFile(
-                file, isVideo: isVideo)
-            else {
-                vm.actionError = ErrorEvent(String(localized: "Could not save to Photos."))
-                return
+            guard let localID = await LocalPhotoLibrary.shared.saveDownloadedFile(file, isVideo: target.asset.isVideo) else {
+                if viewer.isCurrent(target) { vm.actionError = ErrorEvent(String(localized: "Could not save to Photos.")) }
+                return false
             }
-            guard accountGeneration == LocalSnapshot.generation else { return }
-            try? SwiftDataManager.shared.linkDeviceAsset(
-                localIdentifier: localID, to: serverID)
-            updateCurrentOrigin(.both)
-        }
+            guard accountGeneration == LocalSnapshot.generation, !Task.isCancelled else { return false }
+            do {
+                try SwiftDataManager.shared.linkDeviceAsset(localIdentifier: localID, to: serverID)
+                return true
+            } catch {
+                if viewer.isCurrent(target) { vm.actionError = ErrorEvent(error.localizedDescription) }
+                return false
+            }
+        })
     }
 
     private func setAsProfilePhoto() {
-        guard !currentAsset.isVideo, !isSettingProfilePhoto, let vm else { return }
+        let target = currentTarget
+        guard !target.asset.isVideo, !isSettingProfilePhoto, let vm else { return }
         isSettingProfilePhoto = true
         Task {
             defer { isSettingProfilePhoto = false }
-            guard let file = await currentFileURL() else {
-                vm.actionError = ErrorEvent(String(localized: "Could not prepare the profile photo."))
+            guard let file = await fileURL(for: target) else {
+                if viewer.isCurrent(target) { vm.actionError = ErrorEvent(String(localized: "Could not prepare the profile photo.")) }
                 return
             }
             defer { try? FileManager.default.removeItem(at: file) }
+            guard viewer.isCurrent(target) else { return }
             guard let jpeg = await Self.profileJPEG(from: file) else {
-                vm.actionError = ErrorEvent(String(localized: "Could not prepare the profile photo."))
+                if viewer.isCurrent(target) { vm.actionError = ErrorEvent(String(localized: "Could not prepare the profile photo.")) }
                 return
             }
+            guard viewer.isCurrent(target) else { return }
             guard await vm.setProfileImage(jpeg, filename: "profile.jpg") else { return }
             await session.refreshUser()
         }
@@ -1356,42 +1360,52 @@ struct AssetDetailView: View {
         }.value
     }
 
-    private func removeFromDevice() {
+    private func removeFromDevice(_ target: AssetViewerState.Target) {
         guard deviceRemoval == nil else { return }
-        let asset = currentAsset
         let service = FreeUpSpaceService(session: session)
-        deviceRemoval = Task {
-            defer { deviceRemoval = nil }
-            do {
-                try Task.checkCancellation()
-                if asset.origin == .both {
-                    guard try await DeviceCopyDeletion.perform(asset.id, using: service) else { return }
-                    guard !Task.isCancelled, currentAsset.id == asset.id else { return }
-                    // Device-album pages use PhotoKit IDs and leave this list
-                    // when removed. A server page stays with a server-only badge.
-                    if LocalPhotoLibrary.isLocal(asset.id) {
-                        removeCurrentAsset()
-                    } else {
-                        updateCurrentOrigin(.server)
+        let accountGeneration = LocalSnapshot.generation
+        if target.asset.origin == .both, !LocalPhotoLibrary.isLocal(target.asset.id) {
+            deviceRemoval = Task {
+                defer { deviceRemoval = nil }
+                do {
+                    guard try await DeviceCopyDeletion.perform(target.asset.id, using: service),
+                          !Task.isCancelled, accountGeneration == LocalSnapshot.generation else { return }
+                    viewer.setOrigin(.server, for: target.asset.id)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    if accountGeneration == LocalSnapshot.generation, viewer.isCurrent(target) {
+                        vm?.actionError = ErrorEvent(error.localizedDescription)
                     }
-                } else if asset.origin == .device {
-                    guard await LocalPhotoLibrary.shared.delete([asset.id]) else { return }
-                    guard !Task.isCancelled, currentAsset.id == asset.id else { return }
-                    removeCurrentAsset()
                 }
-            } catch is CancellationError {
-                return
-            } catch {
-                guard !Task.isCancelled, currentAsset.id == asset.id else { return }
-                vm?.actionError = ErrorEvent(error.localizedDescription)
             }
-        }
-    }
-
-    private func updateCurrentOrigin(_ origin: AssetOrigin) {
-        currentAsset.origin = origin
-        if pages.indices.contains(currentIndex), pages[currentIndex].id == currentAsset.id {
-            pages[currentIndex] = currentAsset
+        } else {
+            deviceRemoval = viewer.remove(target, operation: {
+                defer { deviceRemoval = nil }
+                do {
+                    try Task.checkCancellation()
+                    let removed: Bool
+                    if target.asset.origin == .both {
+                        removed = try await DeviceCopyDeletion.perform(target.asset.id, using: service)
+                    } else {
+                        removed = await LocalPhotoLibrary.shared.delete([target.asset.id])
+                    }
+                    return removed && !Task.isCancelled && accountGeneration == LocalSnapshot.generation
+                } catch is CancellationError {
+                    return false
+                } catch {
+                    if accountGeneration == LocalSnapshot.generation, viewer.isCurrent(target) {
+                        vm?.actionError = ErrorEvent(error.localizedDescription)
+                    }
+                    return false
+                }
+            }) { isPresented in
+                onAssetRemoved?(target.asset.id)
+                if isPresented {
+                    loadCurrentMetadata()
+                    if viewer.isEmpty { dismiss() }
+                }
+            }
         }
     }
 
@@ -1400,6 +1414,36 @@ struct AssetDetailView: View {
         downloadedFileURL = nil
         sharePreviewImage = nil
     }
+}
+
+private struct PhotoEditorTarget: Identifiable {
+    let target: AssetViewerState.Target
+    let serverID: String
+    let pixelSize: CGSize
+    let edits: [AssetEditRecord]
+    var id: UUID { target.id }
+}
+
+private struct MetadataKey: Equatable {
+    let visit: UUID
+    let assetID: String
+}
+
+private struct FavoriteDisplay: Equatable {
+    let visit: UUID
+    let value: Bool
+}
+
+private struct DetailDisplay: Equatable {
+    let visit: UUID
+    let assetID: String?
+}
+
+private struct LivePhotoDisplay: Equatable {
+    let visit: UUID
+    let assetID: String
+    let videoID: String?
+    let hint: LocalLivePhotoMatchHint?
 }
 
 private struct AssetCardViewport: Equatable {

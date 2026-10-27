@@ -45,6 +45,7 @@ final class PhotoPagerCell: UICollectionViewCell {
     private var isVideo = false
     /// Disimpan supaya tombol putar bisa meminta URL videonya belakangan.
     private weak var loader: PhotoPreviewLoader?
+    private var playbackNotifications = NotificationCenter.default
 
     /// Pemutar dibuat SAAT tombol putar ditekan, bukan saat sel dikonfigurasi.
     ///
@@ -86,6 +87,7 @@ final class PhotoPagerCell: UICollectionViewCell {
     private var livePhotoView: PHLivePhotoView?
     private var liveLoadTask: Task<Void, Never>?
     private var livePhotoDetectionTask: Task<Void, Never>?
+    private var livePhotoHint: LocalLivePhotoMatchHint?
     private var liveEndObserver: NSObjectProtocol?
     private var livePlaybackStatusObserver: NSKeyValueObservation?
     private var livePlaybackKeepUpObserver: NSKeyValueObservation?
@@ -301,6 +303,11 @@ final class PhotoPagerCell: UICollectionViewCell {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) tidak dipakai") }
 
+    convenience init(frame: CGRect, playbackNotifications: NotificationCenter) {
+        self.init(frame: frame)
+        self.playbackNotifications = playbackNotifications
+    }
+
     private weak var doubleTap: UITapGestureRecognizer?
 
     override func prepareForReuse() {
@@ -309,6 +316,7 @@ final class PhotoPagerCell: UICollectionViewCell {
         loadTask = nil
         livePhotoDetectionTask?.cancel()
         livePhotoDetectionTask = nil
+        livePhotoHint = nil
         stopPlayback()
         livePhotoVideoID = nil
         localLivePhotoAssetID = nil
@@ -334,14 +342,15 @@ final class PhotoPagerCell: UICollectionViewCell {
     // MARK: - Isi
 
     func configure(with asset: AssetLite, loader: PhotoPreviewLoader) {
+        loadTask?.cancel()
+        loadTask = nil
         if currentAssetID != nil, currentAssetID != asset.id {
             // Pertahanan tambahan di luar prepareForReuse: UICollectionView dapat
             // mengonfigurasi ulang sel terlihat tanpa reuse saat datanya ditambal.
             // Tidak satu pun konteks Live Photo lama boleh ikut ke aset baru.
-            loadTask?.cancel()
-            loadTask = nil
             livePhotoDetectionTask?.cancel()
             livePhotoDetectionTask = nil
+            livePhotoHint = nil
             stopPlayback()
             livePhotoVideoID = nil
             localLivePhotoAssetID = nil
@@ -373,6 +382,17 @@ final class PhotoPagerCell: UICollectionViewCell {
         localHint: LocalLivePhotoMatchHint?,
         loader: PhotoPreviewLoader
     ) {
+        if livePhotoHint != localHint {
+            livePhotoDetectionTask?.cancel()
+            livePhotoDetectionTask = nil
+            livePhotoHint = localHint
+            let nativeAssetID = currentAssetID.flatMap(loader.localLivePhotoAssetID(for:))
+            if localLivePhotoAssetID != nativeAssetID {
+                isLivePhotoPressed = false
+                stopLivePhoto()
+                localLivePhotoAssetID = nativeAssetID
+            }
+        }
         if livePhotoVideoID != videoID {
             // Video pasangan berubah/nil berarti konteks lama tidak valid lagi.
             // Hentikan sebelum ID diganti agar hasil async lama tidak tampil.
@@ -390,12 +410,12 @@ final class PhotoPagerCell: UICollectionViewCell {
 
         livePhotoDetectionTask = Task { [weak self] in
             let matchedID = await loader.matchingLocalLivePhoto(for: localHint)
-            guard let self else { return }
-            self.livePhotoDetectionTask = nil
-            guard !Task.isCancelled,
+            guard let self, !Task.isCancelled,
                   self.currentAssetID == assetID,
-                  let matchedID
+                  self.livePhotoHint == localHint
             else { return }
+            self.livePhotoDetectionTask = nil
+            guard let matchedID else { return }
             self.localLivePhotoAssetID = matchedID
             self.updateLiveBadgeVisibility(animated: true)
         }
@@ -445,12 +465,10 @@ final class PhotoPagerCell: UICollectionViewCell {
     private func startLoad(_ assetID: String, loader: PhotoPreviewLoader) {
         loadTask = Task { [weak self] in
             let image = await loader.image(for: assetID)
-            guard let self else { return }
-            // Dikosongkan lebih dulu supaya percobaan berikutnya tidak terkunci
-            // oleh task yang sudah selesai.
-            self.loadTask = nil
-            guard !Task.isCancelled, self.currentAssetID == assetID, let image
+            guard let self, !Task.isCancelled, self.currentAssetID == assetID
             else { return }
+            self.loadTask = nil
+            guard let image else { return }
             self.setImage(image)
         }
     }
@@ -757,17 +775,18 @@ final class PhotoPagerCell: UICollectionViewCell {
 
         // Selesai diputar: kembali ke awal dan tombolnya muncul lagi, seperti
         // Photos — bukan berhenti di frame terakhir tanpa jalan keluar.
-        endObserver = NotificationCenter.default.addObserver(
+        endObserver = playbackNotifications.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: player.currentItem,
             queue: .main
-        ) { [weak self] _ in
+        ) { [weak self, weak player] _ in
             MainActor.assumeIsolated {
-                self?.wantsVideoPlayback = false
+                guard let self, let player, self.player === player else { return }
+                self.wantsVideoPlayback = false
                 player.seek(to: .zero)
-                self?.playButton.isHidden = false
-                self?.loadingIndicator.stopAnimating()
-                self?.reportPlayback()
+                self.playButton.isHidden = false
+                self.loadingIndicator.stopAnimating()
+                self.reportPlayback()
             }
         }
 
@@ -821,13 +840,16 @@ final class PhotoPagerCell: UICollectionViewCell {
                 self.reportPlayback()
             }
         }
-        playbackStalledObserver = NotificationCenter.default.addObserver(
+        playbackStalledObserver = playbackNotifications.addObserver(
             forName: .AVPlayerItemPlaybackStalled,
             object: item,
             queue: .main
-        ) { [weak self] _ in
+        ) { [weak self, weak item] _ in
             MainActor.assumeIsolated {
-                guard let self, self.wantsVideoPlayback else { return }
+                guard let self, let item,
+                      self.player?.currentItem === item,
+                      self.wantsVideoPlayback
+                else { return }
                 self.loadingIndicator.startAnimating()
                 // Kalau range berikutnya sudah tiba bersamaan dengan notifikasi,
                 // lanjutkan sekarang; selain itu observer loadedTimeRanges yang
@@ -896,7 +918,7 @@ final class PhotoPagerCell: UICollectionViewCell {
         playbackStatusObserver?.invalidate()
         playbackStatusObserver = nil
         if let playbackStalledObserver {
-            NotificationCenter.default.removeObserver(playbackStalledObserver)
+            playbackNotifications.removeObserver(playbackStalledObserver)
             self.playbackStalledObserver = nil
         }
         loadingIndicator.stopAnimating()
@@ -910,7 +932,7 @@ final class PhotoPagerCell: UICollectionViewCell {
         videoView = nil
         player = nil
         if let endObserver {
-            NotificationCenter.default.removeObserver(endObserver)
+            playbackNotifications.removeObserver(endObserver)
             self.endObserver = nil
         }
         playButton.isHidden = !isVideo
@@ -1070,12 +1092,15 @@ final class PhotoPagerCell: UICollectionViewCell {
 
         // Selesai berputar, kembali ke fotonya walau jari masih menempel —
         // sama seperti Photos, yang tidak mengulang.
-        liveEndObserver = NotificationCenter.default.addObserver(
+        liveEndObserver = playbackNotifications.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: player.currentItem,
             queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.stopLivePhoto() }
+        ) { [weak self, weak player] _ in
+            MainActor.assumeIsolated {
+                guard let self, let player, self.livePlayer === player else { return }
+                self.stopLivePhoto()
+            }
         }
 
         livePlayer = player
@@ -1174,7 +1199,7 @@ final class PhotoPagerCell: UICollectionViewCell {
         liveLayer = nil
         livePlayer = nil
         if let liveEndObserver {
-            NotificationCenter.default.removeObserver(liveEndObserver)
+            playbackNotifications.removeObserver(liveEndObserver)
             self.liveEndObserver = nil
         }
     }

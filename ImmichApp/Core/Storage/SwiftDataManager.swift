@@ -66,6 +66,9 @@ final class SwiftDataManager {
     /// not make a locked or archived device copy appear in Photos.
     private(set) var nonTimelineAssetIDs: Set<String> = []
     private(set) var visibilityMutationRevision = UUID()
+    /// Upload preparation can finish before its background transfer. Viewers
+    /// refresh device/server actions only after a mapping has actually saved.
+    private(set) var backupMappingRevision = UUID()
 
     var isPersistentStoreAvailable: Bool {
         startupState.isPersistentStoreAvailable
@@ -680,6 +683,7 @@ final class SwiftDataManager {
             startupState = .protectionUnavailable(
                 "Backup mapping protection is unavailable: \(error.localizedDescription)")
         }
+        backupMappingRevision = UUID()
     }
 
     private nonisolated static func createDatabaseSnapshot(
@@ -751,6 +755,7 @@ final class SwiftDataManager {
             try? writeBackupRecordJournal(previousMappings)
             throw error
         }
+        backupMappingRevision = UUID()
     }
 
     func getBackupRecord(deviceAssetId: String) -> BackupRecord? {

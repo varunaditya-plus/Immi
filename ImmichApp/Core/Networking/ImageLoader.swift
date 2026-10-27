@@ -80,6 +80,7 @@ actor ImageCache {
     static let shared = ImageCache()
 
     private let diskCacheURL: URL
+    private let stageWrite: @Sendable (Data) async -> URL?
 
     private static let diskLimitDefaultsKey = "imageCache.diskLimitBytes"
     private static let defaultDiskLimit = 512 * 1024 * 1024
@@ -94,7 +95,11 @@ actor ImageCache {
     ///
     /// Sepuluh sel yang meminta gambar yang sama hanya menghasilkan satu
     /// unduhan; sisanya menunggu hasil yang sama.
-    private var inFlight: [String: Task<UIImage, Error>] = [:]
+    private struct ImageRequest {
+        let id: UUID
+        let task: Task<UIImage, Error>
+    }
+    private var inFlight: [String: ImageRequest] = [:]
     /// Dinaikkan saat cache dibersihkan. Prefetch akun lama membawa nomor lama
     /// dan berhenti sebelum dapat memulai permintaan berikutnya.
     private var generation = 0
@@ -134,8 +139,12 @@ actor ImageCache {
         .urls(for: .cachesDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("immich-image-cache")
 
-    init() {
-        diskCacheURL = Self.diskCacheDir
+    init(
+        diskCacheURL: URL = ImageCache.diskCacheDir,
+        stageWrite: @escaping @Sendable (Data) async -> URL? = ImageCache.stageWrite
+    ) {
+        self.diskCacheURL = diskCacheURL
+        self.stageWrite = stageWrite
 
         let stored = UserDefaults.standard.integer(forKey: Self.diskLimitDefaultsKey)
         maxDiskCacheSize = stored > 0 ? stored : Self.defaultDiskLimit
@@ -149,7 +158,7 @@ actor ImageCache {
     /// Membuang satu varian cache setelah server menghasilkan edit baru.
     func remove(key: String, maxPixelSize: Int?) {
         let memoryKey = Self.memoryKey(key, maxPixelSize)
-        inFlight[memoryKey]?.cancel()
+        inFlight[memoryKey]?.task.cancel()
         inFlight[memoryKey] = nil
         ImageMemoryCache.shared.remove(for: memoryKey)
 
@@ -189,19 +198,22 @@ actor ImageCache {
         }
 
         if let running = inFlight[memoryKey] {
-            return try await running.value
+            return try await running.task.value
         }
 
+        let requestID = UUID()
         let task = Task<UIImage, Error> { [weak self] in
             guard let self else { throw CancellationError() }
             return try await self.produce(
                 key: key, memoryKey: memoryKey,
                 maxPixelSize: maxPixelSize, isPrefetch: isPrefetch,
-                expectedGeneration: requestGeneration, fetch: fetch)
+                expectedGeneration: requestGeneration, requestID: requestID, fetch: fetch)
         }
-        inFlight[memoryKey] = task
+        inFlight[memoryKey] = ImageRequest(id: requestID, task: task)
 
-        defer { inFlight[memoryKey] = nil }
+        defer {
+            if inFlight[memoryKey]?.id == requestID { inFlight[memoryKey] = nil }
+        }
         return try await task.value
     }
 
@@ -255,6 +267,7 @@ actor ImageCache {
         maxPixelSize: Int?,
         isPrefetch: Bool,
         expectedGeneration: Int,
+        requestID: UUID,
         fetch: @Sendable () async throws -> Data
     ) async throws -> UIImage {
         let diskPath = diskCacheURL.appendingPathComponent(hashKey(key))
@@ -292,7 +305,8 @@ actor ImageCache {
         try Task.checkCancellation()
         guard expectedGeneration == generation else { throw CancellationError() }
 
-        await store(data, at: diskPath)
+        try await store(data, at: diskPath, memoryKey: memoryKey,
+            requestID: requestID, expectedGeneration: expectedGeneration)
 
         guard let image = await Self.decode(data, maxPixelSize: maxPixelSize) else {
             throw APIError.unknown
@@ -387,26 +401,39 @@ actor ImageCache {
         ImageMemoryCache.shared.insert(image, for: memoryKey)
     }
 
-    /// Penulisan disk tetap berjalan di luar actor, tetapi penyelesaiannya
-    /// ditunggu sebelum ukuran dibukukan. Dengan begitu scan/eviction tidak bisa
-    /// menyatakan cache aman ketika atomic write-nya sebenarnya belum muncul.
-    private func store(_ data: Data, at path: URL) async {
-        // Pembukuan baru dilakukan SETELAH atomic write selesai. Sebelumnya
-        // eviction dapat memindai saat file belum muncul, lalu hasil scan lama
-        // menimpa angka pemakaian meskipun banyak write sudah menyusul.
-        let sizes: (old: Int, new: Int)? = await Task.detached(priority: .background) {
-            let oldSize = (try? path.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+    nonisolated private static func stageWrite(_ data: Data) async -> URL? {
+        await Task.detached(priority: .background) {
+            let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
             do {
-                try data.write(to: path, options: .atomic)
-                let newSize = (try? path.resourceValues(forKeys: [.fileSizeKey]).fileSize)
-                    ?? data.count
-                return (oldSize, newSize)
+                try data.write(to: temporary)
+                return temporary
             } catch {
+                try? FileManager.default.removeItem(at: temporary)
                 return nil
             }
         }.value
+    }
 
-        guard let sizes else { return }
+    /// Byte besar disiapkan di luar actor. Commit tidak boleh melewati remove()
+    /// dan menghidupkan lagi preview lama setelah aset diedit.
+    private func store(
+        _ data: Data, at path: URL, memoryKey: String,
+        requestID: UUID, expectedGeneration: Int
+    ) async throws {
+        guard let temporary = await stageWrite(data) else { return }
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        try Task.checkCancellation()
+        guard expectedGeneration == generation, inFlight[memoryKey]?.id == requestID
+        else { throw CancellationError() }
+
+        let oldSize = (try? path.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        do {
+            if FileManager.default.fileExists(atPath: path.path) {
+                _ = try FileManager.default.replaceItemAt(path, withItemAt: temporary)
+            } else {
+                try FileManager.default.moveItem(at: temporary, to: path)
+            }
+        } catch { return }
         diskMutationGeneration &+= 1
 
         guard let usage = runningDiskUsage else {
@@ -417,7 +444,7 @@ actor ImageCache {
             return
         }
 
-        let updatedUsage = max(0, usage - sizes.old + sizes.new)
+        let updatedUsage = max(0, usage - oldSize + data.count)
         runningDiskUsage = updatedUsage
         if updatedUsage > maxDiskCacheSize { startEviction() }
     }
@@ -515,7 +542,7 @@ actor ImageCache {
         generation &+= 1
         // Permintaan akun lama tidak boleh mengisi cache kembali beberapa saat
         // setelah direktori logout dibersihkan.
-        let pending = Array(inFlight.values)
+        let pending = inFlight.values.map(\.task)
         pending.forEach { $0.cancel() }
         // Finish detached disk writes before replacing the account's cache directory.
         for task in pending { _ = try? await task.value }

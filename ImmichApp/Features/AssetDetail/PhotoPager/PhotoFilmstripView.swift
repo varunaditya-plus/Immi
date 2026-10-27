@@ -368,6 +368,8 @@ final class PhotoFilmstripCell: UICollectionViewCell {
     }
 
     func configure(with asset: AssetLite, loader: PhotoThumbnailLoader) {
+        loadTask?.cancel()
+        loadTask = nil
         currentAssetID = asset.id
 
         if let cached = loader.cachedImage(for: asset.id) {
@@ -379,8 +381,10 @@ final class PhotoFilmstripCell: UICollectionViewCell {
         loadTask = Task { [weak self] in
             let image = await loader.image(for: asset.id)
             guard let self, !Task.isCancelled,
-                  self.currentAssetID == asset.id, let image
+                  self.currentAssetID == asset.id
             else { return }
+            self.loadTask = nil
+            guard let image else { return }
             self.imageView.image = image
         }
     }
