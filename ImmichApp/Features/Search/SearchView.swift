@@ -185,11 +185,42 @@ struct SearchView: View {
                         selectedIDs: $selectedIDs,
                         actions: assetActions,
                         onReachEnd: { Task { await vm.loadMore() } })
+                        .safeAreaInset(edge: .bottom, spacing: 0) {
+                            paginationFooter(vm)
+                        }
                 }
 
             case .failed(let error):
                 errorState(error, vm)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func paginationFooter(_ vm: SearchViewModel) -> some View {
+        if vm.nextPage != nil {
+            VStack(spacing: 6) {
+                if vm.isLoadingMore {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                        Text("Loading More…")
+                            .font(.footnote)
+                    }
+                } else if let error = vm.paginationError {
+                    Text(error)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                    Button("Retry") { Task { await vm.retryLoadMore() } }
+                } else {
+                    Button("Load More") { Task { await vm.loadMore() } }
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.bar)
         }
     }
 
@@ -270,7 +301,8 @@ struct SearchView: View {
     }
 
     private var hasResults: Bool {
-        !(vm?.results.isEmpty ?? true)
+        guard let vm, case .loaded = vm.phase else { return false }
+        return !vm.results.isEmpty
     }
 
     /// Judul besar dengan subjudul opsional, sama seperti Photos.
@@ -294,7 +326,11 @@ struct SearchView: View {
     }
 
     private var resultSubtitle: String? {
-        guard let vm, vm.hasCriteria, vm.totalResults > 0 else { return nil }
+        guard let vm, case .loaded = vm.phase,
+              vm.hasCriteria, vm.totalResults > 0 else { return nil }
+        if vm.nextPage != nil {
+            return String(localized: "\(vm.totalResults)+ Results")
+        }
         return vm.totalResults == 1
             ? String(localized: "1 Result")
             : String(localized: "\(vm.totalResults) Results")
