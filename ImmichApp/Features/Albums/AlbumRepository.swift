@@ -36,6 +36,39 @@ class AlbumRepository {
         try await api.send(.init(path: "/albums/\(id)"))
     }
 
+    /// Album responses no longer embed assets in Immich v3. Covers and widgets
+    /// only need a few recent IDs, so let the server order and limit them.
+    func recentAssetIDs(
+        in albumID: String, limit: Int, includeArchived: Bool = true
+    ) async throws -> [String] {
+        var request = SearchRequestDTO(
+            page: 1, albumIds: [albumID], order: "desc", size: limit,
+            visibility: includeArchived ? nil : "timeline", withExif: false)
+        var ids: [String] = []
+        var seenIDs: Set<String> = []
+        var page = 1
+        while ids.count < limit {
+            try Task.checkCancellation()
+            request.page = page
+            let response: SearchResponseDTO = try await api.send(
+                .json("/search/metadata", method: .post, body: request))
+            try Task.checkCancellation()
+            let previousCount = seenIDs.count
+            for item in response.assets.items where seenIDs.insert(item.id).inserted {
+                guard includeArchived ? item.isVisibleInAlbum : item.isTimelineVisible else { continue }
+                ids.append(item.id)
+                if ids.count == limit { return ids }
+            }
+            guard let nextPage = response.assets.nextPage else { return ids }
+            guard seenIDs.count > previousCount,
+                  let next = Int(nextPage), next > page else {
+                throw URLError(.badServerResponse)
+            }
+            page = next
+        }
+        return ids
+    }
+
     /// Deskripsi ikut di permintaan yang SAMA, bukan lewat PATCH menyusul.
     ///
     /// `POST /albums` sudah menerimanya; mengirimnya terpisah berarti album bisa

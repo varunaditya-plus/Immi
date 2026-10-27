@@ -39,6 +39,10 @@ struct AssetResponseDTO: Codable, Identifiable {
         !isArchived && !isTrashed && (visibility == nil || visibility == "timeline")
     }
 
+    var isVisibleInAlbum: Bool {
+        !isTrashed && (visibility == nil || visibility == "timeline" || visibility == "archive")
+    }
+
     var isVideo: Bool { type == "VIDEO" }
     var isLivePhoto: Bool { livePhotoVideoId != nil }
 

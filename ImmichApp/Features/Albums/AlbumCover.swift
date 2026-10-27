@@ -23,17 +23,19 @@ import SwiftUI
 final class AlbumCoverStore {
     static let shared = AlbumCoverStore()
 
-    /// Hasil yang sudah pernah diselesaikan.
-    ///
-    /// Nilainya sengaja `String?` DI DALAM kamus: nil berarti "sudah dicoba dan
-    /// albumnya memang tidak punya apa-apa", yang berbeda dari "belum pernah
-    /// dicoba" (kuncinya tidak ada). Tanpa pembedaan itu album kosong akan
-    /// diminta ulang setiap kali kartunya lewat di layar.
-    ///
-    /// Ini SATU-SATUNYA properti yang diamati: begitu satu kartu berhasil
-    /// menyelesaikan sampulnya, semua kartu album yang sama di layar lain —
-    /// baris Library, grid Albums, sheet pemilih — ikut tergambar ulang.
-    private var resolved: [String: String?] = [:]
+    private struct Resolution {
+        let assetCount: Int
+        let assetID: String?
+    }
+
+    private struct Request {
+        let assetCount: Int
+        let task: Task<Result<String?, Error>, Never>
+    }
+
+    /// A nil asset ID caches an empty result only for this album count.
+    /// Count changes must resolve again, including an empty album gaining photos.
+    private var resolved: [String: Resolution] = [:]
 
     /// Permintaan yang sedang berjalan, supaya beberapa kartu album yang sama
     /// tidak menembak endpoint yang sama berbarengan.
@@ -42,7 +44,7 @@ final class AlbumCoverStore {
     /// setiap kartu tergambar ulang dua kali percuma (saat permintaan dicatat
     /// dan saat dihapus).
     @ObservationIgnored
-    private var inFlight: [String: Task<Result<String?, Error>, Never>] = [:]
+    private var inFlight: [String: Request] = [:]
 
     /// Penanda "angkatan" data.
     ///
@@ -53,64 +55,60 @@ final class AlbumCoverStore {
     @ObservationIgnored
     private var generation = 0
 
-    private init() {}
+    init() {}
 
     /// Sampul yang berlaku sekarang — dari server kalau ada, kalau tidak hasil
     /// yang sudah diselesaikan. Sinkron, karena inilah yang dibaca `body`.
     func coverID(for album: AlbumResponseDTO) -> String? {
         if let id = album.albumThumbnailAssetId { return id }
-        // Subscript kamus bernilai opsional mengembalikan `String??`; `?? nil`
-        // meratakannya jadi satu lapis.
-        return resolved[album.id] ?? nil
+        guard let cached = resolved[album.id], cached.assetCount == album.assetCount else { return nil }
+        return cached.assetID
     }
 
     func resolveCover(for album: AlbumResponseDTO, session: SessionManager) async {
+        await resolveCover(for: album, repository: AlbumRepository(api: APIClient(session: session)))
+    }
+
+    func resolveCover(for album: AlbumResponseDTO, repository: AlbumRepository) async {
         // Server sudah menyebutkan sampulnya; tidak ada yang perlu dicari.
         guard album.albumThumbnailAssetId == nil else { return }
-        // `keys.contains`, bukan `resolved[id] == nil`: nilai kamusnya sendiri
-        // opsional, jadi perbandingan dengan nil tidak bisa membedakan "sudah
-        // dicoba, hasilnya kosong" dari "belum pernah dicoba".
-        guard !resolved.keys.contains(album.id) else { return }
+        guard resolved[album.id]?.assetCount != album.assetCount else { return }
 
         // Kartu lain sudah menanyakannya. Cukup tunggu; hasilnya ditulis oleh
         // pemanggil pertama dan view ini tergambar ulang karena `resolved`
         // diamati.
         if let running = inFlight[album.id] {
-            _ = await running.value
-            return
+            if running.assetCount == album.assetCount {
+                _ = await running.task.value
+                return
+            }
+            inFlight.removeValue(forKey: album.id)?.task.cancel()
         }
 
         // Album kosong tidak punya apa pun untuk dijadikan sampul; tidak ada
         // gunanya menanyakannya ke server.
         guard album.assetCount > 0 else {
-            remember(nil, for: album.id)
+            remember(nil, for: album)
             return
         }
 
         let albumID = album.id
         let expectedGeneration = generation
         let task = Task<Result<String?, Error>, Never> {
-            let repo = AlbumRepository(api: APIClient(session: session))
             do {
-                let detail = try await repo.detail(albumID)
-                // Yang TERBARU, bukan `assets.first`: urutan yang dikirim server
-                // mengikuti setelan `order` milik album, jadi elemen pertama bisa
-                // yang tertua atau yang termuda tergantung albumnya. Memilih
-                // lewat tanggal membuat sampulnya sama di mana pun.
-                return .success(
-                    detail.assets?.max(by: { $0.fileCreatedAt < $1.fileCreatedAt })?.id)
+                return .success(try await repository.recentAssetIDs(in: albumID, limit: 1).first)
             } catch {
                 return .failure(error)
             }
         }
-        inFlight[albumID] = task
+        inFlight[albumID] = Request(assetCount: album.assetCount, task: task)
         let outcome = await task.value
 
         // Sudah ganti akun selagi permintaan ini berjalan — hasilnya milik data
         // yang sudah dibuang, termasuk `inFlight` yang mungkin sudah diisi
         // permintaan baru untuk album lain.
         guard expectedGeneration == generation,
-              inFlight[albumID] == task
+              inFlight[albumID]?.task == task
         else { return }
         inFlight[albumID] = nil
 
@@ -118,7 +116,7 @@ final class AlbumCoverStore {
         // meleset membuat album itu memakai kotak abu-abu sampai aplikasi
         // ditutup — padahal sampulnya ada, cuma gagal diambil sekali.
         guard case .success(let id) = outcome else { return }
-        remember(id, for: albumID)
+        remember(id, for: album)
     }
 
     /// Dipanggil saat logout: id album milik akun lama tidak boleh menempel di
@@ -126,7 +124,7 @@ final class AlbumCoverStore {
     func clear() {
         generation &+= 1
         resolved.removeAll()
-        inFlight.values.forEach { $0.cancel() }
+        inFlight.values.forEach { $0.task.cancel() }
         inFlight.removeAll()
     }
 
@@ -134,14 +132,11 @@ final class AlbumCoverStore {
     /// khususnya ketika aset yang menjadi cover baru saja dihapus.
     func invalidate(_ albumID: String) {
         resolved.removeValue(forKey: albumID)
-        inFlight.removeValue(forKey: albumID)?.cancel()
+        inFlight.removeValue(forKey: albumID)?.task.cancel()
     }
 
-    /// `resolved[id] = nil` akan MENGHAPUS kuncinya, bukan menyimpan nil —
-    /// jebakan lama Swift untuk kamus bernilai opsional. `updateValue` menyimpan
-    /// nilainya apa adanya.
-    private func remember(_ assetID: String?, for albumID: String) {
-        resolved.updateValue(assetID, forKey: albumID)
+    private func remember(_ assetID: String?, for album: AlbumResponseDTO) {
+        resolved[album.id] = Resolution(assetCount: album.assetCount, assetID: assetID)
     }
 }
 

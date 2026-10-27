@@ -46,7 +46,7 @@ class TimelineRepository {
         let pageSize = 1_000
         var page = 1
         var response = try await albumPage(albumId, page: page, size: pageSize)
-        var assets = response.assets.items.map(AssetLite.init)
+        var assets = response.assets.items.filter(\.isVisibleInAlbum).map(AssetLite.init)
         var seenIDs = Set(assets.map(\.id))
 
         // `nextPage` adalah continuation resmi dan tidak boleh diturunkan dari
@@ -69,7 +69,7 @@ class TimelineRepository {
             // Perubahan album saat pagination berjalan dapat membuat batas dua
             // halaman tumpang tindih. Deduplikasi menjaga grid dan count tetap
             // konsisten tanpa membuang item baru pada halaman berikutnya.
-            for item in response.assets.items {
+            for item in response.assets.items where item.isVisibleInAlbum {
                 let asset = AssetLite(item)
                 if seenIDs.insert(asset.id).inserted {
                     assets.append(asset)
@@ -86,6 +86,7 @@ class TimelineRepository {
     private func albumPage(_ albumId: String, page: Int, size: Int) async throws -> SearchResponseDTO {
         var request = SearchRequestDTO(page: page)
         request.albumIds = [albumId]
+        request.visibility = nil
         request.order = "desc"
         request.size = size
         request.withExif = true

@@ -82,18 +82,12 @@ enum WidgetSnapshotExporter {
         } ?? []
 
         let albumRepo = AlbumRepository(api: api)
-        var albumAssetIDs: [String: [String]] = [:]
-        for id in selectedAlbumIDs where id != favoritesID {
-            guard let detail = try? await albumRepo.detail(id) else { continue }
-            guard expectedRevision == visibilityRevision,
-              (try? api.checkCurrent(context)) != nil else { return }
-            albumAssetIDs[id] = Array(
-                (detail.assets ?? [])
-                    .filter { $0.isTimelineVisible && !dataManager.nonTimelineAssetIDs.contains($0.id) }
-                    .sorted { $0.fileCreatedAt > $1.fileCreatedAt }
-                    .prefix(Self.photosPerAlbum)
-                    .map(\.id))
-        }
+        let albumAssetIDs = await albumAssetIDs(
+            for: selectedAlbumIDs, repository: albumRepo,
+            isCurrent: {
+                expectedRevision == visibilityRevision && (try? api.checkCurrent(context)) != nil
+            })
+            .mapValues { $0.filter { !dataManager.nonTimelineAssetIDs.contains($0) } }
 
         guard expectedRevision == visibilityRevision,
               (try? api.checkCurrent(context)) != nil else { return }
@@ -112,6 +106,21 @@ enum WidgetSnapshotExporter {
             container: container,
             expectedRevision: expectedRevision,
             isCurrentAccount: { (try? api.checkCurrent(context)) != nil })
+    }
+
+    static func albumAssetIDs(
+        for selectedIDs: Set<String>, repository: AlbumRepository,
+        isCurrent: () -> Bool = { true }
+    ) async -> [String: [String]] {
+        var ids: [String: [String]] = [:]
+        for albumID in selectedIDs where albumID != favoritesID {
+            guard isCurrent(), !Task.isCancelled else { return [:] }
+            guard let recent = try? await repository.recentAssetIDs(
+                in: albumID, limit: photosPerAlbum, includeArchived: false) else { continue }
+            guard isCurrent(), !Task.isCancelled else { return [:] }
+            ids[albumID] = recent
+        }
+        return ids
     }
 
     private static func refresh(

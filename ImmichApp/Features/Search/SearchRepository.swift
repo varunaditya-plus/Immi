@@ -30,7 +30,9 @@ class SearchRepository {
         var page = request.page ?? 1
         request.page = page
 
+        try Task.checkCancellation()
         var response = try await metadataSearch(request)
+        try Task.checkCancellation()
         var items = response.assets.items
         var seenIDs = Set(items.map(\.id))
         var knownTotal = response.assets.total
@@ -38,7 +40,9 @@ class SearchRepository {
         while response.assets.nextPage != nil || items.count < knownTotal {
             page += 1
             request.page = page
+            try Task.checkCancellation()
             response = try await metadataSearch(request)
+            try Task.checkCancellation()
             knownTotal = max(knownTotal, response.assets.total)
 
             let countBeforePage = items.count
@@ -46,11 +50,14 @@ class SearchRepository {
                 items.append(item)
             }
 
-            // Server rusak yang mengulang halaman sama tidak boleh membuat loop
-            // tanpa akhir. Halaman kosong juga menandai akhir yang nyata.
-            if response.assets.items.isEmpty || items.count == countBeforePage { break }
+            // A continuation that makes no progress must not turn a truncated
+            // collection into a successful result or overwrite its snapshot.
+            guard !response.assets.items.isEmpty, items.count > countBeforePage else {
+                throw URLError(.badServerResponse)
+            }
         }
 
+        try Task.checkCancellation()
         return items
     }
 

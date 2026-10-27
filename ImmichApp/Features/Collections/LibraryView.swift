@@ -472,7 +472,7 @@ struct LibraryView: View {
 
     @ViewBuilder
     private var albumsSection: some View {
-        let albums = vm?.albums ?? []
+        let albums = vm?.recentAlbums ?? []
         CollectionSection(
             title: "Albums",
             isExpanded: expansion(for: .albums, hasContent: !albums.isEmpty),

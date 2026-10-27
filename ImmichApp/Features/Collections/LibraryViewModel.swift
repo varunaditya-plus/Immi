@@ -8,6 +8,7 @@ final class LibraryViewModel {
 
     var memories: [MemoryStory] = []
     var albums: [AlbumResponseDTO] = []
+    var recentAlbums: [AlbumResponseDTO] { Array(albums.prefix(Self.rowLimit)) }
     // AssetLite equality compares IDs; this storage also publishes metadata changes.
     private struct FavoriteStorage { var assets: [AssetLite] = [] }
     private var favoriteStorage = FavoriteStorage()
@@ -357,14 +358,13 @@ final class LibraryViewModel {
         return MemoryStory.build(from: memories, limit: Self.rowLimit)
     }
 
-    /// `/albums` tidak punya parameter batas, jadi pemotongannya di klien —
-    /// tapi urutannya ditentukan di sini: yang paling baru disentuh lebih dulu.
+    /// Keep every album for the picker and offline snapshot. The Library row
+    /// uses `recentAlbums` to show only the most recently updated albums.
     private func fetchAlbums() async -> [AlbumResponseDTO]? {
         guard let all = try? await albumRepo.all() else { return nil }
-        let sorted = all.sorted { lhs, rhs in
+        return all.sorted { lhs, rhs in
             (lhs.updatedAt ?? lhs.createdAt) > (rhs.updatedAt ?? rhs.createdAt)
         }
-        return Array(sorted.prefix(Self.rowLimit))
     }
 
     private func fetchPeople() async -> [PersonDTO]? {

@@ -13,13 +13,32 @@ class PeopleRepository {
     func all(size: Int? = nil) async throws -> [PersonDTO] {
         struct Response: Decodable {
             let people: [PersonDTO]
+            let hasNextPage: Bool?
         }
-        var query: [URLQueryItem] = [.init(name: "withHidden", value: "false")]
-        if let size { query.append(.init(name: "size", value: String(size))) }
+        let pageSize = size ?? 500
+        var page = 1
+        var people: [PersonDTO] = []
+        var seenIDs: Set<String> = []
+        while true {
+            try Task.checkCancellation()
+            let query: [URLQueryItem] = [
+                .init(name: "withHidden", value: "false"),
+                .init(name: "size", value: String(pageSize)),
+                .init(name: "page", value: String(page)),
+            ]
+            let response: Response = try await api.send(.init(path: "/people", query: query))
+            try Task.checkCancellation()
+            if size != nil { return response.people }
 
-        let response: Response = try await api.send(
-            .init(path: "/people", query: query))
-        return response.people
+            let previousCount = people.count
+            for person in response.people where seenIDs.insert(person.id).inserted {
+                people.append(person)
+            }
+            let hasNextPage = response.hasNextPage ?? (response.people.count == pageSize)
+            guard hasNextPage else { return people }
+            guard people.count > previousCount else { throw URLError(.badServerResponse) }
+            page += 1
+        }
     }
 
     /// GET /people/{id} hanya mengembalikan data orangnya; asetnya
@@ -28,11 +47,12 @@ class PeopleRepository {
         try await api.send(.init(path: "/people/\(id)"))
     }
 
-    func assets(personId: String, page: Int = 1) async throws -> SearchResponseDTO {
-        var request = SearchRequestDTO(page: page)
+    func assets(personId: String) async throws -> [AssetResponseDTO] {
+        var request = SearchRequestDTO(page: 1)
         request.personIds = [personId]
         request.size = 100
-        return try await api.send(.json("/search/metadata", method: .post, body: request))
+        request.order = "desc"
+        return try await SearchRepository(api: api).allMetadata(request)
     }
 
     func rename(_ id: String, to name: String) async throws {

@@ -327,8 +327,7 @@ struct PersonDetailView: View {
                 loader: {
                     // /people/{id} tidak lagi menyertakan aset; isinya diambil
                     // lewat search metadata.
-                    let result = try await repo.assets(personId: personId)
-                    return result.assets.items.map(AssetLite.init)
+                    try await repo.assets(personId: personId).map(AssetLite.init)
                 })
         }
         await vm?.load()

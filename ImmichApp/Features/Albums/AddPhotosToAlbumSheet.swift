@@ -2,9 +2,7 @@ import SwiftUI
 
 /// Pemilih foto untuk ditambahkan ke album.
 ///
-/// Sumbernya `/search/metadata` tanpa filter — endpoint itu sudah
-/// mengembalikan aset terbaru lebih dulu, jadi tidak perlu menarik seluruh
-/// bucket timeline hanya untuk menampilkan beberapa layar foto.
+/// Loads every metadata page before excluding photos already in the album.
 struct AddPhotosToAlbumSheet: View {
     /// Foto yang sudah ada di album; disembunyikan supaya tidak bisa
     /// ditambahkan dua kali.
@@ -13,9 +11,10 @@ struct AddPhotosToAlbumSheet: View {
 
     @Environment(SessionManager.self) private var session
     @Environment(\.dismiss) private var dismiss
-    @State private var assets: [AssetLite] = []
+    @State private var vm: AlbumPhotoPickerViewModel?
     @State private var selectedIDs: Set<String> = []
-    @State private var isLoading = true
+
+    private var assets: [AssetLite] { vm?.assets ?? [] }
 
     private let columns = Array(
         repeating: GridItem(.flexible(), spacing: 2),
@@ -44,14 +43,26 @@ struct AddPhotosToAlbumSheet: View {
 
     @ViewBuilder
     private var content: some View {
-        if isLoading {
+        switch vm?.phase ?? .loading {
+        case .idle, .loading:
             ProgressView()
-        } else if assets.isEmpty {
-            ContentUnavailableView(
-                "No Photos to Add",
-                systemImage: "photo.on.rectangle.angled")
-        } else {
-            grid
+        case .failed(let message):
+            ContentUnavailableView {
+                Label("Failed to Load", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(message)
+            } actions: {
+                Button("Retry") { Task { await vm?.load() } }
+                    .buttonStyle(.borderedProminent)
+            }
+        case .loaded:
+            if assets.isEmpty {
+                ContentUnavailableView(
+                    "No Photos to Add",
+                    systemImage: "photo.on.rectangle.angled")
+            } else {
+                grid
+            }
         }
     }
 
@@ -102,11 +113,11 @@ struct AddPhotosToAlbumSheet: View {
     }
 
     private func load() async {
-        guard assets.isEmpty else { return }
-        let repo = SearchRepository(api: APIClient(session: session))
-        let response = try? await repo.metadataSearch(SearchRequestDTO(size: 200))
-        let items = response?.assets.items.map(AssetLite.init) ?? []
-        assets = items.filter { !existingIDs.contains($0.id) }
-        isLoading = false
+        if vm == nil {
+            vm = AlbumPhotoPickerViewModel(
+                repo: SearchRepository(api: APIClient(session: session)),
+                existingIDs: existingIDs)
+        }
+        await vm?.load()
     }
 }
