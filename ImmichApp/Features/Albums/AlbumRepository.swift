@@ -12,9 +12,13 @@ struct AlbumMutationError: LocalizedError {
 
 class AlbumRepository {
     private let api: APIClient
+    private let dataManager: SwiftDataManager?
+    private let recordsVisibility: Bool
 
-    init(api: APIClient) {
+    init(api: APIClient, dataManager: SwiftDataManager? = nil, recordsVisibility: Bool = true) {
         self.api = api
+        self.dataManager = dataManager
+        self.recordsVisibility = recordsVisibility
     }
 
     func all() async throws -> [AlbumResponseDTO] {
@@ -41,6 +45,7 @@ class AlbumRepository {
     func recentAssetIDs(
         in albumID: String, limit: Int, includeArchived: Bool = true
     ) async throws -> [String] {
+        let visibility = recordsVisibility ? await AssetVisibilityRequest(api: api, dataManager: dataManager) : nil
         var request = SearchRequestDTO(
             page: 1, albumIds: [albumID], order: "desc", size: limit,
             visibility: includeArchived ? nil : "timeline", withExif: false)
@@ -53,6 +58,7 @@ class AlbumRepository {
             let response: SearchResponseDTO = try await api.send(
                 .json("/search/metadata", method: .post, body: request))
             try Task.checkCancellation()
+            await visibility?.record(response.assets.items)
             let previousCount = seenIDs.count
             for item in response.assets.items where seenIDs.insert(item.id).inserted {
                 guard includeArchived ? item.isVisibleInAlbum : item.isTimelineVisible else { continue }

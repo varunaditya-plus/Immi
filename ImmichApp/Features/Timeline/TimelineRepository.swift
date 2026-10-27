@@ -28,9 +28,11 @@ struct TimelineSection: Identifiable, Sendable {
 
 class TimelineRepository {
     private let api: APIClient
+    private let dataManager: SwiftDataManager?
 
-    init(api: APIClient) {
+    init(api: APIClient, dataManager: SwiftDataManager? = nil) {
         self.api = api
+        self.dataManager = dataManager
     }
 
     /// Mengambil seluruh isi album lewat endpoint publik stabil.
@@ -43,9 +45,10 @@ class TimelineRepository {
         _ albumId: String,
         expectedCount: Int? = nil
     ) async throws -> [AssetLite] {
+        let visibility = await AssetVisibilityRequest(api: api, dataManager: dataManager)
         let pageSize = 1_000
         var page = 1
-        var response = try await albumPage(albumId, page: page, size: pageSize)
+        var response = try await albumPage(albumId, page: page, size: pageSize, visibility: visibility)
         var assets = response.assets.items.filter(\.isVisibleInAlbum).map(AssetLite.init)
         var seenIDs = Set(assets.map(\.id))
 
@@ -61,7 +64,7 @@ class TimelineRepository {
         var pageCountFallback = max(1, (knownTotal + pageSize - 1) / pageSize)
         while response.assets.nextPage != nil || page < pageCountFallback {
             page += 1
-            response = try await albumPage(albumId, page: page, size: pageSize)
+            response = try await albumPage(albumId, page: page, size: pageSize, visibility: visibility)
             pageCountFallback = max(
                 pageCountFallback,
                 (response.assets.total + pageSize - 1) / pageSize)
@@ -83,13 +86,16 @@ class TimelineRepository {
         return assets
     }
 
-    private func albumPage(_ albumId: String, page: Int, size: Int) async throws -> SearchResponseDTO {
+    private func albumPage(_ albumId: String, page: Int, size: Int,
+                           visibility: AssetVisibilityRequest) async throws -> SearchResponseDTO {
         var request = SearchRequestDTO(page: page)
         request.albumIds = [albumId]
         request.visibility = nil
         request.order = "desc"
         request.size = size
         request.withExif = true
-        return try await api.send(.json("/search/metadata", method: .post, body: request))
+        let response: SearchResponseDTO = try await api.send(.json("/search/metadata", method: .post, body: request))
+        await visibility.record(response.assets.items)
+        return response
     }
 }

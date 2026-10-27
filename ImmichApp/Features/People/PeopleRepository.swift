@@ -52,7 +52,7 @@ class PeopleRepository {
         request.personIds = [personId]
         request.size = 100
         request.order = "desc"
-        return try await SearchRepository(api: api).allMetadata(request)
+        return try await SearchRepository(api: api).allMetadata(request).filter(\.isTimelineVisible)
     }
 
     func rename(_ id: String, to name: String) async throws {

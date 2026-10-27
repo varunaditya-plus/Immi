@@ -58,7 +58,10 @@ class AssetDetailRepository {
     }
 
     func fetchAsset(_ id: String) async throws -> AssetResponseDTO {
-        try await api.send(.init(path: "/assets/\(id)"))
+        let visibility = await AssetVisibilityRequest(api: api, dataManager: dataManager)
+        let asset: AssetResponseDTO = try await api.send(.init(path: "/assets/\(id)"))
+        await visibility.record([asset])
+        return asset
     }
 
     func toggleFavorite(_ id: String, to value: Bool) async throws {

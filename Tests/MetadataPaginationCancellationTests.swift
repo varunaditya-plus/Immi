@@ -64,7 +64,7 @@ private final class HeldMetadataPageRepository: SearchRepository {
         super.init(api: makeStubAPIClient())
     }
 
-    override func metadataSearch(_ request: SearchRequestDTO) async throws -> SearchResponseDTO {
+    override func metadataPage(_ request: SearchRequestDTO) async throws -> SearchResponseDTO {
         let page = request.page ?? 1
         pages.append(page)
         if shouldHold, page == heldPage {
