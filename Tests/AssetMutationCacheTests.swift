@@ -119,12 +119,14 @@ final class AssetMutationCacheTests: XCTestCase {
 
     func testAcceptedDateUpdatesOfflineOrderAndMonthWhenDetailRefreshFails() async throws {
         let changedDate = oldDate.addingTimeInterval(100 * 86_400)
+        var methods: [String] = []
         MockURLProtocol.responseProvider = { request in
+            methods.append(request.httpMethod ?? "")
             let status = request.httpMethod == "PUT" ? 204 : 503
             return (Data(), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil), nil)
         }
         let model = AssetDetailViewModel(repo: repository)
-        model.detail = detail(ids[0])
+        model.selectAsset(ids[0])
 
         let accepted = await model.updateDate(ids[0], to: changedDate)
 
@@ -138,6 +140,7 @@ final class AssetMutationCacheTests: XCTestCase {
         XCTAssertEqual(try exif(cached)["dateTimeOriginal"] as? String,
             ISO8601DateFormatter.immichFractional.string(from: changedDate))
         XCTAssertNil(snapshot(ids[0]), "A failed refresh must not retain the pre-edit detail snapshot")
+        XCTAssertEqual(methods, ["PUT", "GET"], "The active viewer must attempt its post-save detail refresh")
         if case .failed = model.phase { } else { XCTFail("The refresh failure should remain represented separately") }
     }
 
@@ -216,8 +219,11 @@ final class AssetMutationCacheTests: XCTestCase {
         model.detail = detail(ids[0])
         let moved = await model.move(ids[0], to: .archive)
         XCTAssertTrue(moved)
-        XCTAssertFalse(reopen().timelineAssets().contains { $0.asset.id == ids[0] })
-        XCTAssertEqual(snapshot(ids[0])?.isArchived, true)
+        let afterMove = reopen()
+        XCTAssertFalse(afterMove.timelineAssets().contains { $0.asset.id == ids[0] })
+        XCTAssertEqual(afterMove.getCachedAsset(id: ids[0])?.isArchived, true)
+        XCTAssertTrue(afterMove.nonTimelineAssetIDs.contains(ids[0]))
+        XCTAssertNil(snapshot(ids[0]), "Moving out of the viewer invalidates its captured detail snapshot")
 
         let deleted = await model.delete(ids[1])
         XCTAssertTrue(deleted)

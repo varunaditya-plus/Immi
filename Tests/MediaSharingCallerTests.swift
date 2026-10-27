@@ -112,6 +112,23 @@ final class MediaSharingCallerTests: XCTestCase {
         }
     }
 
+    func testEverySingleSharingScreenRejectsMediaAfterTheAccountChanges() async throws {
+        for screen in SingleScreen.allCases {
+            let fixture = try fixture()
+            let share = singleShare(screen, repository: fixture.repository, api: fixture.api)
+            fixture.api.onDownload = { _ in LocalSnapshot.clearAll() }
+
+            let file = await share(AssetLite(makeTestAsset(id: "video", type: "VIDEO")))
+            if let file { preparedURLs.append(file) }
+
+            XCTAssertNil(file, "Screen: \(screen)")
+            XCTAssertEqual(fixture.api.requests.map(\.path), ["/assets/video/original"])
+            XCTAssertEqual(fixture.api.sources.count, 1, "The response must contain an actual downloaded file")
+            XCTAssertTrue(fixture.api.sources.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) })
+            XCTAssertTrue(fixture.api.dataRequests.isEmpty)
+        }
+    }
+
     private func assertFiles(_ urls: [URL], ids: [String], fixture: SharingFixture) throws {
         XCTAssertEqual(urls.count, ids.count)
         for (url, id) in zip(urls, ids) {
@@ -196,6 +213,7 @@ private final class SharingFileAPI: APIClient {
     var failedIDs = Set<String>()
     var onDownload: ((String) -> Void)?
 
+    @MainActor
     init(session: SessionManager, directory: URL, token: String) {
         self.directory = directory
         self.media = [

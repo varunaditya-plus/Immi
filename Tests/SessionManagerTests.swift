@@ -388,6 +388,42 @@ final class SessionManagerTests: XCTestCase {
         XCTAssertEqual(fixture.session.currentUser?.id, "another-user")
     }
 
+    func testStaleDownloadedFileCannotReturnPreviousAccountsMedia() async throws {
+        let fixture = try SessionFixture()
+        defer { fixture.cleanup() }
+        try await fixture.signIn()
+        let client = APIClient(session: fixture.session, urlSession: fixture.urlSession)
+        let started = expectation(description: "Previous account download started")
+        fixture.server.hold("/test/held-download", started: started)
+        let oldDownload = Task { try await client.rawFile(.init(path: "/test/held-download")) }
+        await fulfillment(of: [started], timeout: 3)
+        await fixture.expireSession()
+        fixture.server.userID = "another-user"
+        fixture.server.token = "another-token"
+        try await fixture.session.loginPassword(email: "another@example.com", password: "password")
+
+        fixture.server.release("/test/held-download", status: 200, json: "previous-account-media")
+        do {
+            let download = try await oldDownload.value
+            try? FileManager.default.removeItem(at: download.url)
+            XCTFail("A successful old-account transfer must not publish a media file")
+        } catch {
+            XCTAssertTrue(error is CancellationError, "Unexpected error: \(error)")
+        }
+        XCTAssertTrue(fixture.session.isLoggedIn)
+        XCTAssertEqual(fixture.session.currentUser?.id, "another-user")
+        XCTAssertEqual(fixture.credentials.read("token"), "another-token")
+
+        // Current-account downloads must remain usable after rejecting the old one.
+        fixture.server.respond(to: "/test/current-download", status: 200, json: "current-account-media")
+        let currentClient = APIClient(session: fixture.session, urlSession: fixture.urlSession)
+        let currentDownload = try await currentClient.rawFile(.init(path: "/test/current-download"))
+        defer { try? FileManager.default.removeItem(at: currentDownload.url) }
+        XCTAssertEqual(try Data(contentsOf: currentDownload.url), Data("current-account-media".utf8))
+        XCTAssertEqual(currentDownload.response.statusCode, 200)
+        XCTAssertEqual(fixture.server.header("Authorization", for: "/test/current-download"), "Bearer another-token")
+    }
+
     func testStaleLoginCannotReplaceLoginOnAnotherServer() async throws {
         let fixture = try SessionFixture()
         defer { fixture.cleanup() }

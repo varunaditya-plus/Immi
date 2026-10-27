@@ -4,6 +4,73 @@ import XCTest
 
 @MainActor
 final class ImageCacheInvalidationTests: XCTestCase {
+    func testAccountClearDoesNotWaitForOldStagedWritesOrLoseTheNewAccountsImage() async throws {
+        let directory = try makeDirectory()
+        let warmCache = ImageCache(diskCacheURL: directory)
+        let cachedKey = UUID().uuidString
+        let key = UUID().uuidString
+        let cachedImage = try await warmCache.image(key: cachedKey, maxPixelSize: nil) {
+            self.png(width: 5)
+        }
+        XCTAssertEqual(cachedImage.size.width, 5)
+        XCTAssertNotNil(ImageMemoryCache.shared.image(for: ImageCache.memoryKey(cachedKey, nil)))
+
+        let writes = HeldImageWrites()
+        let cache = ImageCache(diskCacheURL: directory, stageWrite: { await writes.stage($0) })
+        addTeardownBlock {
+            await cache.clear()
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let oldData = png(width: 10)
+        let currentData = png(width: 20)
+        let old = Task { try await cache.image(key: key, maxPixelSize: nil) { oldData } }
+        addTeardownBlock {
+            old.cancel()
+            await writes.close()
+            _ = try? await old.value
+        }
+        try await waitUntil { await writes.count == 1 }
+        let cleared = expectation(description: "Account clear returns while old write is held")
+        let clearing = Task {
+            await cache.clear()
+            cleared.fulfill()
+        }
+        addTeardownBlock {
+            await writes.close()
+            await clearing.value
+        }
+
+        await fulfillment(of: [cleared], timeout: 1)
+
+        XCTAssertNil(ImageMemoryCache.shared.image(for: ImageCache.memoryKey(cachedKey, nil)))
+        let clearedDiskSize = await cache.diskCacheSize()
+        XCTAssertEqual(clearedDiskSize, 0)
+        let current = Task { try await cache.image(key: key, maxPixelSize: nil) { currentData } }
+        addTeardownBlock {
+            current.cancel()
+            await writes.close()
+            _ = try? await current.value
+        }
+        try await waitUntil { await writes.count == 2 }
+        await writes.release(1)
+        let currentImage = try await current.value
+        XCTAssertEqual(currentImage.size.width, 20)
+        await writes.release(0)
+        await assertCancelled(old)
+        await clearing.value
+        await writes.close()
+
+        // Bypass L1 so a delayed old write cannot hide behind the new image.
+        ImageMemoryCache.shared.remove(for: ImageCache.memoryKey(key, nil))
+        let diskImage = try await cache.image(key: key, maxPixelSize: nil) {
+            XCTFail("The new account's accepted image must remain on disk")
+            return oldData
+        }
+        XCTAssertEqual(diskImage.size.width, 20)
+        let paths = await writes.paths
+        XCTAssertTrue(paths.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) })
+    }
+
     func testOldCompletionCannotLoseTheReplacementRequestsCancellation() async throws {
         let directory = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -172,11 +239,13 @@ private actor HeldImageFetch {
 }
 
 private actor HeldImageWrites {
-    private var continuations: [CheckedContinuation<URL?, Never>] = []
+    private var continuations: [CheckedContinuation<URL?, Never>?] = []
+    private var isClosed = false
     private(set) var paths: [URL] = []
     var count: Int { continuations.count }
 
     func stage(_ data: Data) async -> URL? {
+        guard !isClosed else { return nil }
         let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         do { try data.write(to: temporary, options: .atomic) }
         catch { return nil }
@@ -184,5 +253,19 @@ private actor HeldImageWrites {
         return await withCheckedContinuation { continuations.append($0) }
     }
 
-    func release(_ index: Int) { continuations[index].resume(returning: paths[index]) }
+    func release(_ index: Int) {
+        guard continuations.indices.contains(index), let continuation = continuations[index] else {
+            return XCTFail("Expected a pending staged image write")
+        }
+        continuations[index] = nil
+        continuation.resume(returning: paths[index])
+    }
+
+    func close() {
+        isClosed = true
+        for index in continuations.indices {
+            continuations[index]?.resume(returning: paths[index])
+            continuations[index] = nil
+        }
+    }
 }

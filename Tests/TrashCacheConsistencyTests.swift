@@ -206,10 +206,20 @@ final class TrashCacheConsistencyTests: XCTestCase {
         let revision = fixture.manager.assetMutationRevision
         fixture.respond(500)
 
+        func assertActionFailure() {
+            XCTAssertNotNil(model.actionError, "The failed action must report its failure")
+            guard case .loaded = model.phase else {
+                return XCTFail("An action failure must leave the loaded Trash grid available")
+            }
+        }
         await model.restore([photo.id], using: fixture.trash)
+        assertActionFailure()
         await model.restoreAll(using: fixture.trash)
+        assertActionFailure()
         await model.emptyTrash(using: fixture.trash)
+        assertActionFailure()
         await model.delete([photo.id], permanently: true)
+        assertActionFailure()
 
         XCTAssertEqual(model.assets.map(\.id), [photo.id])
         XCTAssertEqual(LocalSnapshot.load([AssetLite].self, for: fixture.snapshotKey)?.map(\.id), [photo.id])
@@ -218,7 +228,6 @@ final class TrashCacheConsistencyTests: XCTestCase {
         XCTAssertTrue(DeletedServerAssetRegistry.shared.isTrashed(photo.id))
         XCTAssertNil(fixture.reopen().getCachedAsset(id: photo.id))
         XCTAssertEqual(fixture.manager.assetMutationRevision, revision)
-        guard case .failed = model.phase else { return XCTFail("The failed action must still report its failure") }
     }
 
     func testSyncBatchesPublishRemovalReasonsAndReleaseRestoredAssetsAfterCommit() throws {

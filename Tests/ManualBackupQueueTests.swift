@@ -416,6 +416,8 @@ final class ManualBackupQueueTests: XCTestCase {
     func testManualLivePhotoIntentSurvivesAuthenticationStorageRecoveryAndReconciliation() throws {
         let fixture = try fixture()
         let queue = fixture.queue
+        let owner = BackupQueueOwner(server: "https://backup.example/api", userID: "current")
+        try queue.bind(to: owner)
         try queue.enqueue(["live"], intent: .manualUpload, now: initial)
         try queue.markPreparing("live", phase: .primaryAsset, motionAssetID: "motion-server", now: initial)
         try queue.markUploading("live", phase: .primaryAsset, checksum: "still-hash", taskIdentifier: 7, now: initial)
@@ -425,11 +427,22 @@ final class ManualBackupQueueTests: XCTestCase {
         try restored.markPreparing("live", phase: .primaryAsset, motionAssetID: "motion-server", now: requested)
         try restored.markUploading("live", phase: .primaryAsset, checksum: "still-hash", taskIdentifier: 8, now: requested)
         XCTAssertTrue(try restored.requeueAfterStorageRecovery("live", taskIdentifier: 8, now: requested))
+        let ownership = try XCTUnwrap(restored.ownership)
+        XCTAssertEqual(ownership, queue.ownership, "Reopening preserves the account and queue generation")
         let context = BackupUploadTaskContext(phase: .primaryAsset, localIdentifier: "live",
-            checksum: "still-hash", bodyPath: "/tmp/unused-live.multipart")
+            checksum: "still-hash", bodyPath: "/tmp/unused-live.multipart", ownership: ownership)
+        var foreignContext = context
+        foreignContext.ownership = BackupUploadOwnership(
+            owner: BackupQueueOwner(server: owner.server, userID: "another"), generation: ownership.generation)
+        let requeued = try XCTUnwrap(restored.item(id: "live"))
+        try restored.reconcile(activeTasks: [BackupActiveTask(taskIdentifier: 9, context: foreignContext, isSuspended: false)], now: requested)
+        XCTAssertEqual(restored.item(id: "live"), requeued,
+            "Another account cannot adopt the requested Live Photo with the same local and task IDs")
         try restored.reconcile(activeTasks: [BackupActiveTask(taskIdentifier: 9, context: context, isSuspended: false)], now: requested)
 
-        let item = try XCTUnwrap(fixture.reopen().item(id: "live"))
+        let reopened = fixture.reopen()
+        XCTAssertEqual(reopened.ownership, ownership)
+        let item = try XCTUnwrap(reopened.item(id: "live"))
         XCTAssertEqual(item.intent, .manualUpload)
         XCTAssertTrue(item.allowsCellularOverride)
         XCTAssertEqual(item.phase, .primaryAsset)

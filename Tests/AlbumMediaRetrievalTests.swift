@@ -108,7 +108,7 @@ final class AlbumMediaRetrievalTests: XCTestCase {
         await store.resolveCover(for: album, repository: repository)
 
         XCTAssertEqual(store.coverID(for: album), "newest")
-        XCTAssertEqual(repository.requests, [.init(albumID: album.id, limit: 1)])
+        XCTAssertEqual(repository.requests, [.init(albumID: album.id, limit: 1, includeArchived: true)])
     }
 
     func testExplicitCoverAndKnownEmptyAlbumAvoidSearchRequests() async {
@@ -341,6 +341,7 @@ final class AlbumMediaRetrievalTests: XCTestCase {
         XCTAssertEqual(ids, ["available": ["available-image"]])
         XCTAssertEqual(Set(repository.requests.map(\.albumID)), ["offline", "available"])
         XCTAssertTrue(repository.requests.allSatisfy { $0.limit == 8 })
+        XCTAssertTrue(repository.requests.allSatisfy { !$0.includeArchived })
     }
 
     private func album(id: String = "album", count: Int, cover: String? = nil) -> AlbumResponseDTO {
@@ -379,14 +380,17 @@ private final class ControlledAlbumMediaRepository: AlbumRepository {
     struct Request: Equatable {
         let albumID: String
         let limit: Int
+        let includeArchived: Bool
     }
     private(set) var requests: [Request] = []
     var fetch: (String, Int) async throws -> [String] = { _, _ in [] }
 
     init() { super.init(api: APIClient(session: SessionManager())) }
 
-    override func recentAssetIDs(in albumID: String, limit: Int) async throws -> [String] {
-        requests.append(Request(albumID: albumID, limit: limit))
+    override func recentAssetIDs(
+        in albumID: String, limit: Int, includeArchived: Bool = true
+    ) async throws -> [String] {
+        requests.append(Request(albumID: albumID, limit: limit, includeArchived: includeArchived))
         return try await fetch(albumID, limit)
     }
 }

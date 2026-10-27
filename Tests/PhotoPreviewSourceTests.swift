@@ -80,7 +80,7 @@ final class PhotoPreviewSourceTests: XCTestCase {
         let directory: URL
         let serverID = UUID().uuidString
         let localID = LocalPhotoLibrary.assetID(for: UUID().uuidString)
-        let session = MockSessionManager()
+        let session: SessionManager
         let localImage: UIImage
         var localRequests: [String] = []
         let mapped: Bool
@@ -107,10 +107,10 @@ final class PhotoPreviewSourceTests: XCTestCase {
             let format = UIGraphicsImageRendererFormat()
             format.scale = 1
             localImage = UIGraphicsImageRenderer(size: CGSize(width: 5, height: 10), format: format).image { _ in }
-            try session.setServer("https://test.example.com")
             let configuration = URLSessionConfiguration.ephemeral
             configuration.protocolClasses = [MockURLProtocol.self]
-            session.imageAPI = APIClient(session: session, urlSession: URLSession(configuration: configuration))
+            session = SessionManager(urlSession: URLSession(configuration: configuration), restoresSession: false)
+            try session.setServer("https://test.example.com")
         }
 
         func image(width: Int) -> UIImage {

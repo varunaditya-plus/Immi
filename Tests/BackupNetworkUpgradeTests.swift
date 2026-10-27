@@ -105,6 +105,33 @@ final class BackupNetworkUpgradeTests: XCTestCase {
         XCTAssertTrue(tasks.allSatisfy { FileManager.default.fileExists(atPath: $0.body.path) })
     }
 
+    func testUpgradeRejectsAnotherAccountAndAnEarlierGenerationWithTheSameTaskID() throws {
+        for sameAccount in [false, true] {
+            let fixture = try Fixture()
+            defer { fixture.cleanup() }
+            let owner = BackupQueueOwner(server: "https://backup.example/api", userID: "first")
+            try fixture.queue.bind(to: owner)
+            let stale = try fixture.task("same-id", identifier: 1)
+            if sameAccount {
+                try fixture.queue.clear()
+                try fixture.queue.bind(to: owner)
+            } else {
+                try fixture.queue.bind(to: BackupQueueOwner(server: owner.server, userID: "second"))
+            }
+            let current = try fixture.task("same-id", identifier: 1)
+            let replacement = fixture.queue.item(id: "same-id")
+
+            BackupNetworkUpgrade.requeue(tasks: [stale, current], eligibleIDs: ["same-id"],
+                availableOriginalIDs: ["same-id"], queue: fixture.queue)
+
+            XCTAssertTrue(stale.cancelledContexts.isEmpty)
+            XCTAssertEqual(current.cancelledContexts.count, 1,
+                "The matching current transfer remains eligible for the network upgrade")
+            XCTAssertEqual(current.cancelledContexts.first?.ownership, fixture.queue.ownership)
+            XCTAssertEqual(fixture.queue.item(id: "same-id"), replacement)
+        }
+    }
+
     func testMissingOriginalProtectsItsStagedOnlyCopyAndReceipt() throws {
         let fixture = try Fixture()
         defer { fixture.cleanup() }
@@ -180,7 +207,7 @@ final class BackupNetworkUpgradeTests: XCTestCase {
             let body = directory.appendingPathComponent("upload-\(id).multipart")
             try Data("original-\(id)".utf8).write(to: body)
             let context = BackupUploadTaskContext(phase: phase, localIdentifier: id,
-                checksum: "checksum-\(id)", bodyPath: body.path)
+                checksum: "checksum-\(id)", bodyPath: body.path, ownership: queue.ownership)
             try BackupTemporaryFiles.record(context, in: directory)
             var request = URLRequest(url: URL(string: "https://network-upgrade.example/api/assets")!)
             request.allowsCellularAccess = cellular

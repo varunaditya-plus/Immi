@@ -119,6 +119,75 @@ final class MediaFileRepositoryTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
     }
 
+    func testLateDownloadFromPreviousAccountIsRemovedInsteadOfBeingAdopted() async throws {
+        let source = try sourceFile()
+        let started = expectation(description: "Previous account media download started")
+        var continuation: CheckedContinuation<APIClient.DownloadedFile, Error>?
+        defer { continuation?.resume(throwing: CancellationError()) }
+        client.handler = { _ in
+            try await withCheckedThrowingContinuation {
+                continuation = $0
+                started.fulfill()
+            }
+        }
+        let task = Task { try await repository.shareFile("asset") }
+        await fulfillment(of: [started], timeout: 2)
+
+        LocalSnapshot.clearAll()
+        let held = try XCTUnwrap(continuation)
+        continuation = nil
+        held.resume(returning: download(source, filename: "previous-account.mp4"))
+        do {
+            let file = try await task.value
+            prepared.append(file)
+            XCTFail("An old-account transfer must not become a shareable file")
+        } catch {
+            XCTAssertTrue(error is CancellationError, "Unexpected error: \(error)")
+        }
+        XCTAssertEqual(client.requests.map(\.path), ["/assets/asset/original"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
+    }
+
+    func testChangedAccountContextDuringBatchRemovesItsPreparedPrefixAndStopsDownloading() async throws {
+        let token = "batch-context-\(UUID())"
+        let firstSource = try sourceFile()
+        let secondSource = try sourceFile()
+        let controlSource = try sourceFile()
+        client.handler = { _ in self.download(controlSource, filename: "control.jpg") }
+        let control = try await repository.shareFile("control")
+        let shareDirectory = control.deletingLastPathComponent()
+        TemporaryMediaStore.remove(control)
+        client.requests.removeAll()
+        var preparedPrefix: [URL] = []
+        client.handler = { endpoint in
+            if endpoint.path == "/assets/first/original" {
+                return self.download(firstSource, filename: "\(token)-first.heic")
+            }
+            XCTAssertEqual(endpoint.path, "/assets/second/original")
+            preparedPrefix = try FileManager.default.contentsOfDirectory(
+                at: shareDirectory, includingPropertiesForKeys: nil)
+                .filter { $0.lastPathComponent.contains(token) }
+            self.prepared.append(contentsOf: preparedPrefix)
+            try self.client.session.setServer("https://next-account.example.com")
+            return self.download(secondSource, filename: "\(token)-second.mp4")
+        }
+
+        let files = await repository.shareFiles(["first", "second", "third"])
+        prepared.append(contentsOf: files)
+
+        XCTAssertEqual(preparedPrefix.count, 1, "The first file must be prepared before the account changes")
+        XCTAssertTrue(files.isEmpty)
+        XCTAssertEqual(client.requests.map(\.path), ["/assets/first/original", "/assets/second/original"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: firstSource.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: secondSource.path))
+        XCTAssertTrue(preparedPrefix.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) })
+        let remaining = try FileManager.default.contentsOfDirectory(
+            at: shareDirectory, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.contains(token) }
+        prepared.append(contentsOf: remaining)
+        XCTAssertTrue(remaining.isEmpty)
+    }
+
     private func sourceFile() throws -> URL {
         let file = directory.appendingPathComponent(UUID().uuidString)
         try Data("original bytes".utf8).write(to: file)

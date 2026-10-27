@@ -77,6 +77,68 @@ final class WidgetPrivacyInvalidationTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("Widgets").path))
     }
 
+    func testLateThumbnailCannotReplaceCurrentWidgetAfterAccountGenerationChanges() async throws {
+        let directory = try temporaryDirectory()
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let started = expectation(description: "Previous account thumbnail started")
+        let gate = WidgetPrivacyGate(started: started)
+        let oldAPI = try makeAPI(imageGate: gate)
+        let oldExport = Task {
+            await WidgetSnapshotExporter.refresh(api: oldAPI, imageAPI: oldAPI,
+                container: directory, selectedAlbumIDs: [])
+        }
+        addTeardownBlock {
+            await gate.close()
+            await oldExport.value
+        }
+        await fulfillment(of: [started], timeout: 2)
+
+        // Advance account ownership without invalidating widget visibility.
+        // The fake response bypasses APIClient, so publication must check it too.
+        LocalSnapshot.clearAll()
+        let currentAPI = try makeAPI(assetID: "current-account-visible")
+        await WidgetSnapshotExporter.refresh(api: currentAPI, imageAPI: currentAPI,
+            container: directory, selectedAlbumIDs: [])
+        let snapshotURL = directory.appendingPathComponent("Widgets/snapshot.json")
+        let currentSnapshot = try Data(contentsOf: snapshotURL)
+        await gate.release()
+        await oldExport.value
+
+        let oldThumbnailCount = await oldAPI.thumbnailCount.value
+        XCTAssertEqual(oldThumbnailCount, 1)
+        XCTAssertEqual(try Data(contentsOf: snapshotURL), currentSnapshot)
+        let names = try imageNames(in: directory)
+        XCTAssertEqual(names.count, 1)
+        let image = directory.appendingPathComponent("Widgets")
+            .appendingPathComponent(try XCTUnwrap(names.first))
+        XCTAssertEqual(try Data(contentsOf: image), Data([1, 2, 3]))
+    }
+
+    func testLateMetadataCannotStartAnExportAfterAccountGenerationChanges() async throws {
+        let directory = try temporaryDirectory()
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let started = expectation(description: "Previous account metadata started")
+        let gate = WidgetPrivacyGate(started: started)
+        let api = try makeAPI(metadataGate: gate)
+        let export = Task {
+            await WidgetSnapshotExporter.refresh(api: api, imageAPI: api,
+                container: directory, selectedAlbumIDs: [])
+        }
+        addTeardownBlock {
+            await gate.close()
+            await export.value
+        }
+        await fulfillment(of: [started], timeout: 2)
+
+        LocalSnapshot.clearAll()
+        await gate.release()
+        await export.value
+
+        let thumbnailCount = await api.thumbnailCount.value
+        XCTAssertEqual(thumbnailCount, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("Widgets").path))
+    }
+
     func testProtectedPrivateIDsOverrideStaleVisibleMetadata() async throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -119,8 +181,10 @@ final class WidgetPrivacyInvalidationTests: XCTestCase {
 private actor WidgetPrivacyGate {
     let started: XCTestExpectation
     private var continuation: CheckedContinuation<Void, Never>?
+    private var isClosed = false
     init(started: XCTestExpectation) { self.started = started }
     func wait() async {
+        guard !isClosed else { return }
         await withCheckedContinuation {
             continuation = $0
             started.fulfill()
@@ -128,6 +192,11 @@ private actor WidgetPrivacyGate {
     }
     func release() {
         XCTAssertNotNil(continuation, "The export must reach its response boundary first")
+        continuation?.resume()
+        continuation = nil
+    }
+    func close() {
+        isClosed = true
         continuation?.resume()
         continuation = nil
     }
@@ -143,6 +212,7 @@ private final class WidgetPrivacyAPI: APIClient {
     private let imageGate: WidgetPrivacyGate?
     private let metadataGate: WidgetPrivacyGate?
     private let assetID: String
+    @MainActor
     init(session: SessionManager, imageGate: WidgetPrivacyGate?, metadataGate: WidgetPrivacyGate?, assetID: String) {
         self.imageGate = imageGate
         self.metadataGate = metadataGate

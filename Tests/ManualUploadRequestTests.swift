@@ -35,6 +35,53 @@ final class ManualUploadRequestTests: XCTestCase {
         XCTAssertEqual(fixture.metadataLookups, ["selected"])
     }
 
+    func testManualCellularGrantDoesNotAdvanceAutomaticDiscoveryUntilPolicyAllowsIt() async throws {
+        let fixture = try fixture()
+        fixture.automaticEnabled = true
+        let automaticIDs = (0..<205).map { "automatic-\($0)" }
+        fixture.photos = Dictionary(uniqueKeysWithValues: (["selected"] + automaticIDs)
+            .map { ($0, photo($0)) })
+        try fixture.requests.requestUploads(["selected"], uploadedIDs: [])
+        let discovery = AutomaticBackupDiscovery(queue: fixture.queue, batchSize: 100)
+        var processedPass = false
+        var processingError: Error?
+
+        let runDiscovery = {
+            try await discovery.run(
+                photos: { Array(fixture.photos.values) },
+                uploadedIDs: { [] }, activeIDs: { [] },
+                shouldContinue: {
+                    processingError == nil && (!processedPass || fixture.policy.allowsAutomaticDiscovery)
+                },
+                processReady: {
+                    do { try await fixture.process() }
+                    catch { processingError = error }
+                    processedPass = true
+                })
+        }
+        try await runDiscovery()
+
+        XCTAssertNil(processingError)
+        XCTAssertFalse(fixture.policy.allowsAutomaticDiscovery)
+        XCTAssertEqual(fixture.prepared.map(\.id), ["selected"])
+        XCTAssertEqual(fixture.queue.items.map(\.id), ["selected"],
+            "A single manual cellular grant cannot admit automatic library pages")
+        XCTAssertEqual(fixture.prepared.first?.allowsCellular, true)
+
+        fixture.policy = policy(expensive: false)
+        try await runDiscovery()
+
+        XCTAssertNil(processingError)
+        XCTAssertTrue(fixture.policy.allowsAutomaticDiscovery)
+        XCTAssertEqual(fixture.queue.items.count, 100,
+            "Wi-Fi admits one bounded metadata window, including the active manual upload")
+        XCTAssertEqual(fixture.queue.snapshot.active, BackupStagingPolicy.maximumActiveUploads)
+        XCTAssertEqual(fixture.prepared.count, BackupStagingPolicy.maximumActiveUploads)
+        XCTAssertEqual(fixture.prepared.first?.id, "selected")
+        XCTAssertTrue(fixture.prepared.dropFirst().allSatisfy { !$0.allowsCellular })
+        XCTAssertLessThan(fixture.queue.items.filter { automaticIDs.contains($0.id) }.count, automaticIDs.count)
+    }
+
     func testRetryWithAutomaticBackupOffRunsOnlyItsTargetAndRetainsNetworkRestrictions() async throws {
         let fixture = try fixture()
         fixture.photos = ["retry": photo("retry"), "other": photo("other")]
@@ -526,6 +573,39 @@ final class ManualUploadRequestTests: XCTestCase {
             XCTAssertTrue(upgraded.isEmpty)
             XCTAssertEqual(fixture.queue.item(id: "manual"), before)
         }
+    }
+
+    func testNetworkWakeCannotReleaseAReplacementAccountsQueueAfterMetadataReturns() async throws {
+        let fixture = try fixture()
+        try fixture.queue.bind(to: BackupQueueOwner(server: "https://backup.example/api", userID: "first"))
+        try fixture.requests.requestUploads(["shared-id"], uploadedIDs: [])
+        try fixture.queue.markRetry("shared-id", state: .waitingForNetwork, error: "Old account",
+            retryAt: .distantFuture, now: timestamp)
+        let ownership = fixture.queue.ownership
+        let held = HeldMetadata()
+        let wake = Task {
+            try await fixture.requests.releaseNetworkWaits(
+                automaticEnabled: false, policy: fixture.policy,
+                canProcess: { fixture.queue.ownership == ownership },
+                metadata: { _ in await held.value() })
+        }
+        await fulfillment(of: [held.started], timeout: 2)
+        try fixture.queue.bind(to: BackupQueueOwner(server: "https://backup.example/api", userID: "second"))
+        try fixture.requests.requestUploads(["shared-id"], uploadedIDs: [])
+        try fixture.queue.markRetry("shared-id", state: .waitingForNetwork, error: "New account",
+            retryAt: .distantFuture, now: timestamp)
+        let replacement = try XCTUnwrap(fixture.queue.item(id: "shared-id"))
+        let durableReplacement = try XCTUnwrap(BackupQueueStore(fileURL: fixture.queueURL).item(id: "shared-id"))
+        let savedLedger = try Data(contentsOf: fixture.queueURL)
+        held.resolve(photo("shared-id"))
+
+        let eligible = try await wake.value
+
+        XCTAssertTrue(eligible.isEmpty)
+        XCTAssertEqual(fixture.queue.item(id: "shared-id"), replacement)
+        XCTAssertEqual(BackupQueueStore(fileURL: fixture.queueURL).item(id: "shared-id"), durableReplacement)
+        XCTAssertEqual(try Data(contentsOf: fixture.queueURL), savedLedger,
+            "The delayed old-account wake cannot rewrite the replacement account's ledger")
     }
 
     func testAuthenticationWaitsPreserveManualIntentUntilSignInReleasesThem() async throws {
