@@ -71,6 +71,14 @@ final class RemovedAssets {
         trashedIDs.removeAll()
     }
 
+    func contains(_ id: String, scope: Scope = .library) -> Bool {
+        ids.contains(id) && (scope != .trash || !trashedIDs.contains(id))
+    }
+
+    func excludedIDs(scope: Scope = .library) -> Set<String> {
+        scope == .trash ? ids.subtracting(trashedIDs) : ids
+    }
+
     /// Menyaring daftar apa pun. Pulang apa adanya kalau tidak ada yang dibuang —
     /// keadaan yang paling sering terjadi, dan tidak perlu membayar satu lintasan
     /// untuknya.

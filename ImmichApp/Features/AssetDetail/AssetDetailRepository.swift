@@ -115,7 +115,7 @@ class AssetDetailRepository {
     private func cacheMutation(_ mutation: AssetMutation, for id: String, expectedGeneration: UUID) throws {
         let cache = dataManager ?? .shared
         if let visibility = mutation.visibility {
-            try cache.setTimelineVisibility([id], inTimeline: visibility == Visibility.timeline.rawValue)
+            try cache.setAssetVisibility([id], to: visibility)
         } else {
             try? cache.patchCachedAsset(id,
                 isFavorite: mutation.isFavorite,

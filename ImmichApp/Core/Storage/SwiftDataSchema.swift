@@ -178,7 +178,7 @@ enum LocalStoreSchemaV2: VersionedSchema {
     }
 }
 
-/// Schema production saat ini. Modelnya tetap top-level supaya seluruh call
+/// Schema V3. Modelnya tetap top-level supaya seluruh call
 /// site yang sudah ada tidak perlu mengenal versi penyimpanan.
 enum LocalStoreSchemaV3: VersionedSchema {
     static let versionIdentifier = Schema.Version(3, 0, 0)
@@ -187,15 +187,25 @@ enum LocalStoreSchemaV3: VersionedSchema {
     }
 }
 
+enum LocalStoreSchemaV4: VersionedSchema {
+    static let versionIdentifier = Schema.Version(4, 0, 0)
+    static var models: [any PersistentModel.Type] {
+        [CachedAsset.self, BackupRecord.self, SyncState.self, LocalAssetChecksum.self,
+         PrivateAssetRecord.self]
+    }
+}
+
 enum LocalStoreMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
-        [LocalStoreSchemaV1.self, LocalStoreSchemaV2.self, LocalStoreSchemaV3.self]
+        [LocalStoreSchemaV1.self, LocalStoreSchemaV2.self, LocalStoreSchemaV3.self,
+         LocalStoreSchemaV4.self]
     }
 
     static var stages: [MigrationStage] {
         [
             .lightweight(fromVersion: LocalStoreSchemaV1.self, toVersion: LocalStoreSchemaV2.self),
             .lightweight(fromVersion: LocalStoreSchemaV2.self, toVersion: LocalStoreSchemaV3.self),
+            .lightweight(fromVersion: LocalStoreSchemaV3.self, toVersion: LocalStoreSchemaV4.self),
         ]
     }
 }

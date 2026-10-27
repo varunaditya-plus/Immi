@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 /// Aset server yang sengaja dibuang tetapi salinan PhotoKit-nya masih ada.
 ///
@@ -12,6 +13,7 @@ import Foundation
 /// metadata atau media pengguna. State dibersihkan saat logout supaya tidak
 /// menyeberang ke akun/server berikutnya.
 @MainActor
+@Observable
 final class DeletedServerAssetRegistry {
     static let shared = DeletedServerAssetRegistry()
 
@@ -27,6 +29,10 @@ final class DeletedServerAssetRegistry {
     var suppressedIDs: Set<String> {
         trashedIDs.union(permanentIDs)
     }
+
+    var permanentlyDeletedIDs: Set<String> { permanentIDs }
+    var hasSuppressedAssets: Bool { !trashedIDs.isEmpty || !permanentIDs.isEmpty }
+    var hasPermanentlyDeletedAssets: Bool { !permanentIDs.isEmpty }
 
     func isTrashed(_ id: String) -> Bool { trashedIDs.contains(id) }
     func isPermanentlyDeleted(_ id: String) -> Bool { permanentIDs.contains(id) }

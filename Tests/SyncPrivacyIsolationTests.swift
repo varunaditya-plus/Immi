@@ -4,6 +4,73 @@ import XCTest
 
 @MainActor
 final class SyncPrivacyIsolationTests: XCTestCase {
+    override func setUp() async throws {
+        RemovedAssets.shared.clear()
+        DeletedServerAssetRegistry.shared.clear()
+    }
+
+    override func tearDown() async throws {
+        RemovedAssets.shared.clear()
+        DeletedServerAssetRegistry.shared.clear()
+    }
+
+    func testConfirmedLocalDeleteRejectsAnOlderStreamBeforeItCanRestoreTheDeletedID() async throws {
+        let fixture = try PrivacySyncFixture()
+        defer { fixture.cleanup() }
+        let sync = Task { try await fixture.repository.deltaSync() }
+        try await waitForInitialChunk(in: fixture)
+        let previousRevision = fixture.store.visibilityMutationRevision
+        DeletedServerAssetRegistry.shared.record(["stream-250"], permanently: false)
+
+        try fixture.store.purgeAssets(["stream-250"], reason: .trashed)
+        fixture.transport.finishStream()
+        await assertCancelled(sync)
+
+        XCTAssertNotEqual(fixture.store.visibilityMutationRevision, previousRevision)
+        XCTAssertTrue(DeletedServerAssetRegistry.shared.isTrashed("stream-250"))
+        XCTAssertTrue(RemovedAssets.shared.ids.contains("stream-250"))
+        XCTAssertNil(fixture.store.getCachedAsset(id: "stream-250"))
+        XCTAssertEqual(fixture.transport.acknowledgmentCount, 0)
+        XCTAssertNil(fixture.store.getSyncState().lastDeltaSyncAt)
+    }
+
+    func testDirectSyncDeletionCompletesWithoutCancellingItsOwnVisibilityContext() async throws {
+        let fixture = try PrivacySyncFixture()
+        defer { fixture.cleanup() }
+        let revision = fixture.store.visibilityMutationRevision
+        let sync = Task { try await fixture.repository.deltaSync() }
+        try await waitForInitialChunk(in: fixture)
+
+        fixture.transport.finishStream(deleting: true)
+        try await sync.value
+
+        XCTAssertEqual(fixture.store.visibilityMutationRevision, revision)
+        XCTAssertTrue(DeletedServerAssetRegistry.shared.isTrashed("stream-250"))
+        XCTAssertTrue(RemovedAssets.shared.ids.contains("stream-250"))
+        XCTAssertNil(fixture.store.getCachedAsset(id: "stream-250"))
+        XCTAssertEqual(fixture.transport.acknowledgmentCount, 1)
+        XCTAssertNotNil(fixture.store.getSyncState().lastDeltaSyncAt)
+    }
+
+    func testV1AndV2StreamsPreserveRawArchiveAndPrivateVisibility() async throws {
+        for major in [2, 3] {
+            let fixture = try PrivacySyncFixture(serverMajor: major,
+                visibilities: [1: "archive", 2: "locked", 3: "hidden"])
+            defer { fixture.cleanup() }
+            let sync = Task { try await fixture.repository.deltaSync() }
+            try await waitForInitialChunk(in: fixture)
+            fixture.transport.finishStream()
+            try await sync.value
+
+            XCTAssertEqual(fixture.store.archivedAssetIDs, ["stream-1"])
+            XCTAssertEqual(fixture.store.privateAssetIDs, ["stream-2", "stream-3"])
+            let reopened = fixture.reopenStore()
+            XCTAssertEqual(reopened.archivedAssetIDs, ["stream-1"])
+            XCTAssertEqual(reopened.privateAssetIDs, ["stream-2", "stream-3"])
+            XCTAssertEqual(fixture.transport.acknowledgmentCount, 1)
+        }
+    }
+
     func testPreLockStreamCannotRestorePublicVisibilityOrAcknowledgeBufferedRows() async throws {
         let fixture = try PrivacySyncFixture()
         defer { fixture.cleanup() }
@@ -113,14 +180,17 @@ private final class PrivacySyncFixture {
     let transport: PrivacySyncTransport
     private let urlSession: URLSession
 
-    init(acknowledgmentStarted: XCTestExpectation? = nil) throws {
+    init(acknowledgmentStarted: XCTestExpectation? = nil, serverMajor: Int = 3,
+         visibilities: [Int: String] = [:]) throws {
         directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("sync-privacy-tests-\(UUID())", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         store = SwiftDataManager(storeURL: directory.appendingPathComponent("test.store"),
             backupJournalURL: directory.appendingPathComponent("backup.json"))
-        transport = PrivacySyncTransport(acknowledgmentStarted: acknowledgmentStarted)
+        transport = PrivacySyncTransport(acknowledgmentStarted: acknowledgmentStarted,
+            entityType: serverMajor >= 3 ? "AssetV2" : "AssetV1", visibilities: visibilities)
         let session = MockSessionManager()
+        session.mockVersion = ServerVersionDTO(major: serverMajor, minor: 0, patch: 0)
         try session.setServer(transport.baseURL.absoluteString)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [PrivacySyncURLProtocol.self]
@@ -147,9 +217,13 @@ private final class PrivacySyncTransport: @unchecked Sendable {
     private var heldAcknowledgment: PrivacySyncURLProtocol?
     private var acknowledgments = 0
     private let acknowledgmentStarted: XCTestExpectation?
+    private let entityType: String
+    private let visibilities: [Int: String]
 
-    init(acknowledgmentStarted: XCTestExpectation?) {
+    init(acknowledgmentStarted: XCTestExpectation?, entityType: String, visibilities: [Int: String]) {
         self.acknowledgmentStarted = acknowledgmentStarted
+        self.entityType = entityType
+        self.visibilities = visibilities
         PrivacySyncURLProtocol.register(self)
     }
 
@@ -168,7 +242,9 @@ private final class PrivacySyncTransport: @unchecked Sendable {
             lock.lock()
             heldStream = request
             lock.unlock()
-            let firstChunk = (0..<500).map { Self.assetLine($0) }.joined()
+            let firstChunk = (0..<500).map {
+                Self.assetLine($0, visibility: visibilities[$0] ?? "timeline", entityType: entityType)
+            }.joined()
             request.client?.urlProtocol(request, didLoad: Data(firstChunk.utf8))
         } else if url.path == "/api/sync/ack" {
             lock.lock()
@@ -185,14 +261,15 @@ private final class PrivacySyncTransport: @unchecked Sendable {
         }
     }
 
-    func finishStream() {
+    func finishStream(deleting: Bool = false) {
         lock.lock()
         let stream = heldStream
         heldStream = nil
         lock.unlock()
         XCTAssertNotNil(stream, "The first chunk must leave the real HTTP stream open")
         guard let stream else { return }
-        stream.client?.urlProtocol(stream, didLoad: Data(Self.assetLine(250, favorite: true, width: 300, ack: 500).utf8))
+        stream.client?.urlProtocol(stream, didLoad: Data(Self.assetLine(250, favorite: true,
+            width: 300, ack: 500, entityType: entityType, deleted: deleting).utf8))
         stream.client?.urlProtocolDidFinishLoading(stream)
     }
 
@@ -210,8 +287,11 @@ private final class PrivacySyncTransport: @unchecked Sendable {
         request.client?.urlProtocolDidFinishLoading(request)
     }
 
-    private static func assetLine(_ index: Int, favorite: Bool = false, width: Int = 100, ack: Int? = nil) -> String {
-        #"{"type":"AssetV2","ack":"AssetV2|\#(ack ?? index)","data":{"id":"stream-\#(index)","ownerId":"stream-owner","originalFileName":"photo.jpg","checksum":"YWJj","type":"IMAGE","visibility":"timeline","isFavorite":\#(favorite),"isEdited":false,"width":\#(width),"height":100,"fileCreatedAt":"2026-01-01T00:00:00Z"}}"# + "\n"
+    private static func assetLine(_ index: Int, favorite: Bool = false, width: Int = 100,
+                                  ack: Int? = nil, visibility: String = "timeline", entityType: String = "AssetV2",
+                                  deleted: Bool = false) -> String {
+        let deletion = deleted ? #", "deletedAt":"2026-01-02T00:00:00Z""# : ""
+        return #"{"type":"\#(entityType)","ack":"\#(entityType)|\#(ack ?? index)","data":{"id":"stream-\#(index)","ownerId":"stream-owner","originalFileName":"photo.jpg","checksum":"YWJj","type":"IMAGE","visibility":"\#(visibility)","isFavorite":\#(favorite),"isEdited":false,"width":\#(width),"height":100,"fileCreatedAt":"2026-01-01T00:00:00Z"\#(deletion)}}"# + "\n"
     }
 
     func close() {

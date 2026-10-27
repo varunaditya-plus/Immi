@@ -100,6 +100,7 @@ class SyncRepository {
         var outcome = StreamOutcome()
         var upserts: [CachedAsset] = []
         var deletes: [String] = []
+        var visibilityByID: [String: String] = [:]
 
         let lines = try await api.streamLines(.json("/sync/stream", method: .post, body: request))
 
@@ -124,6 +125,7 @@ class SyncRepository {
                     // Restore dari klien lain datang lagi sebagai AssetV1 aktif.
                     DeletedServerAssetRegistry.shared.restore([asset.id])
                     upserts.append(makeCachedAsset(asset))
+                    visibilityByID[asset.id] = asset.visibility
                 }
             case "AssetV2":
                 let asset = try JSONDecoder.immich.decode(
@@ -135,6 +137,7 @@ class SyncRepository {
                 } else {
                     DeletedServerAssetRegistry.shared.restore([asset.id])
                     upserts.append(makeCachedAsset(asset))
+                    visibilityByID[asset.id] = asset.visibility
                 }
             case "AssetDeleteV1":
                 let payload = try JSONDecoder.immich.decode(
@@ -154,11 +157,13 @@ class SyncRepository {
             }
 
             if upserts.count >= Self.chunkSize || deletes.count >= Self.chunkSize {
-                try await flush(&upserts, &deletes, isFullReset: reset, context: context, visibilityRevision: visibilityRevision)
+                try await flush(&upserts, &deletes, &visibilityByID, isFullReset: reset,
+                    context: context, visibilityRevision: visibilityRevision)
             }
         }
 
-        try await flush(&upserts, &deletes, isFullReset: reset, context: context, visibilityRevision: visibilityRevision)
+        try await flush(&upserts, &deletes, &visibilityByID, isFullReset: reset,
+            context: context, visibilityRevision: visibilityRevision)
         return outcome
     }
 
@@ -166,6 +171,7 @@ class SyncRepository {
     private func flush(
         _ upserts: inout [CachedAsset],
         _ deletes: inout [String],
+        _ visibilityByID: inout [String: String],
         isFullReset: Bool,
         context: SessionRequestContext,
         visibilityRevision: UUID
@@ -178,10 +184,12 @@ class SyncRepository {
             upserts: upserts,
             deletedIds: deletes,
             isFullReset: isFullReset,
-            expectedVisibilityRevision: visibilityRevision)
+            expectedVisibilityRevision: visibilityRevision,
+            visibilityByID: visibilityByID)
 
         upserts.removeAll(keepingCapacity: true)
         deletes.removeAll(keepingCapacity: true)
+        visibilityByID.removeAll(keepingCapacity: true)
         await Task.yield()
     }
 

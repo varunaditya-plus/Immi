@@ -149,3 +149,13 @@ final class LocalAssetChecksum {
         self.computedAt = computedAt
     }
 }
+
+/// Private visibility must survive a failed journal write or a cache reset.
+@Model
+final class PrivateAssetRecord {
+    @Attribute(.unique) var id: String
+
+    init(id: String) {
+        self.id = id
+    }
+}

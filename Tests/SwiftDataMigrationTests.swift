@@ -86,6 +86,37 @@ final class SwiftDataMigrationTests: XCTestCase {
             1)
     }
 
+    func testMigratesV3StoreWithoutTreatingLegacyArchivedFlagsAsPublicArchives() throws {
+        let fixture = try StoreFixture()
+        defer { fixture.cleanup() }
+        do {
+            let schema = Schema(versionedSchema: LocalStoreSchemaV3.self)
+            let configuration = ModelConfiguration(schema: schema, url: fixture.storeURL,
+                cloudKitDatabase: .none)
+            let container = try ModelContainer(for: schema, configurations: [configuration])
+            let context = ModelContext(container)
+            context.insert(CachedAsset(id: "old-private", assetId: "old-private", type: "IMAGE",
+                isArchived: true, duration: 4.25, livePhotoVideoId: "motion-v3", ratio: 1.5))
+            context.insert(BackupRecord(id: "backup-v3", assetId: "old-private",
+                deviceAssetId: "checksum-v3", localIdentifier: "device-v3"))
+            try context.save()
+        }
+
+        let migrated = SwiftDataManager(storeURL: fixture.storeURL, backupJournalURL: fixture.journalURL)
+
+        XCTAssertEqual(migrated.startupState, .ready)
+        XCTAssertEqual(migrated.privateAssetIDs, ["old-private"])
+        XCTAssertTrue(migrated.archivedAssetIDs.isEmpty)
+        XCTAssertEqual(migrated.uploadedLocalIdentifiers(), ["device-v3"])
+        let asset = try XCTUnwrap(migrated.getCachedAsset(id: "old-private"))
+        XCTAssertEqual(asset.duration, 4.25)
+        XCTAssertEqual(asset.livePhotoVideoId, "motion-v3")
+        XCTAssertEqual(asset.ratio, 1.5)
+        try migrated.setAssetVisibility(["old-private"], to: "archive")
+        XCTAssertEqual(migrated.archivedAssetIDs, ["old-private"])
+        XCTAssertTrue(migrated.privateAssetIDs.isEmpty)
+    }
+
     func testCorruptCacheIsQuarantinedAndBackupMappingIsRestored() throws {
         let fixture = try StoreFixture()
         defer { fixture.cleanup() }
@@ -198,7 +229,7 @@ final class SwiftDataMigrationTests: XCTestCase {
     }
 
     private func openCurrentStore(at url: URL) throws -> ModelContainer {
-        let schema = Schema(versionedSchema: LocalStoreSchemaV3.self)
+        let schema = Schema(versionedSchema: LocalStoreSchemaV4.self)
         let configuration = ModelConfiguration(
             schema: schema,
             url: url,
