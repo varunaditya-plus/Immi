@@ -37,37 +37,66 @@ struct TrashView: View {
     }
 
     private var screen: some View {
-        PhotoCollectionScreen(
+        collectionScreen(using: vm, repository: trashRepo)
+    }
+
+    func collectionScreen(using model: AssetGridViewModel?, repository: TrashRepository?) -> PhotoCollectionScreen<some View> {
+        let actions: TrashViewerActions?
+        if let model, let repository {
+            actions = viewerActions(using: model, repository: repository)
+        } else { actions = nil }
+        return PhotoCollectionScreen(
             title: "Trash",
             layout: .monthly,
-            assets: vm?.assets ?? [],
-            phase: vm?.phase ?? .loading,
+            assets: model?.assets ?? [],
+            phase: model?.phase ?? .loading,
             actionError: Binding(
-                get: { vm?.actionError },
-                set: { vm?.actionError = $0 }),
+                get: { model?.actionError },
+                set: { model?.actionError = $0 }),
             emptyState: PhotoCollectionEmptyState(
                 title: "Trash is Empty",
                 systemImage: "trash",
                 description: "Deleted photos will appear here."),
-            onRetry: { Task { await vm?.load() } },
-            onToggleFavorite: { await vm?.toggleFavorite($0) },
+            onRetry: { Task { await model?.load() } },
+            onToggleFavorite: { await model?.toggleFavorite($0) },
             // Sudah di tong sampah, jadi "hapus" di sini memang permanen.
-            onDelete: { await vm?.delete($0, permanently: true) },
-            shareURLs: { await vm?.shareURLs(for: $0) ?? [] },
+            onDelete: { await model?.delete($0, permanently: true) },
+            shareURLs: { await model?.shareURLs(for: $0) ?? [] },
             // Restore jadi tombolnya SENDIRI, bukan pilihan di dalam dialog
             // hapus. Foto di tong sampah cuma punya dua jalan keluar — kembali
             // atau hilang selamanya — dan menyembunyikan salah satunya di balik
             // tombol yang bergambar sampah membuat yang tidak merusak terlihat
             // seperti bagian dari yang merusak.
             onRestoreSelection: { ids in
-                guard let trashRepo else { return }
-                await vm?.restore(ids, using: trashRepo)
+                guard let repository else { return }
+                await model?.restore(ids, using: repository)
             },
             // Berbagi isi tong sampah tidak berarti apa pun.
             allowsSelectionShare: false,
             deletesPermanently: true,
+            trashViewerActions: actions,
             removalScope: .trash,
             options: { trashMenu })
+    }
+
+    func viewerActions(using model: AssetGridViewModel, repository: TrashRepository) -> TrashViewerActions {
+        var viewerError: String?
+        return TrashViewerActions(
+            restore: {
+                viewerError = nil
+                let accepted = await model.restore([$0], using: repository)
+                if !accepted { viewerError = model.actionError }
+                model.actionError = nil
+                return accepted
+            },
+            deletePermanently: {
+                viewerError = nil
+                let accepted = await model.delete([$0], permanently: true)
+                if !accepted { viewerError = model.actionError }
+                model.actionError = nil
+                return accepted
+            },
+            errorMessage: { viewerError })
     }
 
     @ViewBuilder

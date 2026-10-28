@@ -80,6 +80,8 @@ final class AssetViewerState {
         preparations[kind]?.contains(selection.visit) == true
     }
 
+    func isRemoving(_ id: String) -> Bool { removingIDs.contains(id) }
+
     @discardableResult
     func prepare<Value>(
         _ target: Target, kind: Preparation,

@@ -5,6 +5,7 @@ import SwiftUI
 struct AssetDetailView: View {
     @State private var viewer: AssetViewerState
     let visibilityPolicy: AssetVisibilityPolicy
+    let trashActions: TrashViewerActions?
     // true saat ditampilkan sebagai fullScreenCover (perlu tombol tutup sendiri).
     var isModal = false
     // Memberi tahu pemanggil foto mana yang sedang tampil, supaya
@@ -33,6 +34,7 @@ struct AssetDetailView: View {
     @State private var isZoomed = false
     @State private var showDeleteConfirm = false
     @State private var deleteTarget: AssetViewerState.Target?
+    @State private var trashActionError: ErrorEvent?
     /// Naik satu setiap toggle favorit yang berhasil; dipakai sebagai pemicu
     /// animasi simbol dan haptic.
     @State private var favoriteFeedback = 0
@@ -113,7 +115,8 @@ struct AssetDetailView: View {
         onAssetChange: ((AssetLite) -> Void)? = nil,
         onAssetRemoved: ((String) -> Void)? = nil,
         onAssetUpdated: ((String) -> Void)? = nil,
-        onFavoriteChanged: ((String, Bool) -> Void)? = nil
+        onFavoriteChanged: ((String, Bool) -> Void)? = nil,
+        trashActions: TrashViewerActions? = nil
     ) {
         _viewer = State(initialValue: AssetViewerState(currentAsset: currentAsset, assets: assets))
         self.visibilityPolicy = visibilityPolicy ?? AssetVisibilityPolicy()
@@ -122,6 +125,7 @@ struct AssetDetailView: View {
         self.onAssetRemoved = onAssetRemoved
         self.onAssetUpdated = onAssetUpdated
         self.onFavoriteChanged = onFavoriteChanged
+        self.trashActions = trashActions
     }
 
     private var currentAsset: AssetLite {
@@ -284,6 +288,7 @@ struct AssetDetailView: View {
                 albumTarget = nil
                 photoEditorTarget = nil
                 showDeleteConfirm = false
+                trashActionError = nil
                 showRemoveDeviceConfirm = false
                 loadCurrentMetadata()
             }
@@ -524,7 +529,7 @@ struct AssetDetailView: View {
     /// lalu panel menutupinya secara bertahap.
     @ViewBuilder
     private var infoPanel: some View {
-        if isPanelMounted, let detail = matchingDetail {
+        if trashActions == nil, isPanelMounted, let detail = matchingDetail {
             panelBody(for: detail)
                 // Tinggi viewport panel TETAP selama drag. Yang bergerak hanya
                 // transform layer-nya lewat `offset` di bawah.
@@ -668,7 +673,7 @@ struct AssetDetailView: View {
             panelScrollEnabled: isPanelAtMax,
             panelScrollAtTop: panelScrollOffset <= 0.5,
             onChanged: { translationY in
-                guard !isZoomed else { return }
+                guard trashActions == nil, !isZoomed else { return }
                 // Menarik ke atas dari layar detail yang belum punya info hanya
                 // menyeret panel kosong; gerakannya dibiarkan lewat kalau
                 // panelnya memang sudah terbuka, supaya tetap bisa ditutup.
@@ -676,6 +681,7 @@ struct AssetDetailView: View {
                 dragChanged(translationY)
             },
             onEnded: { translationY, velocityY in
+                guard trashActions == nil else { return }
                 dragEnded(translationY, velocity: velocityY)
             }
         )
@@ -792,8 +798,11 @@ struct AssetDetailView: View {
     /// Toast-nya mengosongkannya sendiri setelah beberapa detik.
     private var actionErrorBinding: Binding<ErrorEvent?> {
         Binding(
-            get: { vm?.actionError },
-            set: { vm?.actionError = $0 }
+            get: { trashActions == nil ? vm?.actionError : trashActionError },
+            set: {
+                if trashActions == nil { vm?.actionError = $0 }
+                else { trashActionError = $0 }
+            }
         )
     }
 
@@ -806,7 +815,7 @@ struct AssetDetailView: View {
         }
         refreshUploadedCopies(loadMetadata: false)
         await loadCurrentMetadataTask()
-        await vm?.loadAlbumsIfNeeded()
+        if trashActions == nil { await vm?.loadAlbumsIfNeeded() }
     }
 
     private func loadCurrentMetadata() {
@@ -836,7 +845,7 @@ struct AssetDetailView: View {
         selection: AssetDetailViewModel.Selection, model: AssetDetailViewModel) async {
         await model.load(selection)
         guard viewer.isCurrent(target), model.isCurrent(selection) else { return }
-        if target.serverID != nil { await model.loadContainingAlbums(selection) }
+        if trashActions == nil, target.serverID != nil { await model.loadContainingAlbums(selection) }
     }
 
     private func refreshUploadedCopies(loadMetadata: Bool = true) {
@@ -960,7 +969,17 @@ struct AssetDetailView: View {
         // Mode edit deskripsi mengambil alih navigation bar: batal di kiri,
         // simpan di kanan. Aksesori keyboard tidak dipakai karena pendaftaran
         // `placement: .keyboard` dari dalam overlay tidak konsisten.
-        if isEditingDescription {
+        if trashActions != nil {
+            if isModal {
+                ToolbarItem(placement: .topBarLeading) { closeButton }
+            }
+            if usesTopToolbarOnly {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    restoreButton
+                    deleteButton
+                }
+            }
+        } else if isEditingDescription {
             ToolbarItem(placement: .topBarLeading) { cancelEditButton }
             ToolbarItem(placement: .topBarTrailing) { saveEditButton }
         } else if usesTopToolbarOnly {
@@ -1094,7 +1113,11 @@ struct AssetDetailView: View {
 
     @ToolbarContentBuilder
     private var bottomToolbar: some ToolbarContent {
-        if currentAsset.needsUpload {
+        if trashActions != nil {
+            ToolbarItem(placement: .bottomBar) { restoreButton }
+            ToolbarSpacer(.flexible, placement: .bottomBar)
+            ToolbarItem(placement: .bottomBar) { deleteButton }
+        } else if currentAsset.needsUpload {
             // Aset yang hanya ada di perangkat belum punya aksi server. Toolbar
             // sengaja hanya menawarkan dua hal yang benar-benar bisa dilakukan.
             ToolbarItem(placement: .bottomBar) { shareButton }
@@ -1232,27 +1255,47 @@ struct AssetDetailView: View {
         vm?.albums ?? []
     }
 
-    /// Trash dengan konfirmasi yang menempel ke tombolnya.
+    private var restoreButton: some View {
+        Button("Restore") {
+            performTrash(.restore, target: currentTarget)
+        }
+        .disabled(currentServerAssetID == nil || viewer.isRemoving(currentAsset.id))
+        .accessibilityIdentifier("trashViewer.restore")
+    }
+
     private var deleteButton: some View {
         Button(role: .destructive) {
             deleteTarget = currentTarget
             showDeleteConfirm = true
         } label: {
-            Image(systemName: "trash")
+            if trashActions == nil { Image(systemName: "trash") }
+            else { Text("Delete Permanently") }
         }
+        .disabled(trashActions != nil && (currentServerAssetID == nil || viewer.isRemoving(currentAsset.id)))
+        .accessibilityLabel(trashActions == nil ? "Delete" : "Delete Permanently")
         .confirmationDialog(
-            "Delete Photo",
+            trashActions == nil ? "Delete Photo" : "Permanently Delete Photo?",
             isPresented: $showDeleteConfirm,
             titleVisibility: .visible
         ) {
-            Button("Delete", role: .destructive) { if let target = deleteTarget { performDelete(target) } }
+            Button(trashActions == nil ? "Delete" : "Delete Permanently", role: .destructive) {
+                if let target = deleteTarget { performDelete(target) }
+            }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Are you sure you want to delete this photo?")
+            if trashActions == nil {
+                Text("Are you sure you want to delete this photo?")
+            } else {
+                Text("This cannot be undone.")
+            }
         }
     }
 
     private func performDelete(_ target: AssetViewerState.Target) {
+        if trashActions != nil {
+            performTrash(.deletePermanently, target: target)
+            return
+        }
         guard let serverID = target.serverID else { return }
         viewer.remove(target, operation: {
             guard await vm?.delete(serverID) == true else { return false }
@@ -1264,6 +1307,20 @@ struct AssetDetailView: View {
                 loadCurrentMetadata()
                 if viewer.isEmpty { dismiss() }
             }
+        }
+    }
+
+    private func performTrash(_ mutation: TrashViewerActions.Mutation, target: AssetViewerState.Target) {
+        guard visibilityPolicy.allows(id: target.asset.id) else { return }
+        trashActionError = nil
+        trashActions?.perform(mutation, target: target, in: viewer, onError: {
+            trashActionError = ErrorEvent($0)
+        }) { isPresented in
+            onAssetRemoved?(target.asset.id)
+            guard isPresented else { return }
+            if mutation == .deletePermanently { deleteFeedback += 1 }
+            loadCurrentMetadata()
+            if viewer.isEmpty { dismiss() }
         }
     }
 

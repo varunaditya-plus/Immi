@@ -96,6 +96,7 @@ struct PhotoCollectionScreen<Options: View>: View {
     /// sampah. Mengubah peringatannya, dan membuat penghapusan lewat context menu
     /// ikut bertanya lebih dulu.
     var deletesPermanently = false
+    var trashViewerActions: TrashViewerActions? = nil
     /// Trash includes soft-deleted photos while still excluding unavailable ones.
     var removalScope: RemovedAssets.Scope = .library
     var visibilityScope: AssetVisibilityPolicy.Scope = .collection
@@ -326,22 +327,26 @@ struct PhotoCollectionScreen<Options: View>: View {
 
     /// Layar detail, dibangun untuk dipresentasikan oleh grid.
     private func detailScreen(for id: String) -> AnyView {
-        guard let asset = asset(for: id) else { return AnyView(EmptyView()) }
+        guard let detail = detailView(for: id) else { return AnyView(EmptyView()) }
 
         return AnyView(
             NavigationStack {
-                AssetDetailView(
-                    currentAsset: asset,
-                    assets: visibleAssets,
-                    visibilityPolicy: visibilityPolicy,
-                    isModal: true,
-                    // Menutupnya harus mengecil ke foto yang SEDANG dilihat,
-                    // bukan yang pertama dibuka.
-                    onAssetChange: { gridController?.detailDidChangeAsset(to: $0.id) })
+                detail
             }
             .ignoresSafeArea(.keyboard, edges: .bottom)
             .environment(session)
         )
+    }
+
+    func detailView(for id: String) -> AssetDetailView? {
+        guard let asset = asset(for: id) else { return nil }
+        return AssetDetailView(
+            currentAsset: asset,
+            assets: visibleAssets,
+            visibilityPolicy: visibilityPolicy,
+            isModal: true,
+            onAssetChange: { gridController?.detailDidChangeAsset(to: $0.id) },
+            trashActions: trashViewerActions)
     }
 
     /// Judul yang mendarat di toolbar begitu judul besar di sampul menyentuhnya.
