@@ -175,6 +175,7 @@ final class BackupService {
     }
     private var albumLookupOwnership: BackupUploadOwnership?
     private var albumLookups: [String: AlbumLookup] = [:]
+    @ObservationIgnored private var albumPlacementTasks: [UUID: Task<Void, Never>] = [:]
     /// Berapa loop pengantrean yang sedang berjalan.
     ///
     /// PENGHITUNG, bukan `Bool`. `stop()` melepas `task` dan mengosongkan
@@ -858,11 +859,11 @@ final class BackupService {
         }
     }
 
-    /// Wait for queued preparation before background completion.
     func waitUntilFinished() async {
         while !Task.isCancelled {
             if let wake = networkWakeTask { await wake.value }
             else if let work = task { await work.value }
+            else if let placement = albumPlacementTasks.values.first { await placement.value }
             else { return }
         }
     }
@@ -1729,11 +1730,14 @@ final class BackupService {
     ) {
         guard syncAlbums, context.phase == .primaryAsset, let albumName,
               let ownership = context.ownership, uploadOwnership == ownership else { return }
-        Task { @MainActor [weak self] in
+        let id = UUID()
+        let work = Task { @MainActor [weak self] in
             guard let self else { return }
+            defer { self.albumPlacementTasks[id] = nil }
             guard self.syncAlbums else { return }
             await self.placeInAlbum(assetID, albumName: albumName, ownership: ownership)
         }
+        albumPlacementTasks[id] = work
     }
 
     /// Resolve a name once while concurrent upload completions await the same
@@ -1780,6 +1784,8 @@ final class BackupService {
 
     private func resetAlbumResolution(for ownership: BackupUploadOwnership?) {
         guard albumLookupOwnership != ownership else { return }
+        for placement in albumPlacementTasks.values { placement.cancel() }
+        albumPlacementTasks.removeAll()
         for lookup in albumLookups.values { lookup.task.cancel() }
         albumLookups.removeAll()
         albumIDsByName.removeAll()

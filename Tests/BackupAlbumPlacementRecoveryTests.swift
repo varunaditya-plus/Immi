@@ -162,6 +162,50 @@ final class BackupAlbumPlacementRecoveryTests: XCTestCase {
         XCTAssertNil(fixture.data.getBackupRecord(localIdentifier: context.localIdentifier))
     }
 
+    func testBackgroundDrainWaitsForAlbumWorkAddedWhileItIsAlreadyWaiting() async throws {
+        let fixture = try fixture()
+        let gate = PlacementAddGate()
+        addTeardownBlock { await gate.release() }
+        fixture.albums.addGate = gate
+        let context = try fixture.startUpload(queueName: "Camera", contextName: "Camera")
+        fixture.complete(context, assetID: "uploaded")
+        await fulfillment(of: [gate.started], timeout: 2)
+        XCTAssertEqual(fixture.data.getBackupRecord(localIdentifier: context.localIdentifier)?.assetId, "uploaded")
+        XCTAssertNil(fixture.queue.item(id: context.localIdentifier))
+
+        let waiting = expectation(description: "The background drain started")
+        let completed = expectation(description: "The drain must not finish while another album addition is held")
+        completed.isInverted = true
+        var finished = false
+        let drain = Task {
+            waiting.fulfill()
+            await fixture.service.waitUntilFinished()
+            finished = true
+            completed.fulfill()
+        }
+        addTeardownBlock { await gate.release(); await drain.value }
+        await fulfillment(of: [waiting], timeout: 2)
+        await Task.yield()
+        XCTAssertFalse(finished, "Background completion must keep the app alive for the album request")
+
+        let nextGate = PlacementAddGate()
+        addTeardownBlock { await nextGate.release() }
+        fixture.albums.addGate = nextGate
+        let next = try fixture.startUpload(queueName: "Camera", contextName: "Camera", taskIdentifier: 43)
+        fixture.complete(next, assetID: "second-upload", taskIdentifier: 43)
+        await fulfillment(of: [nextGate.started], timeout: 2)
+        gate.release()
+        await fulfillment(of: [completed], timeout: 0.1)
+        XCTAssertFalse(finished)
+        XCTAssertEqual(fixture.albums.addedIDs, [["uploaded"]])
+
+        nextGate.release()
+        await drain.value
+        XCTAssertTrue(finished)
+        XCTAssertEqual(fixture.albums.addedIDs, [["uploaded"], ["second-upload"]])
+        XCTAssertEqual(fixture.albums.createdNames, ["Camera"])
+    }
+
     func testFailedAlbumLookupDoesNotUndoTheDurableSuccessfulUpload() async throws {
         let fixture = try fixture()
         fixture.albums.lookupError = URLError(.timedOut)
@@ -242,6 +286,7 @@ private final class PlacementAlbums: AlbumRepository {
     var onLookup: (() -> Void)?
     var onAdd: (() -> Void)?
     var lookupError: Error?
+    var addGate: PlacementAddGate?
 
     override func all() async throws -> [AlbumResponseDTO] {
         onLookup?()
@@ -256,9 +301,28 @@ private final class PlacementAlbums: AlbumRepository {
     }
 
     override func addAssets(_ ids: [String], to albumId: String) async throws -> [String] {
+        if let addGate { await addGate.wait() }
         addedIDs.append(ids)
         destinationIDs.append(albumId)
         onAdd?()
         return []
+    }
+}
+
+@MainActor
+private final class PlacementAddGate {
+    let started = XCTestExpectation(description: "Album addition is held after the upload completed")
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var released = false
+
+    func wait() async {
+        guard !released else { return }
+        await withCheckedContinuation { continuation = $0; started.fulfill() }
+    }
+
+    func release() {
+        released = true
+        continuation?.resume()
+        continuation = nil
     }
 }
