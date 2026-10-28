@@ -194,10 +194,12 @@ struct PeopleView: View {
 
 /// Foto seseorang, memakai `PhotoCollectionScreen` yang sama dengan detail
 /// album — yang khas di sini hanya menu Rename / Hide.
+@MainActor
 struct PersonDetailView: View {
-    @State var person: PersonDTO
+    @State private var detail: PersonDetailState
     let repo: PeopleRepository
     var listVM: PeopleListViewModel?
+    var onRenamed: ((String, String) -> Void)? = nil
 
     @Environment(SessionManager.self) private var session
     @State private var vm: AssetGridViewModel?
@@ -205,17 +207,33 @@ struct PersonDetailView: View {
     @State private var albumPickerSelection: SelectedAssetIDs?
     @State private var sharedLink: SharedLinkPresentation?
     @State private var showRenameSheet = false
-    @State private var newName = ""
-    @State private var actionError: String?
     /// Kabar singkat dari aksi — mis. "sudah ada di album ini". Toast, bukan
     /// alert: ini bukan kegagalan yang menuntut jawaban.
     @State private var actionMessage: ErrorEvent?
 
+    init(
+        person: PersonDTO, repo: PeopleRepository, listVM: PeopleListViewModel? = nil,
+        onRenamed: ((String, String) -> Void)? = nil
+    ) {
+        _detail = State(initialValue: PersonDetailState(person: person))
+        self.repo = repo
+        self.listVM = listVM
+        self.onRenamed = onRenamed
+    }
+
+    private var person: PersonDTO { detail.person }
+
     var body: some View {
         screen
             .sheet(isPresented: $showRenameSheet) {
-                RenameSheet(name: $newName, onSave: {
-                    Task { await rename() }
+                RenameSheet(name: Bindable(detail).renameDraft, onSave: {
+                    guard let request = detail.prepareRename() else { return }
+                    Task {
+                        await detail.saveRename(request, using: repo) { id, name in
+                            listVM?.applyRename(id, to: name)
+                            onRenamed?(id, name)
+                        }
+                    }
                 })
             }
             .sheet(item: $albumPickerAsset) { asset in
@@ -228,12 +246,12 @@ struct PersonDetailView: View {
                 }
             }
             .alert("Action Failed", isPresented: .init(
-                get: { actionError != nil },
-                set: { if !$0 { actionError = nil } }
+                get: { detail.actionError != nil },
+                set: { if !$0 { detail.actionError = nil } }
             )) {
                 Button("OK", role: .cancel) {}
             } message: {
-                Text(actionError ?? "")
+                Text(detail.actionError ?? "")
             }
             .sheet(item: $albumPickerSelection) { selection in
                 AlbumPickerLoader { album in
@@ -311,14 +329,18 @@ struct PersonDetailView: View {
     @ViewBuilder
     private var personMenu: some View {
         Button {
-            newName = person.name
+            detail.renameDraft = person.name
             showRenameSheet = true
         } label: {
             Label("Rename", systemImage: "pencil")
         }
 
         Button {
-            Task { await toggleHidden() }
+            Task {
+                await detail.toggleHidden(using: repo) { id, hidden in
+                    listVM?.applyHidden(id, to: hidden)
+                }
+            }
         } label: {
             Label(
                 person.isHidden ? "Show" : "Hide",
@@ -345,29 +367,7 @@ struct PersonDetailView: View {
 
         // Nama bisa berubah di server sejak daftar dimuat; diambil ulang supaya
         // judul sampulnya benar.
-        if let detail = try? await repo.detail(person.id) { person = detail }
-    }
-
-    private func rename() async {
-        guard !newName.isEmpty else { return }
-        do {
-            try await repo.rename(person.id, to: newName)
-            person.name = newName
-            listVM?.applyRename(person.id, to: newName)
-        } catch {
-            actionError = (error as? APIError)?.errorDescription ?? error.localizedDescription
-        }
-    }
-
-    private func toggleHidden() async {
-        do {
-            let newValue = !person.isHidden
-            try await repo.setHidden(person.id, to: newValue)
-            person.isHidden = newValue
-            listVM?.applyHidden(person.id, to: newValue)
-        } catch {
-            actionError = (error as? APIError)?.errorDescription ?? error.localizedDescription
-        }
+        await detail.loadDetail(using: repo)
     }
 }
 

@@ -598,7 +598,8 @@ struct LibraryView: View {
     private func personDetail(for person: PersonDTO) -> some View {
         PersonDetailView(
             person: person,
-            repo: PeopleRepository(api: APIClient(session: session)))
+            repo: PeopleRepository(api: APIClient(session: session)),
+            onRenamed: { id, name in vm?.applyPersonRename(id, to: name) })
             .navigationTransition(.zoom(sourceID: person.id, in: personNamespace))
     }
 
