@@ -10,6 +10,10 @@ enum SharedUploadItemState: String, Codable, Sendable {
     case queued
     case uploading
     case uploaded
+    case failed
+
+    var isFinished: Bool { self == .uploaded }
+    var isReadyForUpload: Bool { self == .queued || self == .uploading }
 }
 
 struct SharedUploadItem: Codable, Equatable, Identifiable, Sendable {

@@ -11,6 +11,11 @@ enum SharedUploadClientError: LocalizedError {
     case invalidResponse
     case server(status: Int, message: String?)
 
+    var requiresUserRetry: Bool {
+        guard case .server(let status, _) = self else { return false }
+        return (400..<500).contains(status) && ![401, 408, 425, 429].contains(status)
+    }
+
     var errorDescription: String? {
         switch self {
         case .invalidResponse:

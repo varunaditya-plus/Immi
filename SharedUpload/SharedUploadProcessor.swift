@@ -30,17 +30,18 @@ final class SharedUploadProcessor {
         guard var batch = try await store.batch(id: batchID, owner: owner) else {
             return .finished(remaining: 0)
         }
-        let total = batch.items.count { $0.state != .uploaded }
+        let total = batch.items.count { $0.state.isReadyForUpload }
         var current = 0
         var cleanupError: Error?
 
         for index in batch.items.indices {
             try Task.checkCancellation()
-            if batch.items[index].state == .uploaded {
+            if batch.items[index].state.isFinished {
                 do { try await store.removeFile(for: batch.items[index], batchID: batchID) }
                 catch { cleanupError = cleanupError ?? error }
                 continue
             }
+            guard batch.items[index].state.isReadyForUpload else { continue }
 
             batch.items[index].state = .uploading
             batch.items[index].lastError = nil
@@ -58,7 +59,8 @@ final class SharedUploadProcessor {
                 try Task.checkCancellation()
                 try await upload(item, fileURL, directory)
             } catch {
-                batch.items[index].state = .queued
+                batch.items[index].state = (error as? SharedUploadClientError)?.requiresUserRetry == true
+                    ? .failed : .queued
                 batch.items[index].lastError = error.localizedDescription
                 try await store.save(batch)
                 if Task.isCancelled || error is CancellationError {
@@ -76,7 +78,7 @@ final class SharedUploadProcessor {
         }
 
         if let cleanupError { throw cleanupError }
-        let remaining = batch.items.count { $0.state != .uploaded }
+        let remaining = batch.items.count { !$0.state.isFinished }
         if remaining == 0 {
             // Keep completed rows until this final removal. If cleanup is
             // interrupted, recovery only cleans them and never uploads again.
