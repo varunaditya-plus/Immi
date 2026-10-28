@@ -70,6 +70,8 @@ struct BackupView: View {
                 BackupScheduler.schedule()
             }
         }
+        .onChange(of: library.currentSelectionScanID) { backup.refreshCounts() }
+        .onChange(of: SwiftDataManager.shared.backupMappingRevision) { backup.refreshCounts() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { library.refreshAuthorizationStatus() }
         }
@@ -184,7 +186,7 @@ struct BackupView: View {
             VStack(alignment: .leading, spacing: 10) {
                 if backup.isUploading {
                     uploadProgress
-                } else if let error = backup.lastError {
+                } else if backup.hasStatusError, let error = backup.lastError {
                     // Alasan kegagalan ditulis apa adanya, bukan diringkas jadi
                     // "terjadi kesalahan". Yang bisa diperbaiki pengguna hanya yang
                     // bisa dibacanya.
@@ -278,45 +280,12 @@ struct BackupView: View {
         }
     }
 
-    /// Satu kalimat yang menjelaskan kenapa keadaannya begini.
-    ///
-    /// Bilah kemajuan yang diam tanpa keterangan membuat orang menyimpulkan
-    /// aplikasinya rusak, padahal seringkali jaringannya yang sedang tidak
-    /// memenuhi syarat sendiri.
     private var statusText: String {
-        if !library.isAuthorized && (!library.selectedAlbumIDs.isEmpty || !backup.uploadItems.isEmpty) {
-            return String(localized: "No Access to Photos")
-        }
-        if !backup.isEnabled {
-            return """
-                New photos and videos from the selected albums are uploaded when \
-                you open the app, and occasionally in the background. iOS decides \
-                when background uploads run — opening the app more often makes \
-                them run more often.
-                """
-        }
-        if UIApplication.shared.backgroundRefreshStatus != .available {
-            return "Background App Refresh is disabled. Enable it in Settings > General > Background App Refresh."
-        }
-        if !NetworkMonitor.shared.isOnline {
-            return "Waiting for a network connection."
-        }
-        if backup.waitingForAuthentication > 0 {
-            return "Sign in again to resume the background upload queue."
-        }
-        if backup.waitingForICloud > 0 {
-            return "Waiting for original files to become available from iCloud."
-        }
-        if backup.scheduledForRetry > 0 {
-            return "Some uploads are scheduled to retry automatically."
-        }
-        if NetworkMonitor.shared.isExpensive && !backup.canUploadNow {
-            return "Waiting for Wi-Fi. Allow cellular data in Backup Options to continue now."
-        }
-        if backup.remainder == 0 {
-            return "Everything in the selected albums is backed up."
-        }
-        return backup.isUploading ? "Backing up now." : "Ready to back up."
+        BackupStatus(backup: backup, sharedUploads: sharedUploads).explanation(
+            backup: backup,
+            backgroundRefreshAvailable: UIApplication.shared.backgroundRefreshStatus == .available,
+            isOnline: NetworkMonitor.shared.isOnline,
+            isExpensive: NetworkMonitor.shared.isExpensive)
     }
 }
 
