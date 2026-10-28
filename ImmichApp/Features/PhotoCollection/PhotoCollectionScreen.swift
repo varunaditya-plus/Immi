@@ -63,7 +63,7 @@ struct PhotoCollectionScreen<Options: View>: View {
     var emptyState: PhotoCollectionEmptyState? = nil
 
     var onRetry: () -> Void
-    var onToggleFavorite: (AssetLite) async -> Void
+    var onToggleFavorite: ((AssetLite) async -> Void)? = nil
     var onDelete: ([String]) async -> Void
     var shareURLs: ([String]) async -> [URL]
 
@@ -595,7 +595,7 @@ struct PhotoCollectionScreen<Options: View>: View {
     /// Dibangun dari id, bukan dari salinan aset milik grid — dengan begitu
     /// status favoritnya selalu yang terbaru, bukan yang sempat tersimpan saat
     /// grid terakhir disusun.
-    private func menuActions(for id: String) -> [PhotoGridMenuAction] {
+    func menuActions(for id: String) -> [PhotoGridMenuAction] {
         guard let asset = asset(for: id) else { return [] }
 
         // TONG SAMPAH hanya punya dua jalan keluar, dan keduanya ada di sini.
@@ -667,15 +667,17 @@ struct PhotoCollectionScreen<Options: View>: View {
                 })
         }
 
-        actions.append(PhotoGridMenuAction(
-            title: asset.isFavorite
-                ? String(localized: "Unfavorite")
-                : String(localized: "Favorite"),
-            systemImage: asset.isFavorite ? "heart.fill" : "heart",
-            group: .quick
-        ) {
-            runAction([asset.id]) { await onToggleFavorite(asset) }
-        })
+        if let onToggleFavorite {
+            actions.append(PhotoGridMenuAction(
+                title: asset.isFavorite
+                    ? String(localized: "Unfavorite")
+                    : String(localized: "Favorite"),
+                systemImage: asset.isFavorite ? "heart.fill" : "heart",
+                group: .quick
+            ) {
+                runAction([asset.id]) { await onToggleFavorite(asset) }
+            })
+        }
 
         if let onArchiveSelection {
             actions.append(PhotoGridMenuAction(
@@ -1117,7 +1119,7 @@ extension PhotoCollectionScreen where Options == EmptyView {
         actionError: Binding<String?> = .constant(nil),
         emptyState: PhotoCollectionEmptyState? = nil,
         onRetry: @escaping () -> Void,
-        onToggleFavorite: @escaping (AssetLite) async -> Void,
+        onToggleFavorite: ((AssetLite) async -> Void)? = nil,
         onDelete: @escaping ([String]) async -> Void,
         shareURLs: @escaping ([String]) async -> [URL],
         onAddPhotos: (() -> Void)? = nil,

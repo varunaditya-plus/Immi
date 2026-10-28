@@ -21,6 +21,7 @@ struct DeviceAlbumDetailView: View {
     @State private var uploadedIDs: Set<String> = []
     @State private var phase: LoadingPhase<Void> = .loading
     @State private var actionError: ErrorEvent?
+    @State private var collectionActionError: String?
     @State private var deviceRemoval: Task<Void, Never>?
     @State private var loadRevision = UUID()
 
@@ -47,15 +48,21 @@ struct DeviceAlbumDetailView: View {
     }
 
     private var collection: some View {
+        collectionScreen(assets: assets,
+            phase: library.isAuthorized && photosRevision != library.revision ? .loading : phase,
+            actionError: $collectionActionError)
+    }
+
+    func collectionScreen(
+        assets: [AssetLite], phase: LoadingPhase<Void>, actionError: Binding<String?>
+    ) -> PhotoCollectionScreen<EmptyView> {
         PhotoCollectionScreen(
             title: LocalizedStringKey(album.title),
             subtitle: subtitle,
             assets: assets,
-            phase: library.isAuthorized && photosRevision != library.revision ? .loading : phase,
+            phase: phase,
+            actionError: actionError,
             onRetry: { Task { await load() } },
-            // Foto ini belum tentu ada di server, jadi tidak ada yang bisa
-            // difavoritkan.
-            onToggleFavorite: { _ in },
             onDelete: { await delete($0) },
             shareURLs: { await shareURLs(for: $0) },
             onUpload: { await upload($0) },

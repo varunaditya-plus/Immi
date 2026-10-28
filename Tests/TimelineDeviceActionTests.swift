@@ -285,6 +285,33 @@ final class TimelineDeviceActionTests: XCTestCase {
         }
     }
 
+    func testDeviceAlbumDoesNotOfferAnEmptyFavoriteCallback() async throws {
+        let assets = [AssetLite(id: "device:\(UUID())", isVideo: false, ratio: 1, thumbhash: nil,
+            createdAt: .distantPast, origin: .device),
+            AssetLite(id: "device:\(UUID())", isVideo: false, ratio: 1, thumbhash: nil,
+                createdAt: .distantPast, origin: .both)]
+        let view = DeviceAlbumDetailView(album: LocalAlbum(id: "local-album", title: "Camera", count: 2))
+        let screen = view.collectionScreen(assets: assets, phase: .loaded(()), actionError: .constant(nil))
+        for asset in assets {
+            let titles = screen.menuActions(for: asset.id).map(\.title)
+            XCTAssertFalse(titles.contains(String(localized: "Favorite")))
+            XCTAssertFalse(titles.contains(String(localized: "Unfavorite")))
+            XCTAssertTrue(titles.contains(String(localized: "Share")))
+            XCTAssertTrue(titles.contains(String(localized: "Delete")))
+            XCTAssertEqual(titles.contains(String(localized: "Upload")), asset.origin == .device)
+        }
+        var favored: [String] = []
+        let called = expectation(description: "An ordinary collection still dispatches its favorite callback")
+        let ordinary = PhotoCollectionScreen(title: "Ordinary", assets: [assets[0]], phase: .loaded(()),
+            onRetry: {}, onToggleFavorite: { favored.append($0.id); called.fulfill() },
+            onDelete: { _ in }, shareURLs: { _ in [] })
+        let favorite = try XCTUnwrap(ordinary.menuActions(for: assets[0].id)
+            .first { $0.title == String(localized: "Favorite") })
+        favorite.handler()
+        await fulfillment(of: [called], timeout: 2)
+        XCTAssertEqual(favored, [assets[0].id])
+    }
+
     private func body() throws -> [String: Any] {
         let data = try XCTUnwrap(MockURLProtocol.lastRequestBody)
         return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
