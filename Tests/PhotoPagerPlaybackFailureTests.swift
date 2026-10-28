@@ -56,6 +56,27 @@ final class PhotoPagerPlaybackFailureTests: XCTestCase {
         cell.stopPlayback()
     }
 
+    func testLongPressOnVideoPreservesLoadingWhileItsSourceIsPending() async throws {
+        let loader = PlaybackFailureLoader(sources: [])
+        loader.holdsPlayback = true
+        let cell = makeCell(loader: loader)
+        defer {
+            cell.stopPlayback()
+            loader.pending.forEach { $0.resume(returning: nil) }
+        }
+        let spinner = try loadingIndicator(in: cell)
+        cell.togglePlayPause()
+        try await waitUntil { loader.pending.count == 1 }
+        XCTAssertTrue(spinner.isAnimating)
+
+        hold(.began, on: cell)
+        hold(.ended, on: cell)
+
+        XCTAssertTrue(spinner.isAnimating, "Releasing a hold on a video must not hide its pending playback load")
+        XCTAssertEqual(loader.returnedRequests, 0)
+        XCTAssertTrue(try failureView(in: cell).isHidden)
+    }
+
     func testQueuedFailureFromReplacedItemCannotFailTheCurrentVideo() async throws {
         let movieURL = try await makePagerPlaybackMovie()
         defer { try? FileManager.default.removeItem(at: movieURL) }

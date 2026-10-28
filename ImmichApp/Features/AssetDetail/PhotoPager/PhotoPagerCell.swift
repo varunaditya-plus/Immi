@@ -1106,6 +1106,7 @@ final class PhotoPagerCell: UICollectionViewCell {
 
     /// Ditekan-tahan: bagian bergeraknya diputar selama jari menempel.
     @objc private func handleLongPress(_ recognizer: UILongPressGestureRecognizer) {
+        guard !isVideo else { return }
         switch recognizer.state {
         case .began:
             isLivePhotoPressed = true
