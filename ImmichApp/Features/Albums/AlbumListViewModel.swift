@@ -196,8 +196,14 @@ final class AlbumListViewModel {
             try await repo.addUsers(userIDs, to: albumId)
             guard canPublish else { return }
             invalidateLoads()
-            // Status `shared` ikut berubah di server, jadi daftarnya dimuat
-            // ulang supaya filter Shared/Personal tetap benar.
+            if let index = albums.firstIndex(where: { $0.id == albumId }) {
+                var updated = albums[index]
+                updated.shared = true
+                albums[index] = updated
+                persist()
+            }
+            // Preserve the confirmed sharing change even if reconciliation
+            // fails or a later action invalidates its response.
             await loadAlbums()
         } catch {
             guard canPublish, actionErrorID == errorID else { return }

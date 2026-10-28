@@ -12,7 +12,7 @@ struct AlbumResponseDTO: Decodable, Identifiable, Hashable {
     /// isi album berubah, tanpa menunggu request daftar album selesai.
     var assetCount: Int
     var albumThumbnailAssetId: String?
-    let shared: Bool
+    var shared: Bool
     let createdAt: Date
     let assets: [AssetResponseDTO]?
 
