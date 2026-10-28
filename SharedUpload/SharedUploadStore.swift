@@ -65,6 +65,7 @@ final class SharedUploadBatchClaim: @unchecked Sendable {
 /// aplikasi utama tidak menimpa batch satu sama lain saat keduanya aktif.
 actor SharedUploadStore {
     static let shared = SharedUploadStore()
+    private static let draftLifetime: TimeInterval = 24 * 60 * 60
 
     private let rootURL: URL?
     private let fileManager: FileManager
@@ -87,6 +88,66 @@ actor SharedUploadStore {
             at: directory,
             withIntermediateDirectories: true)
         return directory
+    }
+
+    func makeDraftDirectory(id: UUID) throws -> (directory: URL, claim: SharedUploadBatchClaim) {
+        // Failure to remove an older draft must not prevent a new share.
+        _ = try? cleanupAbandonedDrafts()
+        let directory = try makeBatchDirectory(id: id)
+        guard let claim = try claimBatch(id: id) else { throw POSIXError(.EBUSY) }
+        return (directory, claim)
+    }
+
+    /// Only uncommitted, inactive drafts expire. Any manifest is durable intent,
+    /// including one this version cannot decode or does not own.
+    @discardableResult
+    func cleanupAbandonedDrafts(now: Date = .now) throws -> Int {
+        guard let rootURL else { throw SharedUploadStoreError.appGroupUnavailable }
+        guard fileManager.fileExists(atPath: rootURL.path) else { return 0 }
+        let directories = try fileManager.contentsOfDirectory(
+            at: rootURL, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey],
+            options: [.skipsHiddenFiles])
+        let cutoff = now.addingTimeInterval(-Self.draftLifetime)
+        var removed = 0
+        var firstError: Error?
+        for directory in directories {
+            do {
+                guard let id = UUID(uuidString: directory.lastPathComponent),
+                      directory.lastPathComponent == id.uuidString else { continue }
+                let values = try directory.resourceValues(
+                    forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey])
+                guard values.isDirectory == true, values.isSymbolicLink != true,
+                      let modified = values.contentModificationDate, modified < cutoff,
+                      try !hasManifest(id: id),
+                      let claim = try claimBatch(id: id) else { continue }
+                defer { withExtendedLifetime(claim) {} }
+                // Admission in another process may have finished before this claim.
+                guard try !hasManifest(id: id) else { continue }
+                do {
+                    try fileManager.removeItem(at: directory)
+                } catch {
+                    // Creating a legacy draft's first lock changes its directory
+                    // date. A failed removal must not renew its retention period.
+                    try? fileManager.setAttributes([.modificationDate: modified], ofItemAtPath: directory.path)
+                    throw error
+                }
+                removed += 1
+            } catch {
+                firstError = firstError ?? error
+            }
+        }
+        if let firstError { throw firstError }
+        return removed
+    }
+
+    private func hasManifest(id: UUID) throws -> Bool {
+        let manifest = try batchDirectory(id: id).appendingPathComponent("manifest.json")
+        do {
+            _ = try fileManager.attributesOfItem(atPath: manifest.path)
+            return true
+        } catch let error as CocoaError where Self.isMissing(error) {
+            return false
+        }
     }
 
     func existingBatchDirectory(id: UUID) throws -> URL? {

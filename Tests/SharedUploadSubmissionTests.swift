@@ -87,6 +87,9 @@ final class SharedUploadSubmissionTests: XCTestCase {
         fixture.submission.finish()
         XCTAssertFalse(fixture.submission.isCommitted)
         XCTAssertTrue(fixture.submission.canEdit)
+        let competitor = SharedUploadStore(rootURL: fixture.rootURL)
+        let stillClaimed = try await competitor.claimBatch(id: fixture.submission.batchID)
+        XCTAssertNil(stillClaimed, "A failed admission must remain protected as an active draft")
         XCTAssertEqual(try? Data(contentsOf: fixture.sourceURL), fixture.source)
         XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.manifestURL.path))
 
@@ -171,6 +174,35 @@ final class SharedUploadSubmissionTests: XCTestCase {
         XCTAssertEqual(batches.first?.items, [fixture.item])
     }
 
+    func testPendingDraftPreparationRejectsSubmitAndCloseUntilItsClaimIsOwned() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("DraftPreparation-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let files = HeldCreateFileManager()
+        let store = SharedUploadStore(rootURL: root, fileManager: files)
+        let submission = SharedUploadSubmission(store: store)
+        files.holdNextCreate()
+        let preparing = Task { try await submission.prepareDraft() }
+        await fulfillment(of: [files.started], timeout: 2)
+        defer { files.release.signal() }
+
+        XCTAssertTrue(submission.isProcessing)
+        XCTAssertFalse(submission.begin())
+        XCTAssertFalse(submission.canEdit)
+        let closedWhilePreparing = try await submission.close()
+        XCTAssertFalse(closedWhilePreparing)
+        files.release.signal()
+        let directory = try await preparing.value
+        XCTAssertEqual(directory.lastPathComponent, submission.batchID.uuidString)
+        XCTAssertTrue(submission.canEdit)
+        let competitor = SharedUploadStore(rootURL: root)
+        let protected = try await competitor.claimBatch(id: submission.batchID)
+        XCTAssertNil(protected)
+
+        let closed = try await submission.close()
+        XCTAssertTrue(closed)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
+    }
+
     func testPendingAdmissionRejectsDoubleSubmitAndCloseBeforeItsWriteCompletes() async throws {
         let fileManager = HeldCreateFileManager()
         let fixture = try await Fixture(fileManager: fileManager)
@@ -190,17 +222,23 @@ final class SharedUploadSubmissionTests: XCTestCase {
         let closed = try await fixture.submission.close()
         XCTAssertFalse(closed)
         XCTAssertEqual(try? Data(contentsOf: fixture.sourceURL), fixture.source)
+        let competitor = SharedUploadStore(rootURL: fixture.rootURL)
+        let heldClaim = try await competitor.claimBatch(id: fixture.submission.batchID)
+        XCTAssertNil(heldClaim, "The initial claim must cover the held manifest write")
 
         fileManager.release.signal()
         try await admission.value
         fixture.submission.finish()
         XCTAssertTrue(fixture.submission.isCommitted)
+        let admittedClaim = try await competitor.claimBatch(id: fixture.submission.batchID)
+        XCTAssertNotNil(admittedClaim, "Durable admission releases the draft to the recovery processor")
         let finalClose = try await fixture.submission.close()
         XCTAssertTrue(finalClose)
         XCTAssertEqual(try? Data(contentsOf: fixture.sourceURL), fixture.source)
         let reopened = SharedUploadStore(rootURL: fixture.rootURL)
         let batches = try await reopened.batches(for: fixture.owner)
         XCTAssertEqual(batches.first?.items, [fixture.item])
+        withExtendedLifetime(admittedClaim) {}
     }
 
     @MainActor
@@ -231,7 +269,7 @@ final class SharedUploadSubmissionTests: XCTestCase {
             item = SharedUploadItem(id: UUID(), filename: "shared.jpg", relativePath: "shared.jpg",
                 contentType: "image/jpeg", byteCount: 5, createdAt: now, modifiedAt: now,
                 state: .queued, lastError: nil)
-            _ = try await store.makeBatchDirectory(id: submission.batchID)
+            _ = try await submission.prepareDraft()
             try source.write(to: sourceURL)
         }
 

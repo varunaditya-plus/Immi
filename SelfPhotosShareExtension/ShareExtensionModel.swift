@@ -45,18 +45,20 @@ final class ShareExtensionModel: ObservableObject {
         hasLoaded = true
 
         do {
-            let directory = try await SharedUploadStore.shared.makeBatchDirectory(id: submission.batchID)
+            let directory = try await submission.prepareDraft()
             let providers = (shareContext?.inputItems as? [NSExtensionItem] ?? [])
                 .flatMap { $0.attachments ?? [] }
                 .prefix(30)
 
             for provider in providers {
+                try Task.checkCancellation()
                 guard let typeIdentifier = Self.supportedTypeIdentifier(for: provider)
                 else { continue }
                 let materialized = try await Self.materialize(
                     provider: provider,
                     typeIdentifier: typeIdentifier,
                     directory: directory)
+                try Task.checkCancellation()
                 items.append(materialized)
             }
 
@@ -64,6 +66,7 @@ final class ShareExtensionModel: ObservableObject {
                 ? .failed(String(localized: "No supported photos or videos were shared."))
                 : .ready
         } catch {
+            if Task.isCancelled { _ = try? await submission.close() }
             phase = .failed(error.localizedDescription)
         }
     }

@@ -35,6 +35,7 @@ final class SharedUploadService {
                 }
             }
             do {
+                _ = try? await SharedUploadStore.shared.cleanupAbandonedDrafts()
                 let batches = try await SharedUploadStore.shared.batches(for: credential.owner)
                 let client = SharedUploadClient(credential: credential)
                 let processor = SharedUploadProcessor()
