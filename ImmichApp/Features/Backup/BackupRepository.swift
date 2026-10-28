@@ -3,14 +3,20 @@ import Foundation
 
 class BackupRepository {
     private let api: APIClient
+    private let readChunk: @Sendable (FileHandle, Int) throws -> Data?
 
-    init(api: APIClient) {
+    init(
+        api: APIClient,
+        readChunk: @escaping @Sendable (FileHandle, Int) throws -> Data? = { try $0.read(upToCount: $1) }
+    ) {
         self.api = api
+        self.readChunk = readChunk
     }
 
     /// SHA1 file secara bertahap—video ratusan MB tidak dimuat utuh ke RAM.
     func checksum(forFile url: URL) async throws -> String {
         try Task.checkCancellation()
+        let readChunk = readChunk
         let worker = Task.detached(priority: .utility) {
             try Task.checkCancellation()
             let handle = try FileHandle(forReadingFrom: url)
@@ -20,7 +26,7 @@ class BackupRepository {
             while true {
                 let hasMore = try autoreleasepool {
                     try Task.checkCancellation()
-                    guard let chunk = try handle.read(upToCount: 1024 * 1024), !chunk.isEmpty else {
+                    guard let chunk = try readChunk(handle, 1024 * 1024), !chunk.isEmpty else {
                         return false
                     }
                     hasher.update(data: chunk)
@@ -126,7 +132,10 @@ class BackupRepository {
         modifiedAt: Date,
         additionalFields: [String: String] = [:]
     ) async throws -> PreparedUpload {
+        try Task.checkCancellation()
         let context = await api.session.snapshot
+        try Task.checkCancellation()
+        try await api.checkCurrent(context)
         let baseURL = context.baseURL
         let authHeaders = context.authHeaders
         guard let baseURL else { throw APIError.invalidURL }
@@ -156,7 +165,9 @@ class BackupRepository {
 
         // Badan multipart ditulis per potongan di luar main actor. Dengan ini
         // sebuah video hanya punya buffer 1 MB, bukan dua salinan penuh di RAM.
-        let bodyFile = try await Task.detached(priority: .utility) {
+        let readChunk = readChunk
+        let worker = Task.detached(priority: .utility) {
+            try Task.checkCancellation()
             let url = FileManager.default.temporaryDirectory
                 .appendingPathComponent("upload-\(UUID().uuidString).multipart")
             do {
@@ -166,6 +177,7 @@ class BackupRepository {
                 defer { try? output.close() }
 
                 func write(_ string: String) throws {
+                    try Task.checkCancellation()
                     guard let data = string.data(using: .utf8) else { throw APIError.unknown }
                     try output.write(contentsOf: data)
                 }
@@ -182,17 +194,38 @@ class BackupRepository {
 
                 let input = try FileHandle(forReadingFrom: fileURL)
                 defer { try? input.close() }
-                while let chunk = try input.read(upToCount: 1024 * 1024), !chunk.isEmpty {
-                    try Task.checkCancellation()
-                    try output.write(contentsOf: chunk)
+                while true {
+                    let hasMore = try autoreleasepool {
+                        try Task.checkCancellation()
+                        guard let chunk = try readChunk(input, 1024 * 1024), !chunk.isEmpty else { return false }
+                        try Task.checkCancellation()
+                        try output.write(contentsOf: chunk)
+                        return true
+                    }
+                    if !hasMore { break }
                 }
                 try write("\r\n--\(boundary)--\r\n")
+                try Task.checkCancellation()
                 return url
             } catch {
                 try? FileManager.default.removeItem(at: url)
                 throw error
             }
-        }.value
+        }
+        let bodyFile = try await withTaskCancellationHandler {
+            let url = try await worker.value
+            do {
+                try Task.checkCancellation()
+                try await api.checkCurrent(context)
+                try Task.checkCancellation()
+                return url
+            } catch {
+                try? FileManager.default.removeItem(at: url)
+                throw error
+            }
+        } onCancel: {
+            worker.cancel()
+        }
 
         return PreparedUpload(request: request, bodyFile: bodyFile)
     }
