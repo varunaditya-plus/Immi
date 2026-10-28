@@ -93,6 +93,7 @@ final class BackupStatusReportingTests: XCTestCase {
         try fixture.map("first")
         try fixture.map("second")
 
+        await fixture.sharedUploads.refreshPending(session: fixture.session)
         await fixture.library.load()
         fixture.service.refreshCounts()
 
@@ -121,6 +122,7 @@ final class BackupStatusReportingTests: XCTestCase {
         let fixture = try fixture(photos: [])
         XCTAssertEqual(fixture.service.selectionStatus, .unchecked)
 
+        await fixture.sharedUploads.refreshPending(session: fixture.session)
         await fixture.library.load()
         fixture.service.refreshCounts()
 
@@ -133,6 +135,7 @@ final class BackupStatusReportingTests: XCTestCase {
     func testChangingTheSelectedAlbumsImmediatelyInvalidatesOldAssurance() async throws {
         let fixture = try fixture(photos: ["old-photo"])
         try fixture.map("old-photo")
+        await fixture.sharedUploads.refreshPending(session: fixture.session)
         await fixture.library.load()
         fixture.service.refreshCounts()
         XCTAssertEqual(fixture.status, .synced)
@@ -150,6 +153,7 @@ final class BackupStatusReportingTests: XCTestCase {
     func testNewTimelineScanMustHaveMatchingCountsBeforeItCanReportSynced() async throws {
         let fixture = try fixture(photos: ["mapped"])
         try fixture.map("mapped")
+        await fixture.sharedUploads.refreshPending(session: fixture.session)
         await fixture.library.load()
         fixture.service.refreshCounts()
         XCTAssertEqual(fixture.status, .synced)
@@ -171,6 +175,7 @@ final class BackupStatusReportingTests: XCTestCase {
     func testUnlinkingAConfirmedMappingInvalidatesCountsUntilTheyAreRefreshed() async throws {
         let fixture = try fixture(photos: ["photo"])
         try fixture.map("photo")
+        await fixture.sharedUploads.refreshPending(session: fixture.session)
         await fixture.library.load()
         fixture.service.refreshCounts()
         XCTAssertEqual(fixture.status, .synced)
@@ -204,6 +209,7 @@ final class BackupStatusReportingTests: XCTestCase {
     func testLibraryChangesAccessRevocationAndLogoutInvalidateVerifiedStatus() async throws {
         let fixture = try fixture(photos: ["photo"])
         try fixture.map("photo")
+        await fixture.sharedUploads.refreshPending(session: fixture.session)
         await fixture.library.load()
         fixture.service.refreshCounts()
         XCTAssertEqual(fixture.status, .synced)
@@ -301,6 +307,7 @@ final class BackupStatusReportingTests: XCTestCase {
     func testSharedOnlyWaitDoesNotClaimNativeCellularOrBackgroundRestrictions() async throws {
         let fixture = try fixture(photos: ["mapped"])
         try fixture.map("mapped")
+        await fixture.sharedUploads.refreshPending(session: fixture.session)
         await fixture.library.load()
         fixture.service.refreshCounts()
         XCTAssertEqual(fixture.status, .synced)
@@ -360,6 +367,7 @@ final class BackupStatusReportingTests: XCTestCase {
     func testStandaloneBackupErrorDoesNotAdvertiseAnAbsentUploadDetailsAction() async throws {
         let fixture = try fixture(photos: ["mapped"])
         try fixture.map("mapped")
+        await fixture.sharedUploads.refreshPending(session: fixture.session)
         await fixture.library.load()
         fixture.service.refreshCounts()
         XCTAssertEqual(fixture.status, .synced)
@@ -448,6 +456,7 @@ final class BackupStatusReportingTests: XCTestCase {
     func testEnabledExplanationsReflectVerifiedAndBlockedStates() async throws {
         let synced = try fixture(photos: ["mapped"])
         try synced.map("mapped")
+        await synced.sharedUploads.refreshPending(session: synced.session)
         await synced.library.load()
         synced.service.refreshCounts()
         let complete = synced.status.explanation(backup: synced.service,
@@ -475,6 +484,101 @@ final class BackupStatusReportingTests: XCTestCase {
         let offline = waiting.status.explanation(backup: waiting.service,
             backgroundRefreshAvailable: true, isOnline: false, isExpensive: false).lowercased()
         XCTAssertTrue(offline.contains("network"))
+    }
+
+    func testLimitedAccessOnlyCertifiesTheAccessibleMappedPhotos() async throws {
+        let fixture = try fixture(photos: ["allowed-photo"])
+        fixture.access.authorization = .limited
+        fixture.library.refreshAuthorizationStatus()
+        try fixture.map("allowed-photo")
+        await fixture.sharedUploads.refreshPending(session: fixture.session)
+
+        await fixture.library.load()
+        fixture.service.refreshCounts()
+
+        XCTAssertTrue(fixture.service.hasLimitedPhotosAccess)
+        XCTAssertEqual(fixture.service.total, 1)
+        XCTAssertEqual(fixture.service.backedUp, 1)
+        XCTAssertEqual(fixture.service.selectionStatus, .backedUp)
+        XCTAssertEqual(fixture.status, .limitedSynced)
+        XCTAssertNotEqual(fixture.status, .synced, "An allowed subset cannot certify inaccessible album members")
+        XCTAssertTrue(fixture.status.title.lowercased().contains("accessible"))
+        let message = fixture.status.explanation(backup: fixture.service,
+            backgroundRefreshAvailable: true, isOnline: true, isExpensive: false).lowercased()
+        XCTAssertTrue(message.contains("accessible"))
+        XCTAssertFalse(message.contains("everything in the selected albums is backed up"))
+    }
+
+    func testEmptyLimitedSubsetDoesNotClaimTheSelectedAlbumsAreEmpty() async throws {
+        let fixture = try fixture(photos: [])
+        fixture.access.authorization = .limited
+        fixture.library.refreshAuthorizationStatus()
+        await fixture.sharedUploads.refreshPending(session: fixture.session)
+
+        await fixture.library.load()
+        fixture.service.refreshCounts()
+
+        XCTAssertTrue(fixture.service.hasLimitedPhotosAccess)
+        XCTAssertEqual(fixture.service.total, 0)
+        XCTAssertEqual(fixture.service.selectionStatus, .empty)
+        XCTAssertEqual(fixture.status, .limitedEmpty)
+        XCTAssertNotEqual(fixture.status, .empty)
+        XCTAssertTrue(fixture.status.title.lowercased().contains("accessible"))
+        let message = fixture.status.explanation(backup: fixture.service,
+            backgroundRefreshAvailable: true, isOnline: true, isExpensive: false).lowercased()
+        XCTAssertTrue(message.contains("accessible"))
+        XCTAssertFalse(message.contains("no photos or videos were found in the selected albums"))
+    }
+
+    func testLimitedAccessStillReportsRemainingAccessiblePhotos() async throws {
+        let fixture = try fixture(photos: ["mapped", "not-uploaded"])
+        fixture.access.authorization = .limited
+        fixture.library.refreshAuthorizationStatus()
+        try fixture.map("mapped")
+        await fixture.sharedUploads.refreshPending(session: fixture.session)
+
+        await fixture.library.load()
+        fixture.service.refreshCounts()
+
+        XCTAssertTrue(fixture.service.hasLimitedPhotosAccess)
+        XCTAssertEqual(fixture.service.total, 2)
+        XCTAssertEqual(fixture.service.backedUp, 1)
+        XCTAssertEqual(fixture.service.remainder, 1)
+        XCTAssertEqual(fixture.service.selectionStatus, .remaining)
+        XCTAssertEqual(fixture.status, .waiting)
+        XCTAssertNotEqual(fixture.status, .limitedSynced)
+    }
+
+    func testGrantingFullAccessRequiresTheExpandedSelectionToBeCountedAndMapped() async throws {
+        let fixture = try fixture(photos: ["allowed-photo"])
+        fixture.access.authorization = .limited
+        fixture.library.refreshAuthorizationStatus()
+        try fixture.map("allowed-photo")
+        await fixture.sharedUploads.refreshPending(session: fixture.session)
+        await fixture.library.load()
+        fixture.service.refreshCounts()
+        XCTAssertEqual(fixture.status, .limitedSynced)
+
+        fixture.access.authorization = .denied
+        fixture.library.refreshAuthorizationStatus()
+        XCTAssertEqual(fixture.status, .photosAccess)
+        fixture.access.photoIDs = ["allowed-photo", "previously-inaccessible"]
+        fixture.access.authorization = .authorized
+        fixture.library.refreshAuthorizationStatus()
+        XCTAssertFalse(fixture.service.hasLimitedPhotosAccess)
+        XCTAssertEqual(fixture.service.selectionStatus, .unchecked)
+        XCTAssertEqual(fixture.status, .unchecked)
+
+        await fixture.library.load()
+        fixture.service.refreshCounts()
+        XCTAssertEqual(fixture.service.total, 2)
+        XCTAssertEqual(fixture.service.remainder, 1)
+        XCTAssertEqual(fixture.status, .waiting)
+        try fixture.map("previously-inaccessible")
+        XCTAssertEqual(fixture.status, .unchecked)
+        fixture.service.refreshCounts()
+        XCTAssertEqual(fixture.service.selectionStatus, .backedUp)
+        XCTAssertEqual(fixture.status, .synced)
     }
 
     private func fixture(

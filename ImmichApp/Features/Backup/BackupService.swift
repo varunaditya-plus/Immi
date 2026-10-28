@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import Photos
 
 private enum LivePhotoBackupError: LocalizedError {
     case motionResourceMissing
@@ -130,6 +131,8 @@ final class BackupService {
     private var hasRemainingPhotos = false
     private var hasRemainingVideos = false
     private var lastQueueError: String?
+
+    var hasLimitedPhotosAccess: Bool { localLibrary.authorizationStatus == .limited }
 
     var selectionStatus: BackupSelectionStatus {
         guard !localLibrary.selectedAlbumIDs.isEmpty else { return .noSelection }
