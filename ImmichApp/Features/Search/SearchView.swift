@@ -553,7 +553,7 @@ struct SearchView: View {
             // dialognya menutup, jadi selama animasi tutup tulisannya sempat
             // berubah jadi "Delete 0 Items".
             .confirmationDialog(
-                "This cannot be undone.",
+                "Move to Trash",
                 isPresented: Binding(
                     get: { pendingDelete != nil },
                     set: { if !$0 { pendingDelete = nil } }),
@@ -564,6 +564,8 @@ struct SearchView: View {
                     performDelete(selection.ids)
                 }
                 Button("Cancel", role: .cancel) {}
+            } message: { _ in
+                Text("You can restore these items from Trash.")
             }
             .alert("Action Failed", isPresented: Binding(
                 get: { vm?.actionError != nil },
