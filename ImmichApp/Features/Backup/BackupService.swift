@@ -1803,7 +1803,12 @@ final class BackupService {
         }
         try Task.checkCancellation()
         guard syncAlbums, uploadOwnership == ownership else { throw CancellationError() }
-        _ = try await albumRepo.addAssets([assetID], to: albumID)
+        do {
+            _ = try await albumRepo.addAssets([assetID], to: albumID)
+        } catch {
+            if uploadOwnership == ownership, albumIDsByName[name] == albumID { albumIDsByName[name] = nil }
+            throw error
+        }
     }
 
     private func albumPlacement(

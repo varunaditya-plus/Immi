@@ -62,6 +62,29 @@ final class BackupAlbumPlacementReplayTests: XCTestCase {
         XCTAssertEqual(cold.albums.addedIDs, [["uploaded-photo"]], "Acknowledged placements must not replay again")
     }
 
+    func testFailedAdditionInvalidatesDeletedDestinationBeforeSameSessionRetry() async throws {
+        let fixture = try fixture()
+        fixture.albums.listedAlbums = [album(id: "deleted-album")]
+        fixture.albums.addError = APIError.server(status: 404, message: "Album was deleted")
+        let context = try fixture.startUpload()
+        fixture.complete(context, assetID: "uploaded-photo")
+        await fixture.service.waitUntilFinished()
+
+        XCTAssertEqual(fixture.albums.destinationIDs, ["deleted-album"])
+        XCTAssertEqual(fixture.reopenQueue().pendingAlbumPlacements.count, 1)
+        fixture.albums.listedAlbums = []
+        fixture.albums.addError = nil
+
+        fixture.service.configure(session: fixture.session)
+        await fixture.service.waitUntilFinished()
+
+        XCTAssertEqual(fixture.albums.lookups, 2, "Retry must resolve again instead of reusing the deleted album")
+        XCTAssertEqual(fixture.albums.createdNames, ["Camera"])
+        XCTAssertEqual(fixture.albums.destinationIDs, ["deleted-album", "created-camera"])
+        XCTAssertEqual(fixture.albums.addedIDs, [["uploaded-photo"], ["uploaded-photo"]])
+        XCTAssertTrue(fixture.reopenQueue().pendingAlbumPlacements.isEmpty)
+    }
+
     func testDisabledAlbumSyncPreservesPendingWorkUntilItIsEnabled() async throws {
         UserDefaults.standard.set(false, forKey: "backup.syncAlbums")
         let fixture = try fixture(configure: false)
