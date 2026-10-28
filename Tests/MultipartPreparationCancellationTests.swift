@@ -249,3 +249,251 @@ private final class CancellationUploadProtocol: URLProtocol {
     }
     override func stopLoading() {}
 }
+
+@MainActor
+final class BackupPreparationTaskCancellationTests: XCTestCase {
+    private var savedEnabled: Any?
+    private var fixtures: [PreparationFixture] = []
+
+    override func setUp() async throws {
+        savedEnabled = UserDefaults.standard.object(forKey: "backup.enabled")
+        UserDefaults.standard.set(false, forKey: "backup.enabled")
+    }
+
+    override func tearDown() async throws {
+        for fixture in fixtures { fixture.service.stop(); try? FileManager.default.removeItem(at: fixture.directory) }
+        fixtures.removeAll()
+        if let savedEnabled { UserDefaults.standard.set(savedEnabled, forKey: "backup.enabled") }
+        else { UserDefaults.standard.removeObject(forKey: "backup.enabled") }
+        savedEnabled = nil
+        try await super.tearDown()
+    }
+
+    func testCancellingOnePreparationStopsItsReadsWithoutCancellingTheQueueParentOrNeighbor() async throws {
+        let fixture = try fixture()
+        try fixture.queue.enqueue(["selected", "neighbor"], intent: .manualUpload)
+        let neighbor = fixture.queue.item(id: "neighbor")
+        let ownership = try XCTUnwrap(fixture.queue.ownership)
+        let reads = ChunkReadGate(holdAt: 1)
+        let repository = BackupRepository(api: APIClient(session: fixture.session), readChunk: reads.read)
+        var wasCancelled = false
+        let work = Task {
+            await fixture.service.performPreparation(localIdentifier: "selected", isOwned: true,
+                ownership: ownership) { _ in
+                do {
+                    try fixture.queue.markPreparing("selected", phase: .primaryAsset)
+                    _ = try await repository.checksum(forFile: fixture.source)
+                    XCTFail("The canceled item's hashing must stop")
+                } catch is CancellationError { wasCancelled = true }
+                catch { XCTFail("Unexpected preparation error: \(error)") }
+            }
+            return Task.isCancelled
+        }
+        addTeardownBlock { work.cancel(); reads.release(); _ = await work.value }
+        await fulfillment(of: [reads.started], timeout: 2)
+
+        fixture.service.cancelUpload("selected")
+        reads.release()
+        let parentCancelled = await work.value
+
+        XCTAssertTrue(wasCancelled)
+        XCTAssertFalse(parentCancelled)
+        XCTAssertEqual(reads.count, 1)
+        XCTAssertEqual(fixture.queue.item(id: "selected")?.state, .failed)
+        XCTAssertEqual(fixture.queue.item(id: "selected")?.intent, .manualUpload)
+        XCTAssertEqual(fixture.queue.item(id: "neighbor"), neighbor)
+        var digest: String?
+        await fixture.service.performPreparation(localIdentifier: "neighbor", isOwned: true,
+            ownership: try XCTUnwrap(fixture.queue.ownership)) { _ in
+                digest = try? await repository.checksum(forFile: fixture.source)
+            }
+        XCTAssertEqual(digest, "a9993e364706816aba3e25717850c26c9cd0d89d",
+            "Canceling one item must leave the next preparation usable")
+        XCTAssertEqual(try Data(contentsOf: fixture.source), Data("abc".utf8))
+    }
+
+    func testStopCancelsOwnedPreparationButPreservesACompletionCallbacksPreparation() async throws {
+        for owned in [true, false] {
+            let fixture = try fixture()
+            try fixture.queue.enqueue(["photo"], intent: .manualUpload)
+            let ownership = try XCTUnwrap(fixture.queue.ownership)
+            let reads = ChunkReadGate(holdAt: 1)
+            let repository = BackupRepository(api: APIClient(session: fixture.session), readChunk: reads.read)
+            var cancelled = false
+            var digest: String?
+            let work = Task { await fixture.service.performPreparation(localIdentifier: "photo", isOwned: owned,
+                ownership: ownership) { _ in
+                    do {
+                        try fixture.queue.markPreparing("photo", phase: .primaryAsset, motionAssetID: "completed-motion")
+                        digest = try await repository.checksum(forFile: fixture.source)
+                    } catch is CancellationError { cancelled = true }
+                    catch { XCTFail("Unexpected preparation error: \(error)") }
+                }
+            }
+            addTeardownBlock { work.cancel(); reads.release(); await work.value }
+            await fulfillment(of: [reads.started], timeout: 2)
+
+            fixture.service.stop()
+            XCTAssertEqual(fixture.queue.item(id: "photo")?.state, owned ? .queued : .preparing,
+                "Stop must not release a callback's still-active preparation")
+            reads.release()
+            await work.value
+
+            XCTAssertEqual(cancelled, owned)
+            XCTAssertEqual(digest, owned ? nil : "a9993e364706816aba3e25717850c26c9cd0d89d")
+            XCTAssertEqual(fixture.queue.item(id: "photo")?.state, .queued,
+                "Once either worker ends, an unfinished preparation must be resumable")
+            XCTAssertEqual(fixture.queue.item(id: "photo")?.motionAssetID, "completed-motion")
+            XCTAssertEqual(fixture.queue.item(id: "photo")?.intent, .manualUpload)
+        }
+    }
+
+    func testLogoutAndAuthenticationPauseCancelEvenCompletionOwnedPreparation() async throws {
+        for logout in [false, true] {
+            let fixture = try fixture()
+            try fixture.queue.enqueue(["photo"], intent: .manualUpload)
+            let ownership = try XCTUnwrap(fixture.queue.ownership)
+            let reads = ChunkReadGate(holdAt: 1)
+            let repository = BackupRepository(api: APIClient(session: fixture.session), readChunk: reads.read)
+            var cancelled = false
+            let work = Task { await fixture.service.performPreparation(localIdentifier: "photo", isOwned: false,
+                ownership: ownership) { _ in
+                    do {
+                        try fixture.queue.markPreparing("photo", phase: .primaryAsset, motionAssetID: "completed-motion")
+                        _ = try await repository.checksum(forFile: fixture.source)
+                        XCTFail("A departed account must not continue its preparation")
+                    } catch is CancellationError { cancelled = true }
+                    catch { XCTFail("Unexpected preparation error: \(error)") }
+                }
+            }
+            addTeardownBlock { work.cancel(); reads.release(); await work.value }
+            await fulfillment(of: [reads.started], timeout: 2)
+
+            if logout { fixture.service.resetForLogout() }
+            else { fixture.service.pauseForAuthentication() }
+            reads.release()
+            await work.value
+
+            XCTAssertTrue(cancelled)
+            XCTAssertEqual(reads.count, 1)
+            if logout { XCTAssertTrue(fixture.queue.items.isEmpty) }
+            else {
+                XCTAssertEqual(fixture.queue.item(id: "photo")?.state, .waitingForAuthentication)
+                XCTAssertEqual(fixture.queue.item(id: "photo")?.motionAssetID, "completed-motion")
+                XCTAssertEqual(fixture.queue.item(id: "photo")?.intent, .manualUpload)
+            }
+        }
+    }
+
+    func testParentCancellationReachesTheRegisteredPreparationTask() async throws {
+        let fixture = try fixture()
+        try fixture.queue.enqueue(["photo"], intent: .manualUpload)
+        let ownership = try XCTUnwrap(fixture.queue.ownership)
+        let reads = ChunkReadGate(holdAt: 1)
+        let repository = BackupRepository(api: APIClient(session: fixture.session), readChunk: reads.read)
+        var cancelled = false
+        let work = Task { await fixture.service.performPreparation(localIdentifier: "photo", isOwned: true,
+            ownership: ownership) { _ in
+                do {
+                    try fixture.queue.markPreparing("photo", phase: .primaryAsset, motionAssetID: "saved-motion")
+                    _ = try await repository.checksum(forFile: fixture.source)
+                }
+                catch is CancellationError { cancelled = true }
+                catch { XCTFail("Unexpected preparation error: \(error)") }
+            }
+        }
+        addTeardownBlock { work.cancel(); reads.release(); await work.value }
+        await fulfillment(of: [reads.started], timeout: 2)
+
+        work.cancel()
+        reads.release()
+        await work.value
+
+        XCTAssertTrue(cancelled)
+        XCTAssertEqual(reads.count, 1)
+        XCTAssertEqual(fixture.queue.item(id: "photo")?.state, .queued)
+        let restored = BackupQueueStore(fileURL: fixture.directory.appendingPathComponent("queue.json"))
+        XCTAssertEqual(restored.item(id: "photo")?.motionAssetID, "saved-motion")
+        XCTAssertEqual(BackupUploadRequests(queue: restored).readyItems(automaticEnabled: false).map(\.id), ["photo"])
+    }
+
+    func testCredentialRevisionChangeRequeuesTheUnfinishedBodyUnderTheSameOwner() async throws {
+        let fixture = try fixture()
+        try fixture.session.setServer("https://preparation-task.example")
+        try fixture.queue.enqueue(["photo"], intent: .manualUpload)
+        let ownership = try XCTUnwrap(fixture.queue.ownership)
+        let reads = ChunkReadGate(holdAt: 1)
+        let repository = BackupRepository(api: APIClient(session: fixture.session), readChunk: reads.read)
+        var rejected = false
+        let work = Task { await fixture.service.performPreparation(localIdentifier: "photo", isOwned: true,
+            ownership: ownership) { _ in
+                do {
+                    try fixture.queue.markPreparing("photo", phase: .primaryAsset, motionAssetID: "saved-motion")
+                    let prepared = try await repository.makeUploadRequest(fileURL: fixture.source, filename: "photo.jpg",
+                        checksum: "known-checksum", deviceAssetId: "photo", createdAt: .distantPast, modifiedAt: .distantPast)
+                    try? FileManager.default.removeItem(at: prepared.bodyFile)
+                    XCTFail("An old credential revision cannot hand off the prepared body")
+                } catch is CancellationError { rejected = true }
+                catch { XCTFail("Unexpected preparation error: \(error)") }
+            }
+        }
+        addTeardownBlock { work.cancel(); reads.release(); await work.value }
+        await fulfillment(of: [reads.started], timeout: 2)
+
+        // Same server/account, new request revision, as with credential renewal.
+        try fixture.session.setServer("https://preparation-task.example")
+        reads.release()
+        await work.value
+
+        XCTAssertTrue(rejected)
+        XCTAssertEqual(fixture.queue.ownership, ownership)
+        XCTAssertEqual(fixture.queue.item(id: "photo")?.state, .queued)
+        XCTAssertEqual(fixture.queue.item(id: "photo")?.motionAssetID, "saved-motion")
+        XCTAssertEqual(fixture.queue.item(id: "photo")?.intent, .manualUpload)
+        let restored = BackupQueueStore(fileURL: fixture.directory.appendingPathComponent("queue.json"))
+        XCTAssertEqual(restored.item(id: "photo")?.state, .queued)
+        XCTAssertEqual(BackupUploadRequests(queue: restored).readyItems(automaticEnabled: false).map(\.id), ["photo"])
+    }
+
+    private func fixture() throws -> PreparationFixture {
+        let fixture = try PreparationFixture()
+        fixtures.append(fixture)
+        return fixture
+    }
+}
+
+@MainActor
+private final class PreparationFixture {
+    let directory: URL
+    let source: URL
+    let queue: BackupQueueStore
+    let service: BackupService
+    let session: PreparationSession
+
+    init() throws {
+        directory = FileManager.default.temporaryDirectory.appendingPathComponent("preparation-task-\(UUID())")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        source = directory.appendingPathComponent("source.mov")
+        try Data("abc".utf8).write(to: source)
+        let manager = SwiftDataManager(storeURL: directory.appendingPathComponent("test.store"),
+            backupJournalURL: directory.appendingPathComponent("backup.json"))
+        queue = BackupQueueStore(fileURL: directory.appendingPathComponent("queue.json"))
+        session = try PreparationSession(dataManager: manager)
+        service = BackupService(dataManager: manager, queue: queue)
+        service.configure(session: session)
+        XCTAssertTrue(manager.isPersistentStoreAvailable)
+    }
+}
+
+@MainActor
+private final class PreparationSession: SessionManager {
+    override var backupQueueOwner: BackupQueueOwner? {
+        .init(server: "https://preparation-task.example/api", userID: "owner")
+    }
+
+    init(dataManager: SwiftDataManager) throws {
+        super.init(dataManager: dataManager, restoresSession: false)
+        try setServer("https://preparation-task.example")
+        isLoggedIn = true
+    }
+}

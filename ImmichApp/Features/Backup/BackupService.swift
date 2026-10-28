@@ -155,6 +155,7 @@ final class BackupService {
         let id = UUID()
         let isOwned: Bool
         let ownership: BackupUploadOwnership
+        var task: Task<Void, Never>?
     }
     private var preparationClaims: [String: PreparationClaim] = [:]
     private var refillRequested = false
@@ -684,6 +685,7 @@ final class BackupService {
         retryWakeTask?.cancel()
         retryWakeTask = nil
         let owned = Set(preparationClaims.filter { $0.value.isOwned }.map(\.key))
+        for claim in preparationClaims.values where claim.isOwned { claim.task?.cancel() }
         preparationClaims = preparationClaims.filter { !$0.value.isOwned }
         do { try queue.releasePreparations(owned) }
         catch {
@@ -701,6 +703,7 @@ final class BackupService {
     func resetForLogout() {
         acceptsUploadResults = false
         stop()
+        for claim in preparationClaims.values { claim.task?.cancel() }
         preparationClaims.removeAll()
         repo = nil
         albumRepo = nil
@@ -746,6 +749,7 @@ final class BackupService {
         networkWakeTask?.cancel()
         networkWakeTask = nil
         networkWakeID = UUID()
+        for claim in preparationClaims.values { claim.task?.cancel() }
         preparationClaims.removeAll()
         pendingPhotos.removeAll()
         let message = String(localized: "Your Immich session expired. Sign in again to resume backup.")
@@ -800,6 +804,7 @@ final class BackupService {
     func cancelUpload(_ localIdentifier: String) {
         guard let item = queue.item(id: localIdentifier), item.state.isActive else { return }
         let canceledMessage = String(localized: "Upload canceled.")
+        preparationClaims[localIdentifier]?.task?.cancel()
         preparationClaims[localIdentifier] = nil
 
         do {
@@ -933,10 +938,18 @@ final class BackupService {
         _ photo: LocalPhoto, repository repo: BackupRepository,
         mayReadFromICloud: Bool, ownership: BackupUploadOwnership
     ) async {
-        guard !Task.isCancelled, uploadOwnership == ownership else { return }
-        let claim = PreparationClaim(isOwned: true, ownership: ownership)
-        preparationClaims[photo.id] = claim
-        defer { releasePreparation(photo.id, claim: claim.id) }
+        await performPreparation(localIdentifier: photo.id, isOwned: true, ownership: ownership) { claim in
+            await self.prepareQueuePhoto(photo, repository: repo,
+                mayReadFromICloud: mayReadFromICloud, ownership: ownership, claim: claim)
+        }
+    }
+
+    private func prepareQueuePhoto(
+        _ photo: LocalPhoto, repository repo: BackupRepository,
+        mayReadFromICloud: Bool, ownership: BackupUploadOwnership, claim: UUID
+    ) async {
+        guard !Task.isCancelled, uploadOwnership == ownership,
+              preparationClaims[photo.id]?.id == claim else { return }
         if photo.isLivePhoto {
             do {
                 if let motionAssetID = queue.item(id: photo.id)?.motionAssetID {
@@ -949,7 +962,7 @@ final class BackupService {
                         photo,
                         motionAssetID: motionAssetID,
                         repository: repo,
-                        claim: claim.id,
+                        claim: claim,
                         mayReadFromICloud: mayReadFromICloud,
                         ownership: ownership)
                 } else {
@@ -958,12 +971,12 @@ final class BackupService {
                     try await enqueueLivePhoto(
                         photo,
                         repository: repo,
-                        claim: claim.id,
+                        claim: claim,
                         mayReadFromICloud: mayReadFromICloud,
                         ownership: ownership)
                 }
             } catch {
-                guard preparationClaims[photo.id]?.id == claim.id, !Task.isCancelled,
+                guard preparationClaims[photo.id]?.id == claim, !Task.isCancelled,
                       uploadOwnership == ownership else { return }
                 pendingPhotos[photo.id] = nil
                 handlePreparationFailure(
@@ -989,7 +1002,7 @@ final class BackupService {
             for: LocalPhotoLibrary.assetID(for: photo.id),
             allowsNetworkFallback: mayReadFromICloud)
         else {
-            guard isCurrentPreparation(photo.id, claim: claim.id) else { return }
+            guard isCurrentPreparation(photo.id, claim: claim) else { return }
             // Berkas iCloud yang sedang menunggu Wi‑Fi bukan kegagalan. Ia
             // akan ditemukan lagi oleh BGTask berikutnya di jaringan sesuai.
             let message = mayReadFromICloud
@@ -1005,9 +1018,9 @@ final class BackupService {
         }
 
         do {
-            try checkPreparation(photo.id, claim: claim.id)
+            try checkPreparation(photo.id, claim: claim)
             let checksum = try await repo.checksum(forFile: file.url)
-            if !isCurrentPreparation(photo.id, claim: claim.id) {
+            if !isCurrentPreparation(photo.id, claim: claim) {
                 try? FileManager.default.removeItem(at: file.url)
                 return
             }
@@ -1023,7 +1036,7 @@ final class BackupService {
                 createdAt: photo.createdAt,
                 modifiedAt: photo.modifiedAt)
             try? FileManager.default.removeItem(at: file.url)
-            if !isCurrentPreparation(photo.id, claim: claim.id) {
+            if !isCurrentPreparation(photo.id, claim: claim) {
                 try? FileManager.default.removeItem(at: prepared.bodyFile)
                 return
             }
@@ -1056,7 +1069,7 @@ final class BackupService {
             }
         } catch {
             try? FileManager.default.removeItem(at: file.url)
-            guard preparationClaims[photo.id]?.id == claim.id, !Task.isCancelled,
+            guard preparationClaims[photo.id]?.id == claim, !Task.isCancelled,
                       uploadOwnership == ownership else { return }
             pendingPhotos[photo.id] = nil
             handlePreparationFailure(
@@ -1082,6 +1095,42 @@ final class BackupService {
 
     private func releasePreparation(_ id: String, claim: UUID) {
         if preparationClaims[id]?.id == claim { preparationClaims[id] = nil }
+    }
+
+    /// A per-item task lets Cancel stop expensive preparation without canceling
+    /// unrelated queued photos. Parent cancellation still stops the child.
+    func performPreparation(
+        localIdentifier: String, isOwned: Bool, ownership: BackupUploadOwnership,
+        operation: @escaping @MainActor (UUID) async -> Void
+    ) async {
+        guard !Task.isCancelled, uploadOwnership == ownership else { return }
+        var claim = PreparationClaim(isOwned: isOwned, ownership: ownership)
+        let claimID = claim.id
+        let worker = Task {
+            guard !Task.isCancelled, self.uploadOwnership == ownership,
+                  self.preparationClaims[localIdentifier]?.id == claimID else { return }
+            await operation(claimID)
+        }
+        claim.task = worker
+        preparationClaims[localIdentifier] = claim
+        defer {
+            if preparationClaims[localIdentifier]?.id == claimID, uploadOwnership == ownership,
+               queue.item(id: localIdentifier)?.state == .preparing {
+                do {
+                    try queue.releasePreparations([localIdentifier])
+                } catch {
+                    lastError = error.localizedDescription
+                    acceptsUploadResults = false
+                }
+                applyQueueSnapshot()
+            }
+            releasePreparation(localIdentifier, claim: claimID)
+        }
+        await withTaskCancellationHandler {
+            await worker.value
+        } onCancel: {
+            worker.cancel()
+        }
     }
 
     /// No automatic re-export is possible without the original. Keep this
@@ -1282,39 +1331,38 @@ final class BackupService {
             }
             guard let current = queue.item(id: localIdentifier), current.state == .uploading,
                   current.phase == .livePhotoMotion else { return }
-            let claim = PreparationClaim(isOwned: false, ownership: ownership)
-            preparationClaims[localIdentifier] = claim
-            pendingPhotos[localIdentifier] = photo
-            defer { releasePreparation(localIdentifier, claim: claim.id) }
-            do {
-                try queue.markPreparing(
-                    localIdentifier,
-                    phase: .primaryAsset,
-                    motionAssetID: motionAssetID)
-                applyQueueSnapshot()
-                guard allowsNetwork(for: photo) else {
-                    try queue.markRetry(localIdentifier, state: .waitingForNetwork,
-                        error: String(localized: "Waiting for Wi-Fi."),
-                        retryAt: Date(timeIntervalSinceNow: 15 * 60))
-                    applyQueueSnapshot()
-                    return
+            await performPreparation(localIdentifier: localIdentifier, isOwned: false, ownership: ownership) { claim in
+                self.pendingPhotos[localIdentifier] = photo
+                do {
+                    try self.queue.markPreparing(
+                        localIdentifier,
+                        phase: .primaryAsset,
+                        motionAssetID: motionAssetID)
+                    self.applyQueueSnapshot()
+                    guard self.allowsNetwork(for: photo) else {
+                        try self.queue.markRetry(localIdentifier, state: .waitingForNetwork,
+                            error: String(localized: "Waiting for Wi-Fi."),
+                            retryAt: Date(timeIntervalSinceNow: 15 * 60))
+                        self.applyQueueSnapshot()
+                        return
+                    }
+                    try await self.enqueueLivePhotoPrimary(
+                        photo,
+                        motionAssetID: motionAssetID,
+                        repository: repo,
+                        claim: claim,
+                        mayReadFromICloud: mayReadFromICloud,
+                        ownership: ownership)
+                } catch {
+                    guard !Task.isCancelled, self.uploadOwnership == ownership,
+                          self.preparationClaims[localIdentifier]?.id == claim else { return }
+                    self.pendingPhotos[localIdentifier] = nil
+                    self.handlePreparationFailure(
+                        localIdentifier: localIdentifier,
+                        error: error,
+                        waitingForICloud: true)
+                    self.applyQueueSnapshot()
                 }
-                try await enqueueLivePhotoPrimary(
-                    photo,
-                    motionAssetID: motionAssetID,
-                    repository: repo,
-                    claim: claim.id,
-                    mayReadFromICloud: mayReadFromICloud,
-                    ownership: ownership)
-            } catch {
-                guard !Task.isCancelled, uploadOwnership == ownership,
-                      preparationClaims[localIdentifier]?.id == claim.id else { return }
-                pendingPhotos[localIdentifier] = nil
-                handlePreparationFailure(
-                    localIdentifier: localIdentifier,
-                    error: error,
-                    waitingForICloud: true)
-                applyQueueSnapshot()
             }
         }
     }
