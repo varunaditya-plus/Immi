@@ -55,7 +55,6 @@ final class SyncStatusViewModel {
     var backgroundUploadSize = 0
     var isRefreshing = false
     var isClearingCache = false
-    var isExportingDatabase = false
     var isResettingDatabase = false
     var runningJob: SyncStatusJob?
     var jobStates: [SyncStatusJob: SyncStatusJobState] = [:]
@@ -230,12 +229,7 @@ final class SyncStatusViewModel {
     }
 
     func exportDatabase() async throws -> URL {
-        guard !isExportingDatabase else {
-            throw SyncStatusJobError(message: "A database export is already running.")
-        }
-        isExportingDatabase = true
-        defer { isExportingDatabase = false }
-        return try await dataManager.exportDatabase()
+        try await dataManager.exportDatabase()
     }
 
     func resetDatabase() async throws {
@@ -282,11 +276,14 @@ final class SyncStatusViewModel {
 struct SyncStatusView: View {
     @Environment(SyncViewModel.self) private var appSync: SyncViewModel?
     @State private var vm: SyncStatusViewModel
-    @State private var exportPresentation: DatabaseExportPresentation?
+    @State private var databaseExport = DatabaseExportSharing()
+    @State private var exportTask: Task<Void, Never>?
     @State private var actionError: ErrorEvent?
     @State private var showResetConfirmation = false
+    private let session: SessionManager
 
     init(session: SessionManager) {
+        self.session = session
         _vm = State(initialValue: SyncStatusViewModel(session: session))
     }
 
@@ -316,8 +313,16 @@ struct SyncStatusView: View {
         .task { await vm.loadIfNeeded() }
         .refreshable { await vm.refreshCounts() }
         .sensoryFeedback(.success, trigger: vm.completionFeedback)
-        .sheet(item: $exportPresentation) { presentation in
-            DatabaseActivityView(url: presentation.url)
+        .sheet(item: databaseExport.binding) { presentation in
+            databaseExport.shareSheet(for: presentation)
+        }
+        .onDisappear {
+            exportTask?.cancel()
+            databaseExport.cancelPreparation()
+        }
+        .onChange(of: session.snapshot) { _, _ in
+            exportTask?.cancel()
+            databaseExport.invalidate()
         }
         .alert("Reset Sync Database?", isPresented: $showResetConfirmation) {
             Button("Reset", role: .destructive) {
@@ -516,25 +521,26 @@ struct SyncStatusView: View {
             .disabled(vm.isClearingCache)
 
             Button {
-                Task {
-                    do {
-                        exportPresentation = DatabaseExportPresentation(
-                            url: try await vm.exportDatabase())
-                    } catch {
-                        actionError = ErrorEvent(error.localizedDescription)
+                guard exportTask == nil else { return }
+                exportTask = Task {
+                    defer { exportTask = nil }
+                    if let error = await databaseExport.prepare(session: session, export: {
+                        try await vm.exportDatabase()
+                    }) {
+                        actionError = ErrorEvent(error)
                     }
                 }
             } label: {
                 HStack {
                     Label("Export Database", systemImage: "square.and.arrow.up")
                     Spacer()
-                    if vm.isExportingDatabase {
+                    if databaseExport.isPreparing {
                         ProgressView()
                             .controlSize(.small)
                     }
                 }
             }
-            .disabled(vm.isExportingDatabase || vm.isResettingDatabase)
+            .disabled(exportTask != nil || databaseExport.presentation != nil || vm.isResettingDatabase)
 
             Button(role: .destructive) {
                 showResetConfirmation = true
@@ -594,22 +600,4 @@ struct SyncStatusView: View {
                 .foregroundStyle(.red)
         }
     }
-}
-
-private struct DatabaseExportPresentation: Identifiable {
-    let id = UUID()
-    let url: URL
-}
-
-private struct DatabaseActivityView: UIViewControllerRepresentable {
-    let url: URL
-
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: [url], applicationActivities: nil)
-    }
-
-    func updateUIViewController(
-        _ uiViewController: UIActivityViewController,
-        context: Context
-    ) {}
 }

@@ -1711,14 +1711,19 @@ struct ShareSheet: UIViewControllerRepresentable {
 /// satu item, dan iOS sendiri menampilkan ringkasan "N Items" untuk kumpulan.
 struct MultiShareSheet: UIViewControllerRepresentable {
     let urls: [URL]
+    var onFinish: (() -> Void)? = nil
 
     func makeCoordinator() -> CleanupCoordinator {
-        CleanupCoordinator(urls: urls)
+        CleanupCoordinator(urls: urls, onFinish: onFinish)
     }
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
+        activityController(using: context.coordinator)
+    }
+
+    func activityController(using coordinator: CleanupCoordinator) -> UIActivityViewController {
         let controller = UIActivityViewController(activityItems: urls, applicationActivities: nil)
-        controller.completionWithItemsHandler = { [weak coordinator = context.coordinator]
+        controller.completionWithItemsHandler = { [weak coordinator]
             _, _, _, _ in
             coordinator?.cleanup()
         }
@@ -1739,15 +1744,20 @@ struct MultiShareSheet: UIViewControllerRepresentable {
 /// tanpa memanggil completion handler (mis. view induk ikut hilang).
 final class CleanupCoordinator {
     private var urls: [URL]
+    private var onFinish: (() -> Void)?
 
-    init(urls: [URL]) {
+    init(urls: [URL], onFinish: (() -> Void)? = nil) {
         self.urls = urls
+        self.onFinish = onFinish
     }
 
     func cleanup() {
         guard !urls.isEmpty else { return }
         TemporaryMediaStore.remove(urls)
         urls.removeAll()
+        let finished = onFinish
+        onFinish = nil
+        finished?()
     }
 }
 
