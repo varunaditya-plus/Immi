@@ -25,14 +25,15 @@ class SyncRepository {
     private func sync(reset: Bool, isRetryAfterReset: Bool = false) async throws {
         let context = api.session.snapshot
         let visibilityRevision = dataManager.visibilityMutationRevision
-        let assetRevision = dataManager.assetMutationRevision
+        var assetRevision = dataManager.assetMutationRevision
         var staging = reset ? try FullSyncStaging() : nil
         try api.checkCurrent(context)
         try checkVisibility(visibilityRevision)
         let outcome = try await streamAndApply(reset: reset, staging: staging,
-            context: context, visibilityRevision: visibilityRevision)
+            context: context, visibilityRevision: visibilityRevision, assetRevision: &assetRevision)
         try api.checkCurrent(context)
         try checkVisibility(visibilityRevision)
+        try checkAssets(assetRevision)
 
         if outcome.serverRequestedReset {
             guard !isRetryAfterReset else {
@@ -46,18 +47,17 @@ class SyncRepository {
             guard outcome.completed else {
                 throw APIError.server(status: 502, message: "Sync berakhir sebelum snapshot lengkap")
             }
-            guard assetRevision == dataManager.assetMutationRevision else {
-                throw CancellationError()
-            }
             try dataManager.replaceSyncCache(with: staging,
                 expectedVisibilityRevision: visibilityRevision,
                 expectedAssetRevision: assetRevision)
+            assetRevision = dataManager.assetMutationRevision
         }
 
         // Acknowledge only after the complete snapshot is durable. A failed ack
         // can be retried without discarding the usable cache or its old checkpoint.
         try api.checkCurrent(context)
         try checkVisibility(visibilityRevision)
+        try checkAssets(assetRevision)
         if !outcome.latestAcks.isEmpty {
             try await api.sendVoid(.json("/sync/ack", method: .post,
                                          body: SyncAckSetDTO(acks: Array(outcome.latestAcks.values))))
@@ -65,6 +65,7 @@ class SyncRepository {
 
         try api.checkCurrent(context)
         try checkVisibility(visibilityRevision)
+        try checkAssets(assetRevision)
         let state = dataManager.getSyncState()
         let now = Date()
         if reset || state.lastFullSyncAt == nil { state.lastFullSyncAt = now }
@@ -84,7 +85,10 @@ class SyncRepository {
     private static let chunkSize = 500
 
     @MainActor
-    private func streamAndApply(reset: Bool, staging: FullSyncStaging?, context: SessionRequestContext, visibilityRevision: UUID) async throws -> StreamOutcome {
+    private func streamAndApply(
+        reset: Bool, staging: FullSyncStaging?, context: SessionRequestContext,
+        visibilityRevision: UUID, assetRevision: inout UUID
+    ) async throws -> StreamOutcome {
         // Immich v3 mempertahankan nama request AssetsV1 di enum, tetapi
         // handler server-nya sengaja selalu membalas 400 karena sudah
         // deprecated. Aplikasi sebelumnya tetap memintanya, lalu background
@@ -100,6 +104,7 @@ class SyncRepository {
 
         try api.checkCurrent(context)
         try checkVisibility(visibilityRevision)
+        try checkAssets(assetRevision)
         let requestType = serverMajor >= 3 ? "AssetsV2" : "AssetsV1"
         var request = SyncStreamRequestDTO(types: [requestType])
         if reset { request.reset = true }
@@ -115,6 +120,7 @@ class SyncRepository {
         for try await line in lines {
             try api.checkCurrent(context)
             try checkVisibility(visibilityRevision)
+            try checkAssets(assetRevision)
             guard !line.isEmpty, let data = line.data(using: .utf8) else { continue }
             let envelope = try JSONDecoder.immich.decode(SyncLineEnvelopeDTO.self, from: data)
             if staging != nil, outcome.completed {
@@ -177,7 +183,7 @@ class SyncRepository {
 
             if upserts.count >= Self.chunkSize || deletes.count >= Self.chunkSize {
                 try await flush(&upserts, &deletes, &visibilityByID,
-                    context: context, visibilityRevision: visibilityRevision)
+                    context: context, visibilityRevision: visibilityRevision, assetRevision: &assetRevision)
             }
             if staging != nil {
                 stagedLineCount += 1
@@ -189,7 +195,7 @@ class SyncRepository {
         }
 
         try await flush(&upserts, &deletes, &visibilityByID,
-            context: context, visibilityRevision: visibilityRevision)
+            context: context, visibilityRevision: visibilityRevision, assetRevision: &assetRevision)
         return outcome
     }
 
@@ -199,10 +205,12 @@ class SyncRepository {
         _ deletes: inout [String],
         _ visibilityByID: inout [String: String],
         context: SessionRequestContext,
-        visibilityRevision: UUID
+        visibilityRevision: UUID,
+        assetRevision: inout UUID
     ) async throws {
         try api.checkCurrent(context)
         try checkVisibility(visibilityRevision)
+        try checkAssets(assetRevision)
         guard !upserts.isEmpty || !deletes.isEmpty else { return }
 
         try dataManager.applySyncBatch(
@@ -210,6 +218,8 @@ class SyncRepository {
             deletedIds: deletes,
             expectedVisibilityRevision: visibilityRevision,
             visibilityByID: visibilityByID)
+        // Advance only for this stream's own accepted batch.
+        assetRevision = dataManager.assetMutationRevision
 
         upserts.removeAll(keepingCapacity: true)
         deletes.removeAll(keepingCapacity: true)
@@ -221,6 +231,13 @@ class SyncRepository {
     private func checkVisibility(_ expectedRevision: UUID) throws {
         try Task.checkCancellation()
         guard expectedRevision == dataManager.visibilityMutationRevision else {
+            throw CancellationError()
+        }
+    }
+
+    @MainActor
+    private func checkAssets(_ expectedRevision: UUID) throws {
+        guard expectedRevision == dataManager.assetMutationRevision else {
             throw CancellationError()
         }
     }

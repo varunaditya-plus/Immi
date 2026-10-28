@@ -279,6 +279,137 @@ final class FullSyncReplacementTests: XCTestCase {
         XCTAssertEqual(fixture.reopen().cachedAssetCount(), 2)
     }
 
+    func testNewerDeltaFromAnotherRepositoryInvalidatesAHeldFullSnapshot() async throws {
+        let fixture = try FullSyncFixture()
+        defer { fixture.cleanup() }
+        fixture.transport.responses = [
+            .held(FullSyncTransport.assets(700)),
+            .body(FullSyncTransport.asset("keep", favorite: true)
+                + FullSyncTransport.asset("delta-new") + FullSyncTransport.complete)
+        ]
+        let started = expectation(description: "Older full snapshot is held")
+        fixture.transport.onStream = { [weak transport = fixture.transport] in
+            if transport?.streamRequestCount == 1 { started.fulfill() }
+        }
+        let full = Task { try await fixture.repository.fullSync() }
+        await fulfillment(of: [started], timeout: 5)
+
+        try await fixture.anotherRepository().deltaSync()
+        let deltaCheckpoint = fixture.dataManager.getSyncState().lastDeltaSyncAt
+        fixture.transport.finishStream(with: FullSyncTransport.asset("keep") + FullSyncTransport.complete)
+        do {
+            try await full.value
+            XCTFail("The older full snapshot must not replace the accepted delta")
+        } catch is CancellationError {}
+
+        for store in [fixture.dataManager, fixture.reopen()] {
+            XCTAssertEqual(store.cachedAssetCount(), 3)
+            XCTAssertTrue(try XCTUnwrap(store.getCachedAsset(id: "keep")).isFavorite)
+            XCTAssertNotNil(store.getCachedAsset(id: "delta-new"))
+            XCTAssertNotNil(store.getCachedAsset(id: "stale"))
+            XCTAssertNil(store.getCachedAsset(id: "download-0"))
+            XCTAssertEqual(store.getSyncState().lastFullSyncAt, fixture.checkpoint)
+            XCTAssertEqual(store.getSyncState().lastDeltaSyncAt, deltaCheckpoint)
+            XCTAssertEqual(store.getSyncState().totalAssets, 3)
+        }
+        XCTAssertGreaterThan(try XCTUnwrap(deltaCheckpoint), fixture.checkpoint)
+        XCTAssertEqual(fixture.transport.acknowledgmentCount, 1)
+    }
+
+    func testNewerFullSnapshotInvalidatesAHeldDeltaFromAnotherRepository() async throws {
+        let fixture = try FullSyncFixture()
+        defer { fixture.cleanup() }
+        fixture.transport.responses = [
+            .held(FullSyncTransport.asset("keep")),
+            .body(FullSyncTransport.asset("keep", favorite: true)
+                + FullSyncTransport.asset("full-new") + FullSyncTransport.complete)
+        ]
+        let started = expectation(description: "Older delta is held")
+        fixture.transport.onStream = { [weak transport = fixture.transport] in
+            if transport?.streamRequestCount == 1 { started.fulfill() }
+        }
+        let delta = Task { try await fixture.repository.deltaSync() }
+        await fulfillment(of: [started], timeout: 5)
+
+        try await fixture.anotherRepository().fullSync()
+        let fullCheckpoint = fixture.dataManager.getSyncState().lastFullSyncAt
+        fixture.transport.finishStream(with: FullSyncTransport.asset("old-delta-new") + FullSyncTransport.complete)
+        do {
+            try await delta.value
+            XCTFail("An older delta must not overwrite a newly accepted full snapshot")
+        } catch is CancellationError {}
+
+        for store in [fixture.dataManager, fixture.reopen()] {
+            XCTAssertEqual(store.cachedAssetCount(), 2)
+            XCTAssertTrue(try XCTUnwrap(store.getCachedAsset(id: "keep")).isFavorite)
+            XCTAssertNotNil(store.getCachedAsset(id: "full-new"))
+            XCTAssertNil(store.getCachedAsset(id: "old-delta-new"))
+            XCTAssertNil(store.getCachedAsset(id: "stale"))
+            XCTAssertEqual(store.getSyncState().lastFullSyncAt, fullCheckpoint)
+            XCTAssertEqual(store.getSyncState().lastDeltaSyncAt, fullCheckpoint)
+            XCTAssertEqual(store.getSyncState().totalAssets, 2)
+        }
+        XCTAssertGreaterThan(try XCTUnwrap(fullCheckpoint), fixture.checkpoint)
+        XCTAssertEqual(fixture.transport.acknowledgmentCount, 1)
+    }
+
+    func testDeltaTracksItsOwnRevisionAcrossMultipleAcceptedBatches() async throws {
+        let fixture = try FullSyncFixture()
+        defer { fixture.cleanup() }
+        fixture.transport.responses = [.body(FullSyncTransport.assets(1_200)
+            + FullSyncTransport.asset("keep", favorite: true) + FullSyncTransport.complete)]
+
+        try await fixture.repository.deltaSync()
+
+        for store in [fixture.dataManager, fixture.reopen()] {
+            XCTAssertEqual(store.cachedAssetCount(), 1_202)
+            XCTAssertTrue(try XCTUnwrap(store.getCachedAsset(id: "keep")).isFavorite)
+            XCTAssertNotNil(store.getCachedAsset(id: "download-0"))
+            XCTAssertNotNil(store.getCachedAsset(id: "download-1199"))
+            XCTAssertEqual(store.getSyncState().totalAssets, 1_202)
+            XCTAssertGreaterThan(try XCTUnwrap(store.getSyncState().lastDeltaSyncAt), fixture.checkpoint)
+        }
+        XCTAssertEqual(fixture.transport.acknowledgmentCount, 1)
+    }
+
+    func testLateAcknowledgmentCannotOverwriteANewerSyncCheckpoint() async throws {
+        for full in [false, true] {
+            let fixture = try FullSyncFixture()
+            defer { fixture.cleanup() }
+            fixture.transport.responses = [
+                .body(FullSyncTransport.asset("keep") + FullSyncTransport.complete),
+                .body(FullSyncTransport.asset("keep", favorite: true)
+                    + FullSyncTransport.asset("newest") + FullSyncTransport.complete)
+            ]
+            fixture.transport.holdAcknowledgment = true
+            let started = expectation(description: "Older sync acknowledgment is held")
+            fixture.transport.onAcknowledgment = { [weak transport = fixture.transport] in
+                if transport?.acknowledgmentCount == 1 { started.fulfill() }
+            }
+            let old = Task {
+                if full { try await fixture.repository.fullSync() }
+                else { try await fixture.repository.deltaSync() }
+            }
+            await fulfillment(of: [started], timeout: 5)
+            fixture.transport.holdAcknowledgment = false
+            try await fixture.anotherRepository().deltaSync()
+            let currentCheckpoint = fixture.dataManager.getSyncState().lastDeltaSyncAt
+            fixture.transport.finishAcknowledgment(failing: false)
+            do {
+                try await old.value
+                XCTFail("The older acknowledgment must not overwrite the accepted sync checkpoint")
+            } catch is CancellationError {}
+
+            for store in [fixture.dataManager, fixture.reopen()] {
+                XCTAssertTrue(try XCTUnwrap(store.getCachedAsset(id: "keep")).isFavorite)
+                XCTAssertNotNil(store.getCachedAsset(id: "newest"))
+                XCTAssertEqual(store.getSyncState().lastDeltaSyncAt, currentCheckpoint)
+                XCTAssertEqual(store.getSyncState().totalAssets, full ? 2 : 3)
+            }
+            XCTAssertEqual(fixture.transport.acknowledgmentCount, 2)
+        }
+    }
+
     private func expectFailure(_ operation: () async throws -> Void) async {
         do {
             try await operation()
@@ -336,6 +467,10 @@ private final class FullSyncFixture {
     }
 
     func reopen() -> SwiftDataManager { SwiftDataManager(storeURL: storeURL, backupJournalURL: journalURL) }
+
+    func anotherRepository() -> SyncRepository {
+        SyncRepository(api: APIClient(session: session, urlSession: urlSession), dataManager: dataManager)
+    }
 
     func cleanup() {
         urlSession.invalidateAndCancel()

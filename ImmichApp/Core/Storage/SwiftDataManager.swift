@@ -324,6 +324,10 @@ final class SwiftDataManager {
 
         let deleted = Set(deletedIds)
         RemovedAssets.shared.restore(upserts.map(\.id).filter { !deleted.contains($0) })
+        // Upsert-only deltas must also invalidate older in-flight snapshots.
+        if !upserts.isEmpty, deletedIds.isEmpty {
+            assetMutationRevision = UUID()
+        }
     }
 
     /// Promotion is one synchronous save on the shared context, so existing UI
