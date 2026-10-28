@@ -129,6 +129,7 @@ final class BackupService {
     private var countedMappingRevision: UUID?
     private var hasRemainingPhotos = false
     private var hasRemainingVideos = false
+    private var lastQueueError: String?
 
     var selectionStatus: BackupSelectionStatus {
         guard !localLibrary.selectedAlbumIDs.isEmpty else { return .noSelection }
@@ -141,10 +142,10 @@ final class BackupService {
         return remainder > 0 ? .remaining : .backedUp
     }
 
+    /// Retry messages stay informational when an item leaves its wait state.
     var hasStatusError: Bool {
         guard let lastError else { return false }
-        let state = queue.snapshot
-        return state.waiting == 0 || state.lastError != lastError
+        return !failures.isEmpty || lastQueueError != lastError
     }
 
     private(set) var isUploading = false
@@ -792,6 +793,7 @@ final class BackupService {
         pendingThisRun = 0
         failures = []
         lastError = nil
+        lastQueueError = nil
         lastRunAt = nil
         waitingForNetwork = 0
         waitingForICloud = 0
@@ -1742,8 +1744,10 @@ final class BackupService {
         scheduleRetryWake()
         if let queueError = state.lastError {
             lastError = queueError
+            lastQueueError = queueError
         } else if state.total == 0 || (state.unfinished == 0 && state.failed == 0) {
             lastError = nil
+            lastQueueError = nil
         }
         notificationRevision += 1
         guard notify, isEnabled, !defersCompletion else { return }

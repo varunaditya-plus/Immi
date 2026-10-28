@@ -417,6 +417,22 @@ final class BackupStatusReportingTests: XCTestCase {
         }
     }
 
+    func testRequeuedNetworkWaitDoesNotTurnItsRetainedMessageIntoAStandaloneError() throws {
+        let fixture = try fixture(queueState: .waitingForNetwork)
+        let message = try XCTUnwrap(fixture.service.lastError)
+        XCTAssertFalse(fixture.service.hasStatusError)
+        XCTAssertEqual(fixture.status, .waiting)
+
+        try fixture.queue.markQueued("manual-photo")
+        fixture.service.stop()
+
+        XCTAssertNil(fixture.queue.snapshot.lastError)
+        XCTAssertEqual(fixture.queue.item(id: "manual-photo")?.state, .queued)
+        XCTAssertEqual(fixture.service.lastError, message)
+        XCTAssertFalse(fixture.service.hasStatusError)
+        XCTAssertEqual(fixture.status, .waiting)
+    }
+
     func testDisabledExplanationDoesNotPromiseAutomaticUploadsForQueuedOrIdleStates() throws {
         for state in [BackupQueueItemState?.none, .some(.queued), .some(.preparing), .some(.failed)] {
             let fixture = try fixture(enabled: false, queueState: state)
