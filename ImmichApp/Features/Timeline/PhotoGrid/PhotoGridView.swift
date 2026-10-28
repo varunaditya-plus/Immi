@@ -1458,6 +1458,9 @@ extension PhotoGridController: UICollectionViewDelegate {
         shouldSelectItemAt indexPath: IndexPath
     ) -> Bool {
         guard let id = dataSource.itemIdentifier(for: indexPath) else { return false }
+        if id == addItemID {
+            return configuration.showsAddTile && !collectionView.isEditing
+        }
         return id != heroItemID && !id.hasPrefix(padItemPrefix)
     }
 
@@ -1469,6 +1472,7 @@ extension PhotoGridController: UICollectionViewDelegate {
 
         if id == addItemID {
             collectionView.deselectItem(at: indexPath, animated: false)
+            guard configuration.showsAddTile, !collectionView.isEditing else { return }
             onAddTapped?()
             return
         }

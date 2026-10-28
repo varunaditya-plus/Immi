@@ -158,6 +158,58 @@ final class EmptyAlbumAddPhotosTests: XCTestCase {
         XCTAssertEqual(input.additions, 0)
     }
 
+    func testPendingScrollSnapshotCannotActivateAnAddControlThatIsNoLongerAllowed() async throws {
+        for reason in ["configuration", "selection", "both"] {
+            let grid = makeGrid()
+            let asset = AssetLite(makeTestAsset(id: UUID().uuidString))
+            let visible = PhotoGridConfiguration(columns: 3, showsSectionHeaders: false, showsAddTile: true)
+            grid.apply(sections: [section([asset])], configuration: visible, hero: nil)
+            await nextMainQueueTurn()
+            grid.view.layoutIfNeeded()
+            let collection = try collectionView(in: grid)
+            let addPath = try XCTUnwrap(collection.visibleCells.first(where: { $0 is PhotoGridAddCell })
+                .flatMap { collection.indexPath(for: $0) })
+            let photoPath = try XCTUnwrap(grid.revealCell(for: asset.id))
+            var additions = 0
+            var selected: Set<String> = []
+            grid.onAddTapped = { additions += 1 }
+            grid.onSelectionChanged = { selected = $0 }
+
+            grid.scrollViewWillBeginDragging(collection)
+            var current = visible
+            current.showsAddTile = reason == "selection"
+            grid.apply(sections: [section([asset])], configuration: current, hero: nil)
+            grid.setSelecting(reason != "configuration")
+            XCTAssertTrue(collection.cellForItem(at: addPath) is PhotoGridAddCell,
+                "The old cell must remain visible while its removal snapshot is held")
+
+            XCTAssertFalse(grid.collectionView(collection, shouldSelectItemAt: addPath), reason)
+            // UIKit can deliver a selection already admitted before state changed.
+            grid.collectionView(collection, didSelectItemAt: addPath)
+            XCTAssertEqual(additions, 0, reason)
+            XCTAssertTrue(selected.isEmpty)
+            XCTAssertTrue(collection.indexPathsForSelectedItems?.isEmpty ?? true)
+
+            grid.setSelecting(true)
+            XCTAssertTrue(grid.collectionView(collection, shouldSelectItemAt: photoPath))
+            collection.selectItem(at: photoPath, animated: false, scrollPosition: [])
+            grid.collectionView(collection, didSelectItemAt: photoPath)
+            XCTAssertEqual(selected, [asset.id], "Real photos must remain selectable")
+
+            grid.scrollViewDidEndDragging(collection, willDecelerate: false)
+            await nextMainQueueTurn()
+            grid.setSelecting(false)
+            grid.apply(sections: [section([asset])], configuration: visible, hero: nil)
+            await nextMainQueueTurn()
+            grid.view.layoutIfNeeded()
+            let restoredPath = try XCTUnwrap(collection.visibleCells.first(where: { $0 is PhotoGridAddCell })
+                .flatMap { collection.indexPath(for: $0) })
+            XCTAssertTrue(grid.collectionView(collection, shouldSelectItemAt: restoredPath))
+            grid.collectionView(collection, didSelectItemAt: restoredPath)
+            XCTAssertEqual(additions, 1, "Leaving selection and restoring the action must make it usable again")
+        }
+    }
+
     private func makeGrid() -> PhotoGridController {
         let session = MockSessionManager()
         let controller = PhotoGridController(loader: PhotoThumbnailLoader(session: session), session: session)
