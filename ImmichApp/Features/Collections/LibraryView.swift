@@ -147,15 +147,7 @@ struct LibraryView: View {
         case .memories:
             MemoriesView()
         case .album(let id):
-            RoutedAlbumView(
-                albumID: id,
-                cachedAlbum: vm?.albums.first(where: { $0.id == id }),
-                onContentsChanged: { assets in
-                    guard vm?.applyAlbumContents(assets, to: id) == true
-                    else { return }
-                    Task { await vm?.refreshAlbums(invalidatingCoverFor: id) }
-                },
-                onAlbumChanged: { vm?.applyAlbumUpdate($0) })
+            routedAlbumDestination(id: id, using: vm)
         }
     }
 
@@ -487,22 +479,12 @@ struct LibraryView: View {
             isEmpty: hasLoaded && albums.isEmpty,
             contentHeight: 200,
             destination: {
-                AlbumsListView(onAlbumUpdated: { vm?.applyAlbumUpdate($0) })
+                allAlbumsDestination(using: vm)
             }
         ) {
             ForEach(albums) { album in
                 NavigationLink {
-                    AlbumDetailView(
-                        album: album,
-                        onContentsChanged: { assets in
-                            guard vm?.applyAlbumContents(assets, to: album.id) == true
-                            else { return }
-                            Task {
-                                await vm?.refreshAlbums(
-                                    invalidatingCoverFor: album.id)
-                            }
-                        },
-                        onAlbumChanged: { vm?.applyAlbumUpdate($0) })
+                    albumDestination(for: album, using: vm)
                         .navigationTransition(
                             .zoom(sourceID: album.id, in: albumNamespace))
                 } label: {
@@ -530,6 +512,38 @@ struct LibraryView: View {
                 }
             }
         }
+    }
+
+    func albumDestination(for album: AlbumResponseDTO, using model: LibraryViewModel?) -> AlbumDetailView {
+        AlbumDetailView(
+            album: album,
+            onContentsChanged: { reportAlbumContents($0, id: album.id, using: model) },
+            onAlbumChanged: { model?.applyAlbumUpdate($0) },
+            onDeleted: { model?.removeDeletedAlbum(album.id) },
+            onShared: { model?.applyAlbumSharing(album.id) })
+    }
+
+    func allAlbumsDestination(using model: LibraryViewModel?) -> AlbumsListView {
+        AlbumsListView(
+            onAlbumUpdated: { model?.applyAlbumUpdate($0) },
+            onAlbumCreated: { model?.applyAlbumCreation($0) },
+            onAlbumContentsChanged: { id, assets in
+                reportAlbumContents(assets, id: id, using: model)
+            },
+            onAlbumDeleted: { model?.removeDeletedAlbum($0) },
+            onAlbumShared: { model?.applyAlbumSharing($0) })
+    }
+
+    func routedAlbumDestination(id: String, using model: LibraryViewModel?) -> RoutedAlbumView {
+        RoutedAlbumView(
+            albumID: id,
+            cachedAlbum: model?.albums.first(where: { $0.id == id }),
+            destination: { albumDestination(for: $0, using: model) })
+    }
+
+    private func reportAlbumContents(_ assets: [AssetLite], id: String, using model: LibraryViewModel?) {
+        guard model?.applyAlbumContents(assets, to: id) == true else { return }
+        Task { await model?.refreshAlbums(invalidatingCoverFor: id) }
     }
 
     @ViewBuilder
@@ -703,11 +717,10 @@ struct LibraryView: View {
 /// Album dari widget bisa bukan salah satu kartu ringkas yang sedang dimuat di
 /// Library. Ambil DTO-nya langsung berdasarkan id agar deep link selalu menuju
 /// album yang dipilih, bukan jatuh kembali ke daftar semua album.
-private struct RoutedAlbumView: View {
+struct RoutedAlbumView: View {
     let albumID: String
     let cachedAlbum: AlbumResponseDTO?
-    let onContentsChanged: ([AssetLite]) -> Void
-    let onAlbumChanged: (AlbumResponseDTO) -> Void
+    let destination: (AlbumResponseDTO) -> AlbumDetailView
 
     @Environment(SessionManager.self) private var session
     @State private var album: AlbumResponseDTO?
@@ -716,10 +729,7 @@ private struct RoutedAlbumView: View {
     var body: some View {
         Group {
             if let album = album ?? cachedAlbum {
-                AlbumDetailView(
-                    album: album,
-                    onContentsChanged: onContentsChanged,
-                    onAlbumChanged: onAlbumChanged)
+                destination(album)
             } else if didFail {
                 ContentUnavailableView(
                     "Album Unavailable",

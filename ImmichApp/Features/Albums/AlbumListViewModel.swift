@@ -111,7 +111,8 @@ final class AlbumListViewModel {
     func createAlbum(
         name: String,
         description: String,
-        assetIds: [String]
+        assetIds: [String],
+        onCreated: ((AlbumResponseDTO) -> Void)? = nil
     ) async -> String? {
         guard canPublish, !name.isEmpty else { return nil }
         do {
@@ -123,6 +124,7 @@ final class AlbumListViewModel {
             invalidateLoads()
             if !albums.contains(where: { $0.id == newAlbum.id }) { albums.append(newAlbum) }
             persist()
+            onCreated?(newAlbum)
             return nil
         } catch {
             guard canPublish else { return nil }
@@ -180,7 +182,10 @@ final class AlbumListViewModel {
         persist()
     }
 
-    func addUsers(_ userIDs: [String], to albumId: String) async {
+    func addUsers(
+        _ userIDs: [String], to albumId: String,
+        onShared: ((String) -> Void)? = nil
+    ) async {
         guard canPublish, !userIDs.isEmpty else { return }
         let errorID = UUID()
         actionErrorID = errorID
@@ -188,13 +193,8 @@ final class AlbumListViewModel {
         do {
             try await repo.addUsers(userIDs, to: albumId)
             guard canPublish else { return }
-            invalidateLoads()
-            if let index = albums.firstIndex(where: { $0.id == albumId }) {
-                var updated = albums[index]
-                updated.shared = true
-                albums[index] = updated
-                persist()
-            }
+            applyAlbumSharing(albumId)
+            onShared?(albumId)
             // Preserve the confirmed sharing change even if reconciliation
             // fails or a later action invalidates its response.
             await loadAlbums()
@@ -205,26 +205,32 @@ final class AlbumListViewModel {
         }
     }
 
-    func deleteAlbum(_ id: String) async {
+    func applyAlbumSharing(_ id: String) {
         guard canPublish else { return }
+        invalidateLoads()
+        guard let index = albums.firstIndex(where: { $0.id == id }) else { return }
+        var updated = albums[index]
+        updated.shared = true
+        albums[index] = updated
+        persist()
+    }
+
+    @discardableResult
+    func deleteAlbum(_ id: String) async -> Bool {
+        guard canPublish else { return false }
         let errorID = UUID()
         actionErrorID = errorID
         actionError = nil
         do {
             try await repo.delete(id)
-            guard canPublish else { return }
-            invalidateLoads()
-            updateIDs[id] = nil
-            albums.removeAll { $0.id == id }
-            persist()
-            // Potret ISI album itu juga dibuang, bukan cuma barisnya dari
-            // daftar. Tanpa ini berkasnya tertinggal selamanya — tidak pernah
-            // dibaca, tidak pernah dibersihkan.
-            LocalSnapshot.remove(LocalSnapshot.Key.album(id), expectedGeneration: snapshotGeneration)
+            guard canPublish else { return false }
+            removeDeletedAlbum(id)
+            return true
         } catch {
-            guard canPublish, actionErrorID == errorID else { return }
+            guard canPublish, actionErrorID == errorID else { return false }
             actionError = (error as? APIError)?.errorDescription
                 ?? String(localized: "Failed to delete album")
+            return false
         }
     }
 
@@ -264,6 +270,8 @@ final class AlbumListViewModel {
         updateIDs[id] = nil
         albums.removeAll { $0.id == id }
         persist()
+        LocalSnapshot.remove(LocalSnapshot.Key.album(id), expectedGeneration: snapshotGeneration)
+        AlbumCoverStore.shared.invalidate(id)
     }
 
     func retry() async {

@@ -10,13 +10,14 @@ struct AlbumDetailView: View {
     let album: AlbumResponseDTO
     /// Library memakai daftar aset yang sudah benar di layar ini untuk menambal
     /// count dan cover tanpa menunggu halaman induk dimuat ulang.
-    var onContentsChanged: (([AssetLite]) -> Void)? = nil
+    var onContentsChanged: (([AssetLite]) -> Void)?
     /// Metadata album yang berhasil disimpan dikirim kembali ke list/grid yang
     /// membuka detail ini.
-    var onAlbumChanged: ((AlbumResponseDTO) -> Void)? = nil
+    var onAlbumChanged: ((AlbumResponseDTO) -> Void)?
     /// Sidebar memakai callback ini untuk menghapus tab album yang baru saja
     /// dihapus dan kembali ke All Albums.
-    var onDeleted: (() -> Void)? = nil
+    var onDeleted: (() -> Void)?
+    var onShared: (() -> Void)?
 
     @Environment(SessionManager.self) private var session
     @Environment(\.dismiss) private var dismiss
@@ -131,7 +132,12 @@ struct AlbumDetailView: View {
 
     private var addUserSheet: some View {
         AlbumAddUserSheet { userIDs in
-            await vm?.addUsers(userIDs, to: album.id)
+            if await vm?.addUsers(userIDs, to: album.id) == true {
+                var updated = currentAlbum
+                updated.shared = true
+                editedAlbum = updated
+                onShared?()
+            }
             defer { vm?.actionError = nil }
             return vm?.actionError
         }
@@ -259,14 +265,21 @@ final class AlbumDetailViewModel {
         }
     }
 
-    func addUsers(_ userIDs: [String], to albumId: String) async {
-        guard !userIDs.isEmpty else { return }
+    @discardableResult
+    func addUsers(_ userIDs: [String], to albumId: String) async -> Bool {
+        guard !Task.isCancelled, snapshotGeneration == LocalSnapshot.generation,
+              !userIDs.isEmpty else { return false }
         actionError = nil
         do {
             try await albumRepo.addUsers(userIDs, to: albumId)
+            guard !Task.isCancelled, snapshotGeneration == LocalSnapshot.generation else { return false }
+            return true
         } catch {
+            guard !Task.isCancelled, !(error is CancellationError),
+                  snapshotGeneration == LocalSnapshot.generation else { return false }
             actionError = (error as? APIError)?.errorDescription
                 ?? String(localized: "Failed to add user")
+            return false
         }
     }
 

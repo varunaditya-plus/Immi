@@ -176,13 +176,14 @@ final class AlbumListConsistencyTests: XCTestCase {
         let initial = [album("deleted"), album("kept")]
         model.albums = initial
         let delete = Task { await model.deleteAlbum("deleted") }
-        addTeardownBlock { await deletion.complete(.failure(CancellationError())); await delete.value }
+        addTeardownBlock { await deletion.complete(.failure(CancellationError())); _ = await delete.value }
         await fulfillment(of: [deletion.started], timeout: 2)
         let load = Task { await model.loadAlbums() }
         addTeardownBlock { await listing.complete(.failure(CancellationError())); await load.value }
         await fulfillment(of: [listing.started], timeout: 2)
         deletion.complete(.success(()))
-        await delete.value
+        let confirmed = await delete.value
+        XCTAssertTrue(confirmed)
         listing.complete(.success(initial))
         await load.value
 

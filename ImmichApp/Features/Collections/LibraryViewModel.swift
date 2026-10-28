@@ -234,6 +234,25 @@ final class LibraryViewModel {
         LocalSnapshot.save(albums, for: LocalSnapshot.Key.libraryAlbums, expectedGeneration: snapshotGeneration)
     }
 
+    func applyAlbumCreation(_ album: AlbumResponseDTO) {
+        guard canPublish else { return }
+        albumRequest = UUID()
+        guard !albums.contains(where: { $0.id == album.id }) else { return }
+        albums.append(album)
+        albums.sort { ($0.updatedAt ?? $0.createdAt) > ($1.updatedAt ?? $1.createdAt) }
+        LocalSnapshot.save(albums, for: LocalSnapshot.Key.libraryAlbums, expectedGeneration: snapshotGeneration)
+    }
+
+    func applyAlbumSharing(_ id: String) {
+        guard canPublish else { return }
+        albumRequest = UUID()
+        guard let index = albums.firstIndex(where: { $0.id == id }) else { return }
+        var updated = albums[index]
+        updated.shared = true
+        albums[index] = updated
+        LocalSnapshot.save(albums, for: LocalSnapshot.Key.libraryAlbums, expectedGeneration: snapshotGeneration)
+    }
+
     func addUsers(_ userIDs: [String], to albumId: String) async {
         guard canPublish, !userIDs.isEmpty else { return }
         let errorID = UUID()
@@ -242,13 +261,7 @@ final class LibraryViewModel {
         do {
             try await albumRepo.addUsers(userIDs, to: albumId)
             guard canPublish else { return }
-            if let index = albums.firstIndex(where: { $0.id == albumId }) {
-                var updated = albums[index]
-                updated.shared = true
-                albums[index] = updated
-                LocalSnapshot.save(albums, for: LocalSnapshot.Key.libraryAlbums,
-                    expectedGeneration: snapshotGeneration)
-            }
+            applyAlbumSharing(albumId)
             await refreshAlbums()
         } catch {
             guard canPublish, actionErrorID == errorID, !(error is CancellationError) else { return }
@@ -265,16 +278,23 @@ final class LibraryViewModel {
         do {
             try await albumRepo.delete(id)
             guard canPublish else { return }
-            albumRequest = UUID()
-            albumUpdates[id] = nil
-            albums.removeAll { $0.id == id }
-            LocalSnapshot.save(albums, for: LocalSnapshot.Key.libraryAlbums, expectedGeneration: snapshotGeneration)
-            LocalSnapshot.remove(LocalSnapshot.Key.album(id), expectedGeneration: snapshotGeneration)
+            removeDeletedAlbum(id)
         } catch {
             guard canPublish, actionErrorID == errorID, !(error is CancellationError) else { return }
             actionError = (error as? APIError)?.errorDescription
                 ?? String(localized: "Failed to delete album")
+            return
         }
+    }
+
+    func removeDeletedAlbum(_ id: String) {
+        guard canPublish else { return }
+        albumRequest = UUID()
+        albumUpdates[id] = nil
+        albums.removeAll { $0.id == id }
+        LocalSnapshot.save(albums, for: LocalSnapshot.Key.libraryAlbums, expectedGeneration: snapshotGeneration)
+        LocalSnapshot.remove(LocalSnapshot.Key.album(id), expectedGeneration: snapshotGeneration)
+        AlbumCoverStore.shared.invalidate(id)
     }
 
     /// Menambal kartu album seketika dari daftar aset yang sudah benar di layar

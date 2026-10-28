@@ -3,6 +3,10 @@ import SwiftUI
 struct AlbumsListView: View {
     /// Pemilik layar (Library, misalnya) dapat ikut menambal snapshot albumnya.
     var onAlbumUpdated: ((AlbumResponseDTO) -> Void)?
+    var onAlbumCreated: ((AlbumResponseDTO) -> Void)?
+    var onAlbumContentsChanged: ((String, [AssetLite]) -> Void)?
+    var onAlbumDeleted: ((String) -> Void)?
+    var onAlbumShared: ((String) -> Void)?
 
     @Environment(SessionManager.self) private var session
     @State private var vm: AlbumListViewModel?
@@ -40,10 +44,18 @@ struct AlbumsListView: View {
     /// membuat/menghapus album langsung terlihat di kedua tempat.
     init(
         viewModel: AlbumListViewModel? = nil,
-        onAlbumUpdated: ((AlbumResponseDTO) -> Void)? = nil
+        onAlbumUpdated: ((AlbumResponseDTO) -> Void)? = nil,
+        onAlbumCreated: ((AlbumResponseDTO) -> Void)? = nil,
+        onAlbumContentsChanged: ((String, [AssetLite]) -> Void)? = nil,
+        onAlbumDeleted: ((String) -> Void)? = nil,
+        onAlbumShared: ((String) -> Void)? = nil
     ) {
         _vm = State(initialValue: viewModel)
         self.onAlbumUpdated = onAlbumUpdated
+        self.onAlbumCreated = onAlbumCreated
+        self.onAlbumContentsChanged = onAlbumContentsChanged
+        self.onAlbumDeleted = onAlbumDeleted
+        self.onAlbumShared = onAlbumShared
     }
 
     var body: some View {
@@ -80,8 +92,8 @@ struct AlbumsListView: View {
                     guard let vm else {
                         return String(localized: "Failed to create album")
                     }
-                    return await vm.createAlbum(
-                        name: name, description: description, assetIds: assetIds)
+                    return await createAlbum(
+                        name: name, description: description, assetIds: assetIds, using: vm)
                 }
             }
             .sheet(item: $editTarget) { album in
@@ -92,7 +104,7 @@ struct AlbumsListView: View {
             }
             .sheet(item: $addUserTarget) { album in
                 AlbumAddUserSheet { userIDs in
-                    await vm?.addUsers(userIDs, to: album.id)
+                    if let vm { await addUsers(userIDs, to: album.id, using: vm) }
                     defer { vm?.actionError = nil }
                     return vm?.actionError
                 }
@@ -229,7 +241,7 @@ struct AlbumsListView: View {
     ) -> some View {
         Group {
             switch layout {
-            case .grid: albumsGrid(albums)
+            case .grid: albumsGrid(albums, vm)
             case .list: albumsList(albums, vm)
             }
         }
@@ -252,18 +264,13 @@ struct AlbumsListView: View {
     /// mendorong dua entri sekaligus — halaman yang sama muncul di atas, dan
     /// detailnya baru terlihat setelah ditekan back. Jalur dari Collections
     /// tidak pernah bermasalah justru karena memakai tujuan langsung.
-    private func albumsGrid(_ albums: [AlbumResponseDTO]) -> some View {
+    private func albumsGrid(_ albums: [AlbumResponseDTO], _ model: AlbumListViewModel) -> some View {
         GeometryReader { proxy in
             ScrollView {
                 LazyVGrid(columns: gridColumns(for: proxy.size.width), spacing: 16) {
                     ForEach(albums) { album in
                         NavigationLink {
-                            AlbumDetailView(
-                                album: album,
-                                onAlbumChanged: {
-                                    vm?.applyAlbumUpdate($0)
-                                    onAlbumUpdated?($0)
-                                })
+                            albumDestination(for: album, using: model)
                                 .navigationTransition(
                                     .zoom(sourceID: album.id, in: albumNamespace))
                         } label: {
@@ -283,7 +290,7 @@ struct AlbumsListView: View {
                         ) {
                             Button("Delete Album", role: .destructive) {
                                 deleteTarget = nil
-                                Task { await vm?.deleteAlbum(album.id) }
+                                Task { await deleteAlbum(album.id, using: model) }
                             }
                             Button("Cancel", role: .cancel) {}
                         } message: {
@@ -328,12 +335,7 @@ struct AlbumsListView: View {
         List {
             ForEach(albums) { album in
                 NavigationLink {
-                    AlbumDetailView(
-                        album: album,
-                        onAlbumChanged: {
-                            vm.applyAlbumUpdate($0)
-                            onAlbumUpdated?($0)
-                        })
+                    albumDestination(for: album, using: vm)
                         .navigationTransition(
                             .zoom(sourceID: album.id, in: albumNamespace))
                 } label: {
@@ -358,7 +360,7 @@ struct AlbumsListView: View {
                 ) {
                     Button("Delete Album", role: .destructive) {
                         deleteTarget = nil
-                        Task { await vm.deleteAlbum(album.id) }
+                        Task { await deleteAlbum(album.id, using: vm) }
                     }
                     Button("Cancel", role: .cancel) {}
                 } message: {
@@ -368,7 +370,7 @@ struct AlbumsListView: View {
             .onDelete { indices in
                 for index in indices {
                     let id = albums[index].id
-                    Task { await vm.deleteAlbum(id) }
+                    Task { await deleteAlbum(id, using: vm) }
                 }
             }
             // Garis di ATAS baris pertama dibuang: ia bukan pemisah antar apa
@@ -379,6 +381,44 @@ struct AlbumsListView: View {
     }
 
     // MARK: - Context menu
+
+    func albumDestination(for album: AlbumResponseDTO, using model: AlbumListViewModel) -> AlbumDetailView {
+        AlbumDetailView(
+            album: album,
+            onContentsChanged: { assets in
+                model.applyContents(assets, to: album.id)
+                onAlbumContentsChanged?(album.id, assets)
+            },
+            onAlbumChanged: {
+                model.applyAlbumUpdate($0)
+                onAlbumUpdated?($0)
+            },
+            onDeleted: {
+                model.removeDeletedAlbum(album.id)
+                onAlbumDeleted?(album.id)
+            },
+            onShared: {
+                model.applyAlbumSharing(album.id)
+                onAlbumShared?(album.id)
+            })
+    }
+
+    func createAlbum(
+        name: String, description: String, assetIds: [String], using model: AlbumListViewModel
+    ) async -> String? {
+        await model.createAlbum(name: name, description: description, assetIds: assetIds) { album in
+            scope = .all
+            onAlbumCreated?(album)
+        }
+    }
+
+    func addUsers(_ ids: [String], to albumID: String, using model: AlbumListViewModel) async {
+        await model.addUsers(ids, to: albumID, onShared: onAlbumShared)
+    }
+
+    func deleteAlbum(_ id: String, using model: AlbumListViewModel) async {
+        if await model.deleteAlbum(id) { onAlbumDeleted?(id) }
+    }
 
     private func contextMenu(for album: AlbumResponseDTO) -> some View {
         AlbumActionsMenu(

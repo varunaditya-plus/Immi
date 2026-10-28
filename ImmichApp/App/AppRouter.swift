@@ -278,6 +278,9 @@ struct MainTabView: View {
                                     onDeleted: {
                                         sidebarAlbumsVM.removeDeletedAlbum(album.id)
                                         select(.allAlbums)
+                                    },
+                                    onShared: {
+                                        sidebarAlbumsVM.applyAlbumSharing(album.id)
                                     })
                             }
                         } label: {
