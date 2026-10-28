@@ -90,25 +90,14 @@ struct TrashView: View {
     private func start() async {
         if vm == nil {
             let api = APIClient(session: session)
-            let searchRepo = SearchRepository(api: api)
-            trashRepo = TrashRepository(api: api)
+            let repository = TrashRepository(api: api)
+            trashRepo = repository
             vm = AssetGridViewModel(
                 assetRepo: AssetDetailRepository(api: api),
                 albumRepo: AlbumRepository(api: api),
                 snapshotKey: LocalSnapshot.Key.trash,
                 loader: {
-                    // `withDeleted` SAJA tidak cukup — itu berarti "ikut
-                    // sertakan yang di trash", bukan "hanya yang di trash",
-                    // sehingga foto baru dari server pun ikut muncul di sini.
-                    // `trashedAfter` yang menyaringnya: aset yang tidak pernah
-                    // dibuang tidak punya tanggal buang, jadi tidak satu pun
-                    // dari mereka yang lolos.
-                    let items = try await searchRepo.allMetadata(
-                        SearchRequestDTO(
-                            size: 200,
-                            withDeleted: true,
-                            trashedAfter: trashEpoch))
-                    return items.map(AssetLite.init)
+                    try await repository.assets().map(AssetLite.init)
                 })
         }
         // Setiap kali — penyegarannya tak terlihat, dan itu yang memberi jalan
@@ -126,9 +115,3 @@ struct TrashView: View {
         Task { await vm?.restoreAll(using: trashRepo) }
     }
 }
-
-/// Batas bawah "kapan dibuang" yang pasti melingkupi seluruh isi trash.
-///
-/// Bukan tanggal yang berarti apa-apa — ia cuma cara menyatakan "yang pernah
-/// dibuang, kapan pun itu".
-private let trashEpoch = "1970-01-01T00:00:00.000Z"
