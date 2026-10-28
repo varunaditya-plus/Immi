@@ -116,9 +116,11 @@ struct AssetDetailView: View {
         onAssetRemoved: ((String) -> Void)? = nil,
         onAssetUpdated: ((String) -> Void)? = nil,
         onFavoriteChanged: ((String, Bool) -> Void)? = nil,
-        trashActions: TrashViewerActions? = nil
+        trashActions: TrashViewerActions? = nil,
+        viewModel: AssetDetailViewModel? = nil
     ) {
         _viewer = State(initialValue: AssetViewerState(currentAsset: currentAsset, assets: assets))
+        _vm = State(initialValue: viewModel)
         self.visibilityPolicy = visibilityPolicy ?? AssetVisibilityPolicy()
         self.isModal = isModal
         self.onAssetChange = onAssetChange
@@ -1145,9 +1147,14 @@ struct AssetDetailView: View {
         Button {
             shareFile()
         } label: {
-            shareIcon
+            Label {
+                Text("Share")
+            } icon: {
+                shareIcon
+            }
         }
-        .disabled(isPreparingShare)
+        .labelStyle(.iconOnly)
+        .disabled(isPreparingShare || isSharePresented)
     }
 
     @ViewBuilder
@@ -1349,6 +1356,7 @@ struct AssetDetailView: View {
     }
 
     private func shareFile() {
+        guard !isSharePresented else { return }
         let target = currentTarget
         let accountGeneration = LocalSnapshot.generation
         viewer.prepare(target, kind: .share,
