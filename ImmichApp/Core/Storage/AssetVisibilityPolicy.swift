@@ -62,7 +62,7 @@ struct AssetVisibilityPolicy {
             _ = dataManager.backupMappingRevision
             let hasDurableRemoval = removalScope == .trash
                 ? deleted.hasPermanentlyDeletedAssets : deleted.hasSuppressedAssets
-            if suppressed.isEmpty, removed.ids.isEmpty, !hasDurableRemoval { return true }
+            if suppressed.isEmpty, removed.excludedIDs(scope: removalScope).isEmpty, !hasDurableRemoval { return true }
         }
         let serverID = isLocal
             ? mappingCache.mappings(in: dataManager)[LocalPhotoLibrary.localIdentifier(from: id)]

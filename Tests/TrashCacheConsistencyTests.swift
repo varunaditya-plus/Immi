@@ -186,7 +186,7 @@ final class TrashCacheConsistencyTests: XCTestCase {
             RemovedAssets.shared.remove([photo.id])
             DeletedServerAssetRegistry.shared.record([photo.id], permanently: true)
             release.signal()
-            await pending.value
+            _ = await pending.value
 
             XCTAssertTrue(model.assets.isEmpty)
             XCTAssertNil(fixture.reopen().getCachedAsset(id: photo.id))

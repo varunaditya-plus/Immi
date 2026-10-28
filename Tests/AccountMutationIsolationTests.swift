@@ -32,7 +32,7 @@ final class AccountMutationIsolationTests: XCTestCase {
         // The repository returns success after the switch. This tests the
         // model's storage boundary independently of API response validation.
         gate.resume()
-        await restoration.value
+        _ = await restoration.value
 
         XCTAssertEqual(fixture.dataManager.timelineAssets().map(\.asset.id), ["next-account-photo"])
         XCTAssertNil(fixture.dataManager.getCachedAsset(id: photo.id))
@@ -53,7 +53,7 @@ final class AccountMutationIsolationTests: XCTestCase {
         let restoration = Task { await model.restore([photo.id], using: repository) }
         await fulfillment(of: [gate.started], timeout: 2)
         gate.resume()
-        await restoration.value
+        _ = await restoration.value
 
         XCTAssertEqual(fixture.dataManager.timelineAssets().map(\.asset.id), [photo.id])
         XCTAssertEqual(fixture.dataManager.getCachedAsset(id: photo.id)?.ratio, photo.ratio)
@@ -114,7 +114,7 @@ final class AccountMutationIsolationTests: XCTestCase {
         LocalSnapshot.clearAll()
         DeletedServerAssetRegistry.shared.record(["next-account-trash"], permanently: false)
         gate.resume()
-        await restoration.value
+        _ = await restoration.value
 
         XCTAssertTrue(DeletedServerAssetRegistry.shared.suppressedIDs.contains("next-account-trash"))
     }
@@ -130,9 +130,9 @@ final class AccountMutationIsolationTests: XCTestCase {
         LocalSnapshot.clearAll()
         DeletedServerAssetRegistry.shared.record(["next-account-trash"], permanently: false)
         gate.resume()
-        await emptying.value
+        _ = await emptying.value
 
-        DeletedServerAssetRegistry.shared.restoreAllFromTrash()
+        DeletedServerAssetRegistry.shared.restore(["next-account-trash"])
         XCTAssertFalse(DeletedServerAssetRegistry.shared.suppressedIDs.contains("next-account-trash"))
     }
 

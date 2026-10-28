@@ -23,7 +23,7 @@ final class DeletedServerAssetRegistry {
     }
 
     private let defaults: UserDefaults
-    private var trashedIDs: Set<String>
+    private(set) var trashedIDs: Set<String>
     private var permanentIDs: Set<String>
 
     var suppressedIDs: Set<String> {
@@ -66,19 +66,12 @@ final class DeletedServerAssetRegistry {
         persist()
     }
 
-    /// Restore All hanya berlaku untuk isi Trash. Aset yang sudah dihapus
-    /// permanen tetap harus ditekan agar salinan lokalnya tidak muncul kembali.
-    func restoreAllFromTrash() {
-        guard !trashedIDs.isEmpty else { return }
-        trashedIDs.removeAll()
-        persist()
-    }
-
     /// Empty Trash mengubah soft-delete menjadi permanent-delete.
-    func emptyTrash() {
-        guard !trashedIDs.isEmpty else { return }
-        permanentIDs.formUnion(trashedIDs)
-        trashedIDs.removeAll()
+    func emptyTrash(_ emptied: [String]) {
+        let confirmed = Set(emptied)
+        guard !confirmed.isEmpty else { return }
+        permanentIDs.formUnion(confirmed)
+        trashedIDs.subtract(confirmed)
         persist()
     }
 

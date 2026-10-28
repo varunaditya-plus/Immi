@@ -152,20 +152,30 @@ final class AssetGridViewModel {
 
     /// Menghapus dari PERPUSTAKAAN — ke tong sampah, atau permanen kalau
     /// fotonya memang sudah ada di sana.
-    func delete(_ ids: [String], permanently: Bool = false) async {
-        guard !ids.isEmpty, snapshotGeneration == LocalSnapshot.generation else { return }
+    @discardableResult
+    func delete(_ ids: [String], permanently: Bool = false) async -> Bool {
+        guard !ids.isEmpty, canMutate else { return false }
+        let requestedIDs: [String]
+        if permanently {
+            let selected = Set(ids)
+            requestedIDs = restorable(assets).filter { selected.contains($0.id) }.map(\.id)
+        } else { requestedIDs = ids }
+        guard !requestedIDs.isEmpty else { return false }
         actionError = nil
         do {
-            try await assetRepo.delete(ids, force: permanently)
-            guard snapshotGeneration == LocalSnapshot.generation else { return }
+            try await assetRepo.delete(requestedIDs, force: permanently)
+            guard canMutate else { return false }
             loadRevision = UUID()
-            let removed = Set(ids)
+            let removed = Set(requestedIDs)
             assets.removeAll { removed.contains($0.id) }
             persist()
+            phase = .loaded(())
+            return true
         } catch {
-            guard snapshotGeneration == LocalSnapshot.generation else { return }
+            guard canMutate, !(error is CancellationError) else { return false }
             actionError = (error as? APIError)?.errorDescription
                 ?? String(localized: "Failed to delete photos")
+            return false
         }
     }
 
@@ -246,7 +256,8 @@ final class AssetGridViewModel {
     /// terasa rusak alih-alih membantu.
     private func persist() {
         guard let snapshotKey else { return }
-        LocalSnapshot.save(assets, for: snapshotKey, expectedGeneration: snapshotGeneration)
+        let snapshot = snapshotKey == LocalSnapshot.Key.trash ? restorable(assets) : assets
+        LocalSnapshot.save(snapshot, for: snapshotKey, expectedGeneration: snapshotGeneration)
     }
 
     private func cacheFavoriteIfNeeded(_ id: String, value: Bool) {
@@ -286,76 +297,119 @@ final class AssetGridViewModel {
 
     // MARK: - Tong sampah
 
+    private var canMutate: Bool {
+        !Task.isCancelled && snapshotGeneration == LocalSnapshot.generation
+    }
+
     private func restorable(_ candidates: [AssetLite]) -> [AssetLite] {
-        RemovedAssets.shared.filter(candidates, scope: .trash)
-            .filter { !DeletedServerAssetRegistry.shared.isPermanentlyDeleted($0.id) }
+        AssetVisibilityPolicy(scope: .collection, removalScope: .trash, dataManager: dataManager).filter(candidates)
+    }
+
+    private func availableInTrash(_ id: String) -> Bool {
+        !RemovedAssets.shared.contains(id, scope: .trash)
+            && !DeletedServerAssetRegistry.shared.isPermanentlyDeleted(id)
     }
 
     /// Mengembalikan foto terpilih dari tong sampah.
-    func restore(_ ids: [String], using repo: TrashRepository) async {
-        guard !ids.isEmpty else { return }
+    @discardableResult
+    func restore(_ ids: [String], using repo: TrashRepository) async -> Bool {
+        guard !ids.isEmpty, canMutate else { return false }
         actionError = nil
-        // DICATAT SEBELUM dibuang dari daftar: setelah `removeAll`, tidak ada
-        // lagi tempat mengambil rasio dan thumbhash-nya untuk ditulis balik ke
-        // cache linimasa.
         let selected = Set(ids)
         let candidates = restorable(assets).filter { selected.contains($0.id) }
         let requestedIDs = candidates.map(\.id)
-        guard !requestedIDs.isEmpty else { return }
+        guard !requestedIDs.isEmpty else { return false }
+        let revision = RemovedAssets.shared.trashMutationRevision
+        let visibilityRevision = dataManager.visibilityMutationRevision
         do {
             try await repo.restore(requestedIDs)
-            guard snapshotGeneration == LocalSnapshot.generation else { return }
+            guard canMutate else { return false }
             loadRevision = UUID()
-            let restoredAssets = restorable(candidates)
-            let restoredIDs = restoredAssets.map(\.id)
+            let restoredIDs = requestedIDs.filter {
+                !RemovedAssets.shared.changedInTrash($0, after: revision) && availableInTrash($0)
+            }
+            let restoredAssets = restorable(candidates).filter { restoredIDs.contains($0.id) }
             DeletedServerAssetRegistry.shared.restore(restoredIDs)
-            RemovedAssets.shared.restore(restoredIDs)
-            let restored = Set(requestedIDs)
-            assets.removeAll { restored.contains($0.id) }
+            RemovedAssets.shared.restoreFromTrash(restoredIDs)
+            let completed = Set(requestedIDs.filter {
+                !RemovedAssets.shared.changedInTrash($0, after: revision) || !availableInTrash($0)
+            })
+            assets.removeAll { completed.contains($0.id) }
             persist()
-            // Aset yang dibuang sudah tidak ada di cache linimasa, jadi ini
-            // menulisnya kembali — bukan sekadar menandai.
-            try? dataManager.restoreToTimeline(restoredAssets)
+            phase = .loaded(())
+            try? dataManager.restoreToTimeline(restoredAssets, expectedVisibilityRevision: visibilityRevision)
+            return restoredIDs.count == requestedIDs.count
         } catch {
+            guard canMutate, !(error is CancellationError) else { return false }
             actionError = (error as? APIError)?.errorDescription
                 ?? String(localized: "Failed to restore photos")
+            return false
         }
     }
 
-    func restoreAll(using repo: TrashRepository) async {
+    @discardableResult
+    func restoreAll(using repo: TrashRepository) async -> Bool {
+        guard canMutate else { return false }
         let candidates = restorable(assets)
+        let knownIDs = Set(candidates.map(\.id))
+            .union(DeletedServerAssetRegistry.shared.trashedIDs)
+            .union(RemovedAssets.shared.trashedIDs)
+        let revision = RemovedAssets.shared.trashMutationRevision
+        let visibilityRevision = dataManager.visibilityMutationRevision
         actionError = nil
         do {
             try await repo.restoreAll()
-            guard snapshotGeneration == LocalSnapshot.generation else { return }
+            guard canMutate else { return false }
             loadRevision = UUID()
-            let restoredAssets = restorable(candidates)
-            DeletedServerAssetRegistry.shared.restoreAllFromTrash()
-            RemovedAssets.shared.restoreAllFromTrash()
-            assets.removeAll()
+            RemovedAssets.shared.invalidateTrashQueries()
+            let currentIDs = knownIDs.filter {
+                !RemovedAssets.shared.changedInTrash($0, after: revision) && availableInTrash($0)
+            }
+            let restoredAssets = restorable(candidates).filter { currentIDs.contains($0.id) }
+            DeletedServerAssetRegistry.shared.restore(Array(currentIDs))
+            RemovedAssets.shared.restoreFromTrash(Array(currentIDs))
+            assets.removeAll { currentIDs.contains($0.id) || !availableInTrash($0.id) }
             persist()
-            try? dataManager.restoreToTimeline(restoredAssets)
+            phase = .loaded(())
+            try? dataManager.restoreToTimeline(restoredAssets, expectedVisibilityRevision: visibilityRevision)
+            return true
         } catch {
+            guard canMutate, !(error is CancellationError) else { return false }
             actionError = (error as? APIError)?.errorDescription
                 ?? String(localized: "Failed to restore photos")
+            return false
         }
     }
 
-    func emptyTrash(using repo: TrashRepository) async {
-        let removedIDs = assets.map(\.id)
+    @discardableResult
+    func emptyTrash(using repo: TrashRepository) async -> Bool {
+        guard canMutate else { return false }
+        let knownIDs = Set(assets.map(\.id))
+            .union(DeletedServerAssetRegistry.shared.trashedIDs)
+            .union(RemovedAssets.shared.trashedIDs)
+        let revision = RemovedAssets.shared.trashMutationRevision
         actionError = nil
         do {
             try await repo.empty()
-            guard snapshotGeneration == LocalSnapshot.generation else { return }
+            guard canMutate else { return false }
             loadRevision = UUID()
-            DeletedServerAssetRegistry.shared.emptyTrash()
-            RemovedAssets.shared.remove(removedIDs)
-            RemovedAssets.shared.emptyTrash()
-            assets.removeAll()
+            RemovedAssets.shared.invalidateTrashQueries()
+            let emptied = knownIDs.filter {
+                !RemovedAssets.shared.changedInTrash($0, after: revision)
+                    && !RemovedAssets.shared.contains($0, scope: .trash)
+            }
+            DeletedServerAssetRegistry.shared.emptyTrash(Array(emptied))
+            RemovedAssets.shared.emptyTrash(Array(emptied))
+            assets.removeAll { emptied.contains($0.id) || !availableInTrash($0.id) }
             persist()
+            phase = .loaded(())
+            try? dataManager.purgeAssets(Array(emptied), reason: .unavailable)
+            return true
         } catch {
+            guard canMutate, !(error is CancellationError) else { return false }
             actionError = (error as? APIError)?.errorDescription
                 ?? String(localized: "Failed to empty trash")
+            return false
         }
     }
 
