@@ -24,6 +24,8 @@ struct BackupUploadTaskContext: Codable, Equatable, Sendable {
     /// Persisted in URLSession so cancellation remains a requeue operation
     /// even when the process exits before its completion callback arrives.
     var isStorageRecovery: Bool? = nil
+    /// Preserves the selected device album when completion launches a new process.
+    var sourceAlbumName: String? = nil
 
     var encoded: String {
         guard let data = try? JSONEncoder().encode(self) else { return "" }
@@ -186,7 +188,8 @@ final class BackupUploader: NSObject {
         checksum: String,
         allowsCellular: Bool,
         ownership: BackupUploadOwnership,
-        phase: BackupUploadPhase = .primaryAsset
+        phase: BackupUploadPhase = .primaryAsset,
+        sourceAlbumName: String? = nil
     ) throws -> URLSessionUploadTask {
         let request = Self.uploadRequest(prepared.request, allowsCellular: allowsCellular)
 
@@ -197,7 +200,8 @@ final class BackupUploader: NSObject {
             bodyPath: prepared.bodyFile.path,
             ownership: ownership,
             credentialFingerprint: BackupUploadTaskContext.credentialFingerprint(
-                for: request.allHTTPHeaderFields ?? [:]))
+                for: request.allHTTPHeaderFields ?? [:]),
+            sourceAlbumName: sourceAlbumName)
         try BackupTemporaryFiles.record(context)
         let task = session.uploadTask(with: request, fromFile: prepared.bodyFile)
         task.taskDescription = context.encoded
@@ -322,8 +326,8 @@ final class BackupUploader: NSObject {
 
     /// ID PhotoKit yang sudah berada di tangan `nsurlsessiond`.
     ///
-    /// Daftar ini bertahan saat proses aplikasi mati. Tanpanya cold launch
-    /// background mengantre file yang sama lagi karena `pendingPhotos` hanya RAM.
+    /// Daftar ini bertahan saat proses aplikasi mati dan mencegah cold launch
+    /// background mengantre file yang sama lagi.
     @MainActor
     func activeLocalIdentifiers(ownership: BackupUploadOwnership?) async -> Set<String> {
         Set(await activeTasks(ownership: ownership).map(\.context.localIdentifier))

@@ -177,10 +177,13 @@ final class BackupUploadRequests {
 
     /// The motion transfer succeeded even if Photos access disappeared before
     /// the still could be read. Persist that handoff before waiting for access.
-    func retainCompletedMotion(_ id: String, motionAssetID: String) throws {
+    func retainCompletedMotion(
+        _ id: String, motionAssetID: String, sourceAlbumName: String? = nil
+    ) throws {
         guard let current = queue.item(id: id), current.state == .uploading,
               current.phase == .livePhotoMotion else { return }
-        try queue.markPreparing(id, phase: .primaryAsset, motionAssetID: motionAssetID)
+        try queue.markPreparing(id, phase: .primaryAsset, motionAssetID: motionAssetID,
+            sourceAlbumName: sourceAlbumName)
         try queue.markQueued(id)
     }
 

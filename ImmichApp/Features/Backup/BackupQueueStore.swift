@@ -46,6 +46,8 @@ struct BackupQueueItem: Codable, Equatable, Identifiable, Sendable {
     var updatedAt: Date
     /// Missing on older ledgers, which retain automatic network restrictions.
     var intent: BackupQueueIntent? = nil
+    /// Captured before staging so completion does not depend on a PhotoKit scan.
+    var sourceAlbumName: String? = nil
 
     var isUserRequested: Bool { intent != nil }
     var allowsCellularOverride: Bool { intent == .manualUpload }
@@ -349,6 +351,7 @@ final class BackupQueueStore {
         _ id: String,
         phase: BackupUploadPhase,
         motionAssetID: String? = nil,
+        sourceAlbumName: String? = nil,
         now: Date = .now
     ) throws {
         guard let state = ledger.items.first(where: { $0.id == id })?.state,
@@ -358,6 +361,7 @@ final class BackupQueueStore {
             item.phase = phase
             item.state = .preparing
             item.motionAssetID = motionAssetID
+            if item.sourceAlbumName == nil { item.sourceAlbumName = sourceAlbumName }
             item.nextAttemptAt = nil
             item.lastError = nil
             item.taskIdentifier = nil
@@ -621,6 +625,11 @@ final class BackupQueueStore {
 
         for task in activeTasks {
             if let index = proposed.items.firstIndex(where: { $0.id == task.context.localIdentifier }) {
+                if proposed.items[index].sourceAlbumName == nil,
+                   let sourceAlbumName = task.context.sourceAlbumName {
+                    proposed.items[index].sourceAlbumName = sourceAlbumName
+                    changed = true
+                }
                 if proposed.items[index].state != .cancelling
                     && (proposed.items[index].taskIdentifier != task.taskIdentifier
                     || proposed.items[index].state != .uploading) {
@@ -644,7 +653,8 @@ final class BackupQueueStore {
                     taskIdentifier: task.taskIdentifier,
                     motionAssetID: nil,
                     createdAt: now,
-                    updatedAt: now))
+                    updatedAt: now,
+                    sourceAlbumName: task.context.sourceAlbumName))
                 proposed.completionNotificationPending = true
                 changed = true
             }
