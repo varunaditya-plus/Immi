@@ -288,10 +288,10 @@ private final class PlacementAlbums: AlbumRepository {
     var lookupError: Error?
     var addGate: PlacementAddGate?
 
-    override func all() async throws -> [AlbumResponseDTO] {
+    override func ownedAlbum(named name: String, ownerID: String) async throws -> AlbumResponseDTO? {
         onLookup?()
         if let lookupError { throw lookupError }
-        return []
+        return nil
     }
 
     override func create(name: String, description: String?, assetIds: [String]) async throws -> AlbumResponseDTO {

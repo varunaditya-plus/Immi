@@ -10,6 +10,12 @@ struct AlbumMutationError: LocalizedError {
     }
 }
 
+struct AlbumOwnershipUnavailableError: LocalizedError {
+    var errorDescription: String? {
+        String(localized: "The server did not identify the owner of a matching album.")
+    }
+}
+
 class AlbumRepository {
     private let api: APIClient
     private let dataManager: SwiftDataManager?
@@ -23,6 +29,17 @@ class AlbumRepository {
 
     func all() async throws -> [AlbumResponseDTO] {
         try await api.send(.init(path: "/albums"))
+    }
+
+    /// Backup may reuse an owned album, including one shared with other users.
+    /// A same-name album with unknown ownership does not establish absence.
+    func ownedAlbum(named name: String, ownerID: String) async throws -> AlbumResponseDTO? {
+        let matches = try await all().filter { $0.albumName == name }
+        if let owned = matches.first(where: { $0.ownerId == ownerID }) { return owned }
+        guard !matches.contains(where: { $0.ownerId == nil }) else {
+            throw AlbumOwnershipUnavailableError()
+        }
+        return nil
     }
 
     /// Album yang MEMUAT sebuah foto.

@@ -286,7 +286,9 @@ private final class AlbumResolutionRepository: AlbumRepository {
         self.driver = driver
         super.init(api: api)
     }
-    override func all() async throws -> [AlbumResponseDTO] { try await driver.all() }
+    override func ownedAlbum(named name: String, ownerID: String) async throws -> AlbumResponseDTO? {
+        try await driver.all().first { $0.albumName == name }
+    }
     override func create(name: String, description: String?, assetIds: [String]) async throws -> AlbumResponseDTO {
         try await driver.createAlbum(name)
     }

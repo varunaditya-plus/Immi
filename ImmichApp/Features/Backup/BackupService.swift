@@ -1755,10 +1755,10 @@ final class BackupService {
         let worker = Task { @MainActor [weak self] () -> String? in
             guard let self, self.isCurrentAlbumLookup(name, id: lookupID, ownership: ownership) else { return nil }
             do {
-                let albums = try await albumRepo.all()
+                let existing = try await albumRepo.ownedAlbum(named: name, ownerID: ownership.owner.userID)
                 guard self.isCurrentAlbumLookup(name, id: lookupID, ownership: ownership) else { return nil }
                 let albumID: String
-                if let existing = albums.first(where: { $0.albumName == name }) {
+                if let existing {
                     albumID = existing.id
                 } else {
                     let created = try await albumRepo.create(name: name)

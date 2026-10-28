@@ -30,6 +30,8 @@ struct AlbumResponseDTO: Decodable, Identifiable, Hashable {
     var startDate: Date? = nil
     /// Tanggal foto TERBARU di album.
     var endDate: Date? = nil
+    /// v2 supplies ownerId; v3 identifies the owner in albumUsers.
+    var ownerId: String? = nil
 
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
@@ -44,6 +46,16 @@ extension AlbumResponseDTO {
     private enum CodingKeys: String, CodingKey {
         case id, albumName, description, assetCount, albumThumbnailAssetId
         case shared, createdAt, assets, updatedAt, startDate, endDate
+        case ownerId, albumUsers
+    }
+
+    private struct AlbumUserIdentity: Decodable {
+        struct UserIdentity: Decodable {
+            let id: String
+        }
+
+        let user: UserIdentity
+        let role: String
     }
 
     /// Respons daftar dan detail album memuat seluruh field, tetapi beberapa
@@ -63,6 +75,11 @@ extension AlbumResponseDTO {
         albumThumbnailAssetId = try container.decodeIfPresent(
             String.self, forKey: .albumThumbnailAssetId)
         shared = try container.decodeIfPresent(Bool.self, forKey: .shared) ?? false
+        ownerId = try container.decodeIfPresent(String.self, forKey: .ownerId)
+        if ownerId == nil {
+            let albumUsers = try container.decodeIfPresent([AlbumUserIdentity].self, forKey: .albumUsers)
+            ownerId = albumUsers?.first(where: { $0.role == "owner" })?.user.id
+        }
 
         updatedAt = try? container.decode(Date.self, forKey: .updatedAt)
         createdAt = (try? container.decode(Date.self, forKey: .createdAt))
