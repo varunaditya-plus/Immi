@@ -98,6 +98,7 @@ final class SettingsViewModel {
     var gridColumns: Int
 
     private let repo: SettingsRepository
+    @ObservationIgnored private var serverRequestID = UUID()
 
     init(repo: SettingsRepository) {
         self.repo = repo
@@ -111,6 +112,9 @@ final class SettingsViewModel {
     /// `SessionManager.refreshUser()`. Menariknya lagi di sini hanya berarti dua
     /// permintaan `/users/me` untuk satu layar yang sama.
     func loadServerInfo() async {
+        guard !Task.isCancelled else { return }
+        let requestID = UUID()
+        serverRequestID = requestID
         serverPhase = .loading
         latestVersion = nil
         do {
@@ -124,15 +128,22 @@ final class SettingsViewModel {
             // alasan untuk menandai datanya gagal.
             async let versionTask = try? repo.getVersionCheck()
 
-            let (storage, server) = try await (storageTask, serverTask)
+            let (storage, server, stats, version) = try await (storageTask, serverTask, statsTask, versionTask)
+            guard serverRequestID == requestID else { return }
+            try Task.checkCancellation()
 
             self.storage = storage
             self.serverInfo = server
-            self.assetStats = await statsTask
-            self.latestVersion = await versionTask?.releaseVersion
+            self.assetStats = stats
+            self.latestVersion = version?.releaseVersion
 
             serverPhase = .loaded(())
         } catch {
+            guard serverRequestID == requestID else { return }
+            guard !Task.isCancelled, !(error is CancellationError) else {
+                serverPhase = .idle
+                return
+            }
             serverPhase = .failed(
                 (error as? APIError)?.errorDescription ?? error.localizedDescription)
         }
