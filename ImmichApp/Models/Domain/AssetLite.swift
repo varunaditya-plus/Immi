@@ -43,6 +43,8 @@ struct AssetLite: Identifiable, Hashable, Sendable, Codable {
     /// `init(from:)` di bawah. Sintesis `Decodable` mengabaikan nilai bawaan
     /// untuk properti non-Optional dan tetap menuntut kuncinya ada.
     var origin: AssetOrigin = .server
+    /// Retained only for Trash restoration; legacy snapshots keep known local visibility.
+    var trashVisibility: String? = nil
 
     /// Ada di perangkat, jadi bisa dihapus dari sana.
     var isOnDevice: Bool { origin != .server }
@@ -83,6 +85,7 @@ struct AssetLite: Identifiable, Hashable, Sendable, Codable {
             && duration == other.duration
             && livePhotoVideoID == other.livePhotoVideoID
             && origin == other.origin
+            && trashVisibility == other.trashVisibility
     }
 }
 
@@ -110,7 +113,8 @@ extension AssetLite {
             createdAt: asset.fileCreatedAt,
             isFavorite: asset.isFavorite,
             duration: asset.duration,
-            livePhotoVideoID: asset.livePhotoVideoId)
+            livePhotoVideoID: asset.livePhotoVideoId,
+            trashVisibility: asset.isTrashed ? asset.visibility ?? (asset.isArchived ? "archive" : "timeline") : nil)
     }
 }
 
@@ -132,7 +136,7 @@ extension AssetLite {
 extension AssetLite {
     private enum CodingKeys: String, CodingKey {
         case id, isVideo, ratio, thumbhash, createdAt
-        case isFavorite, duration, livePhotoVideoID, origin
+        case isFavorite, duration, livePhotoVideoID, origin, trashVisibility
     }
 
     init(from decoder: Decoder) throws {
@@ -146,6 +150,7 @@ extension AssetLite {
             isFavorite: try c.decodeIfPresent(Bool.self, forKey: .isFavorite) ?? false,
             duration: try c.decodeIfPresent(Double.self, forKey: .duration),
             livePhotoVideoID: try c.decodeIfPresent(String.self, forKey: .livePhotoVideoID),
-            origin: try c.decodeIfPresent(AssetOrigin.self, forKey: .origin) ?? .server)
+            origin: try c.decodeIfPresent(AssetOrigin.self, forKey: .origin) ?? .server,
+            trashVisibility: try c.decodeIfPresent(String.self, forKey: .trashVisibility))
     }
 }

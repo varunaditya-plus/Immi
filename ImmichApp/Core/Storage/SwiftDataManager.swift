@@ -722,9 +722,23 @@ final class SwiftDataManager {
     /// tersedia cuma yang dibawa layar sampah (`AssetLite`), dan itu cukup:
     /// petak grid hanya butuh rasio, thumbhash, tanggal, dan durasi. Sisanya
     /// menyusul saat sync berikutnya menimpanya.
-    func restoreToTimeline(_ assets: [AssetLite]) throws {
+    func restoreToTimeline(_ assets: [AssetLite], expectedVisibilityRevision: UUID? = nil) throws {
         guard !assets.isEmpty else { return }
+        // A retained Trash snapshot can distinguish archive from timeline, but
+        // must never release a known private restriction or a newer action.
+        let acceptsHint = expectedVisibilityRevision == nil || expectedVisibilityRevision == visibilityMutationRevision
+        if acceptsHint {
+            let privateIDs = privateAssetIDs
+            let archived = assets.filter {
+                $0.trashVisibility == "archive" && !privateIDs.contains($0.id)
+                    && (!nonTimelineAssetIDs.contains($0.id) || !archivedAssetIDs.contains($0.id))
+            }.map(\.id)
+            if !archived.isEmpty { try setAssetVisibility(archived, to: "archive") }
+        }
         for asset in assets {
+            // A changed visibility context cannot safely classify an otherwise
+            // unknown archived row as public. Sync will supply its metadata.
+            if !acceptsHint, asset.trashVisibility == "archive", !nonTimelineAssetIDs.contains(asset.id) { continue }
             let cached = CachedAsset(
                 id: asset.id,
                 assetId: asset.id,
