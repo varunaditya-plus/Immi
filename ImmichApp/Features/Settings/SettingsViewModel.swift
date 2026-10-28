@@ -2,9 +2,63 @@ import Foundation
 import Observation
 import UIKit
 
-private extension String {
-    var normalizedVersion: String {
-        hasPrefix("v") ? String(dropFirst()) : self
+private struct ServerReleaseVersion: Comparable {
+    let core: [String]
+    let prerelease: [String]
+
+    init?(_ tag: String) {
+        let version = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
+        let buildParts = version.split(separator: "+", omittingEmptySubsequences: false)
+        guard buildParts.count <= 2 else { return nil }
+        if buildParts.count == 2, !Self.validIdentifiers(buildParts[1]) { return nil }
+        let parts = buildParts[0].split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+        let core = parts[0].split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+        guard core.count == 3, core.allSatisfy(Self.validNumber) else { return nil }
+        self.core = core
+        if parts.count == 2 {
+            guard Self.validIdentifiers(parts[1]) else { return nil }
+            let identifiers = parts[1].split(separator: ".").map(String.init)
+            guard identifiers.allSatisfy({ !Self.isNumeric($0) || Self.validNumber($0) }) else { return nil }
+            prerelease = identifiers
+        } else {
+            prerelease = []
+        }
+    }
+
+    static func < (lhs: Self, rhs: Self) -> Bool {
+        for (left, right) in zip(lhs.core, rhs.core) where left != right {
+            return numberPrecedes(left, right)
+        }
+        guard !lhs.prerelease.isEmpty else { return false }
+        guard !rhs.prerelease.isEmpty else { return true }
+        for (left, right) in zip(lhs.prerelease, rhs.prerelease) where left != right {
+            let leftIsNumeric = isNumeric(left)
+            let rightIsNumeric = isNumeric(right)
+            if leftIsNumeric != rightIsNumeric { return leftIsNumeric }
+            return leftIsNumeric ? numberPrecedes(left, right) : left < right
+        }
+        return lhs.prerelease.count < rhs.prerelease.count
+    }
+
+    private static func isNumeric(_ value: String) -> Bool {
+        !value.isEmpty && value.utf8.allSatisfy { (48...57).contains($0) }
+    }
+
+    private static func validNumber(_ value: String) -> Bool {
+        isNumeric(value) && (value == "0" || !value.hasPrefix("0"))
+    }
+
+    // Compare decimal strings to avoid overflowing Int on large version components.
+    private static func numberPrecedes(_ lhs: String, _ rhs: String) -> Bool {
+        lhs.count == rhs.count ? lhs < rhs : lhs.count < rhs.count
+    }
+
+    private static func validIdentifiers(_ value: Substring) -> Bool {
+        value.split(separator: ".", omittingEmptySubsequences: false).allSatisfy { identifier in
+            !identifier.isEmpty && identifier.utf8.allSatisfy {
+                (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || $0 == 45
+            }
+        }
     }
 }
 
@@ -90,16 +144,12 @@ final class SettingsViewModel {
         return build.map { "\(short) (\($0))" } ?? short
     }
 
-    /// Perbandingan dilakukan setelah membuang awalan "v".
-    ///
-    /// Server mengirim tag rilis apa adanya ("v1.130.0") sementara `/server/about`
-    /// mengirim versinya tanpa awalan — tanpa dinormalkan, keduanya tidak pernah
-    /// dianggap sama dan pembaruan seolah selalu tersedia.
     var isUpdateAvailable: Bool {
-        guard let latest = latestVersion?.normalizedVersion,
-              let current = serverInfo?.version.normalizedVersion
+        guard let latestVersion, let currentVersion = serverInfo?.version,
+              let latest = ServerReleaseVersion(latestVersion),
+              let current = ServerReleaseVersion(currentVersion)
         else { return false }
-        return latest != current
+        return current < latest
     }
 
     func refreshCacheSize() async {
