@@ -27,6 +27,12 @@ private struct BackupPersistenceError: LocalizedError {
     }
 }
 
+private struct BackupAlbumPlacementError: LocalizedError {
+    var errorDescription: String? {
+        String(localized: "The photo is backed up, but its album could not be resolved. Album placement will retry.")
+    }
+}
+
 /// Pencadangan otomatis foto perangkat ke server.
 ///
 /// **Apa yang bisa dan tidak bisa dilakukan di iOS.** Aplikasi TIDAK bisa
@@ -58,7 +64,10 @@ final class BackupService {
                 stop()
                 BackupScheduler.cancel()
                 BackupNotifier.shared.clearProgress()
-                if queue.hasPendingUserRequests { requestNetworkWake() }
+                if queue.hasPendingUserRequests || hasPendingAlbumPlacements {
+                    BackupScheduler.schedule()
+                    requestNetworkWake()
+                }
                 return
             }
             // Izin pemberitahuan diminta TEPAT di sini: pengguna baru saja
@@ -103,6 +112,10 @@ final class BackupService {
         didSet {
             guard syncAlbums != oldValue else { return }
             UserDefaults.standard.set(syncAlbums, forKey: Self.syncAlbumsKey)
+            if syncAlbums {
+                resumePendingAlbumPlacements()
+                BackupScheduler.schedule()
+            }
         }
     }
 
@@ -177,7 +190,12 @@ final class BackupService {
     }
     private var albumLookupOwnership: BackupUploadOwnership?
     private var albumLookups: [String: AlbumLookup] = [:]
-    @ObservationIgnored private var albumPlacementTasks: [UUID: Task<Void, Never>] = [:]
+    private struct AlbumPlacementWork {
+        let id: UUID
+        let placement: BackupAlbumPlacement
+        let task: Task<Void, Never>
+    }
+    @ObservationIgnored private var albumPlacementTasks: [String: AlbumPlacementWork] = [:]
     /// Berapa loop pengantrean yang sedang berjalan.
     ///
     /// PENGHITUNG, bukan `Bool`. `stop()` melepas `task` dan mengosongkan
@@ -249,7 +267,11 @@ final class BackupService {
     func configure(session: SessionManager) {
         guard session.isLoggedIn, session.backupQueueOwner != nil else { return }
         if repo != nil {
-            guard self.session !== session else { return }
+            if self.session === session {
+                recoverCompletedAlbumPlacements()
+                resumePendingAlbumPlacements()
+                return
+            }
             if self.session?.backupQueueOwner != session.backupQueueOwner { stop() }
         }
         attach(session)
@@ -308,6 +330,8 @@ final class BackupService {
             acceptsUploadResults = false
         }
         resetAlbumResolution(for: uploadOwnership)
+        recoverCompletedAlbumPlacements()
+        resumePendingAlbumPlacements()
     }
 
     /// Dipanggil sejak launch, termasuk cold launch yang hanya terjadi karena
@@ -326,6 +350,7 @@ final class BackupService {
         await pruneUnavailableFailures()
         guard !Task.isCancelled, uploadOwnership == ownership else { return }
         applyQueueSnapshot()
+        resumePendingAlbumPlacements()
         if queue.hasPendingUserRequests {
             requestNetworkWake()
         }
@@ -350,7 +375,7 @@ final class BackupService {
         networkWakeTask?.cancel()
         let id = UUID()
         networkWakeID = id
-        guard isEnabled || queue.hasPendingUserRequests else {
+        guard isEnabled || queue.hasPendingUserRequests || hasPendingAlbumPlacements else {
             networkWakeTask = nil
             return
         }
@@ -363,6 +388,8 @@ final class BackupService {
             await NetworkMonitor.shared.waitUntilReady()
             guard !Task.isCancelled, self.uploadOwnership == ownership,
                   self.repo != nil, self.dataManager.isPersistentStoreAvailable else { return }
+            self.recoverCompletedAlbumPlacements()
+            self.resumePendingAlbumPlacements()
             do {
                 let eligible = try await self.uploadRequests.releaseNetworkWaits(
                     automaticEnabled: self.isEnabled, policy: self.networkPolicy,
@@ -390,6 +417,7 @@ final class BackupService {
     }
 
     var hasPendingRequestedUploads: Bool { queue.hasPendingUserRequests }
+    var hasPendingAlbumPlacements: Bool { syncAlbums && !queue.pendingAlbumPlacements.isEmpty }
     /// Mencari pekerjaan baru, lalu menyerahkannya.
     ///
     /// **Inilah yang membuat pencadangan bisa berlanjut tanpa aplikasi dibuka.**
@@ -403,9 +431,12 @@ final class BackupService {
     /// menyampaikan hasilnya. Yang kedua membuatnya berantai — selama masih ada
     /// sisa, tiap penyelesaian membangunkan aplikasi ini untuk mengantre lagi.
     func continueInBackground() async {
-        guard isEnabled || queue.hasPendingUserRequests else { return }
+        guard isEnabled || queue.hasPendingUserRequests || hasPendingAlbumPlacements else { return }
         await ensureConfigured()
-        guard isEnabled || queue.hasPendingUserRequests,
+        guard !Task.isCancelled else { return }
+        recoverCompletedAlbumPlacements()
+        resumePendingAlbumPlacements()
+        guard isEnabled || queue.hasPendingUserRequests || hasPendingAlbumPlacements,
               repo != nil, !Task.isCancelled else { return }
         if !isEnabled {
             refillReadyQueue()
@@ -871,7 +902,7 @@ final class BackupService {
         while !Task.isCancelled {
             if let wake = networkWakeTask { await wake.value }
             else if let work = task { await work.value }
-            else if let placement = albumPlacementTasks.values.first { await placement.value }
+            else if let placement = albumPlacementTasks.values.first { await placement.task.value }
             else { return }
         }
     }
@@ -1483,10 +1514,18 @@ final class BackupService {
         // Preserve the first queued destination; task metadata repairs older or missing ledgers.
         let sourceAlbumName = queue.item(id: localIdentifier)?.sourceAlbumName ?? context.sourceAlbumName
         if let existing = dataManager.getBackupRecord(localIdentifier: localIdentifier) {
-            try? queue.discard(localIdentifier)
+            let placement = albumPlacement(existing.assetId, albumName: sourceAlbumName, context: context)
+            do {
+                if case .success = outcome, let placement {
+                    try queue.recordAlbumPlacement(placement)
+                }
+                try queue.discard(localIdentifier)
+            } catch {
+                lastError = error.localizedDescription
+            }
             applyQueueSnapshot()
-            if case .success = outcome {
-                scheduleAlbumPlacement(existing.assetId, albumName: sourceAlbumName, context: context)
+            if case .success = outcome, let placement, let ownership = context.ownership {
+                scheduleAlbumPlacement(placement, ownership: ownership)
             }
             return
         }
@@ -1508,6 +1547,7 @@ final class BackupService {
         }
         switch outcome {
         case .success(let assetID):
+            let placement = albumPlacement(assetID, albumName: sourceAlbumName, context: context)
             do {
                 guard dataManager.isPersistentStoreAvailable else {
                     throw BackupPersistenceError()
@@ -1516,7 +1556,7 @@ final class BackupService {
                     assetID: assetID,
                     checksum: context.checksum,
                     localIdentifier: localIdentifier)
-                try queue.markCompleted(localIdentifier)
+                try queue.markCompleted(localIdentifier, albumPlacement: placement)
             } catch {
                 lastError = error.localizedDescription
                 try? queue.markRetry(
@@ -1526,7 +1566,9 @@ final class BackupService {
                     retryAt: retryDate(for: localIdentifier))
             }
 
-            scheduleAlbumPlacement(assetID, albumName: sourceAlbumName, context: context)
+            if let placement, let ownership = context.ownership {
+                scheduleAlbumPlacement(placement, ownership: ownership)
+            }
 
         case .failure(let error):
             lastError = error.localizedDescription
@@ -1749,31 +1791,84 @@ final class BackupService {
     // MARK: - Sinkronisasi album
 
     /// Menaruh aset di album server bernama sama dengan album perangkatnya.
-    ///
-    /// Kegagalannya DIAM dan tidak membatalkan apa pun: fotonya sudah aman di
-    /// server, dan itu yang penting. Gagal menaruhnya ke album adalah kerapian
-    /// yang tertunda, bukan data yang hilang — percobaan berikutnya akan
-    /// menemukannya lagi lewat "Organize into Albums".
-    private func placeInAlbum(_ assetID: String, albumName name: String, ownership: BackupUploadOwnership) async {
-        guard !Task.isCancelled, uploadOwnership == ownership else { return }
-        guard let albumID = await albumID(named: name, ownership: ownership),
-              !Task.isCancelled, uploadOwnership == ownership else { return }
-        _ = try? await albumRepo?.addAssets([assetID], to: albumID)
+    private func placeInAlbum(
+        _ assetID: String, albumName name: String, ownership: BackupUploadOwnership
+    ) async throws {
+        try Task.checkCancellation()
+        guard syncAlbums, uploadOwnership == ownership, let albumRepo else { throw CancellationError() }
+        guard let albumID = await albumID(named: name, ownership: ownership) else {
+            try Task.checkCancellation()
+            guard uploadOwnership == ownership else { throw CancellationError() }
+            throw BackupAlbumPlacementError()
+        }
+        try Task.checkCancellation()
+        guard syncAlbums, uploadOwnership == ownership else { throw CancellationError() }
+        _ = try await albumRepo.addAssets([assetID], to: albumID)
     }
 
-    private func scheduleAlbumPlacement(
+    private func albumPlacement(
         _ assetID: String, albumName: String?, context: BackupUploadTaskContext
-    ) {
+    ) -> BackupAlbumPlacement? {
         guard syncAlbums, context.phase == .primaryAsset, let albumName,
-              let ownership = context.ownership, uploadOwnership == ownership else { return }
+              let ownership = context.ownership, uploadOwnership == ownership else { return nil }
+        return BackupAlbumPlacement(localIdentifier: context.localIdentifier, assetID: assetID, albumName: albumName)
+    }
+
+    private func resumePendingAlbumPlacements() {
+        guard !Task.isCancelled, syncAlbums, let ownership = uploadOwnership, albumRepo != nil else { return }
+        for placement in queue.pendingAlbumPlacements {
+            scheduleAlbumPlacement(placement, ownership: ownership)
+        }
+    }
+
+    /// A crash can land between saving the upload mapping and checkpointing
+    /// its album intent. Repair that boundary without requiring the original.
+    private func recoverCompletedAlbumPlacements() {
+        guard !Task.isCancelled, syncAlbums, uploadOwnership != nil else { return }
+        for item in queue.items where item.phase == .primaryAsset {
+            guard let name = item.sourceAlbumName,
+                  let record = dataManager.getBackupRecord(localIdentifier: item.id) else { continue }
+            do {
+                try queue.markCompleted(item.id, albumPlacement: .init(
+                    localIdentifier: item.id, assetID: record.assetId, albumName: name))
+            } catch {
+                lastError = error.localizedDescription
+                acceptsUploadResults = false
+                return
+            }
+        }
+        applyQueueSnapshot(notify: false)
+    }
+
+    @discardableResult
+    private func scheduleAlbumPlacement(
+        _ placement: BackupAlbumPlacement, ownership: BackupUploadOwnership
+    ) -> Task<Void, Never>? {
+        guard !Task.isCancelled, syncAlbums, uploadOwnership == ownership,
+              queue.pendingAlbumPlacements.contains(placement) else { return nil }
+        if let current = albumPlacementTasks[placement.id], current.placement == placement { return current.task }
+        albumPlacementTasks[placement.id]?.task.cancel()
         let id = UUID()
         let work = Task { @MainActor [weak self] in
             guard let self else { return }
-            defer { self.albumPlacementTasks[id] = nil }
-            guard self.syncAlbums else { return }
-            await self.placeInAlbum(assetID, albumName: albumName, ownership: ownership)
+            defer {
+                if self.albumPlacementTasks[placement.id]?.id == id { self.albumPlacementTasks[placement.id] = nil }
+            }
+            do {
+                try await self.placeInAlbum(placement.assetID, albumName: placement.albumName, ownership: ownership)
+                try Task.checkCancellation()
+                guard self.uploadOwnership == ownership,
+                      self.albumPlacementTasks[placement.id]?.id == id else { return }
+                try self.queue.completeAlbumPlacement(placement)
+            } catch {
+                guard !Task.isCancelled, !(error is CancellationError), self.uploadOwnership == ownership,
+                      self.albumPlacementTasks[placement.id]?.id == id else { return }
+                self.lastError = error.localizedDescription
+                BackupScheduler.schedule()
+            }
         }
-        albumPlacementTasks[id] = work
+        albumPlacementTasks[placement.id] = AlbumPlacementWork(id: id, placement: placement, task: work)
+        return work
     }
 
     /// Resolve a name once while concurrent upload completions await the same
@@ -1820,7 +1915,7 @@ final class BackupService {
 
     private func resetAlbumResolution(for ownership: BackupUploadOwnership?) {
         guard albumLookupOwnership != ownership else { return }
-        for placement in albumPlacementTasks.values { placement.cancel() }
+        for placement in albumPlacementTasks.values { placement.task.cancel() }
         albumPlacementTasks.removeAll()
         for lookup in albumLookups.values { lookup.task.cancel() }
         albumLookups.removeAll()
@@ -1843,10 +1938,18 @@ final class BackupService {
         let links = dataManager.serverAssetIDsByLocalIdentifier()
 
         for photo in LocalPhotoLibrary.shared.photos {
-            if Task.isCancelled { return }
+            if Task.isCancelled || !syncAlbums { return }
             guard let assetID = links[photo.id],
                   let name = LocalPhotoLibrary.shared.albumTitles[photo.id] else { continue }
-            await placeInAlbum(assetID, albumName: name, ownership: ownership)
+            guard uploadOwnership == ownership else { return }
+            do {
+                let placement = BackupAlbumPlacement(localIdentifier: photo.id, assetID: assetID, albumName: name)
+                try queue.recordAlbumPlacement(placement)
+                await scheduleAlbumPlacement(placement, ownership: ownership)?.value
+            } catch {
+                lastError = error.localizedDescription
+                return
+            }
         }
     }
 }
