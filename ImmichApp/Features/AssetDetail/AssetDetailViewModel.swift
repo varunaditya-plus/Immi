@@ -81,6 +81,11 @@ final class AssetDetailViewModel {
         snapshotGeneration == LocalSnapshot.generation && selection == selected
     }
 
+    func currentSelection(for id: String) -> Selection? {
+        guard let selection, selection.id == id, isCurrent(selection) else { return nil }
+        return selection
+    }
+
     func invalidateSelection() {
         selection = nil
         detailRequest = UUID()
@@ -125,6 +130,56 @@ final class AssetDetailViewModel {
         let fetched = (try? await albumRepo.albums(containing: selected.id)) ?? []
         guard !Task.isCancelled, isCurrent(selected), containingAlbumsRequest == request else { return }
         containingAlbums = fetched
+    }
+
+    func applyAlbumUpdate(_ updated: AlbumResponseDTO, for selected: Selection) {
+        guard !Task.isCancelled, isCurrent(selected) else { return }
+        invalidateAlbumReads()
+        updateAlbumRows(updated.id) { album in
+            album.albumName = updated.albumName
+            album.description = updated.description
+            album.updatedAt = updated.updatedAt ?? album.updatedAt
+        }
+    }
+
+    func applyAlbumShared(_ id: String, for selected: Selection) {
+        guard !Task.isCancelled, isCurrent(selected) else { return }
+        invalidateAlbumReads()
+        updateAlbumRows(id) { $0.shared = true }
+    }
+
+    func applyAlbumContents(_ assets: [AssetLite], to id: String, for selected: Selection) {
+        guard !Task.isCancelled, isCurrent(selected) else { return }
+        invalidateAlbumReads()
+        let remaining = Set(assets.map(\.id))
+        let newestID = assets.max(by: { $0.createdAt < $1.createdAt })?.id
+        updateAlbumRows(id) { album in
+            album.assetCount = assets.count
+            if album.albumThumbnailAssetId.map(remaining.contains) != true {
+                album.albumThumbnailAssetId = newestID
+            }
+        }
+        if !remaining.contains(selected.id) { containingAlbums.removeAll { $0.id == id } }
+        AlbumCoverStore.shared.invalidate(id)
+    }
+
+    func removeDeletedAlbum(_ id: String, for selected: Selection) {
+        guard !Task.isCancelled, isCurrent(selected) else { return }
+        invalidateAlbumReads()
+        albums.removeAll { $0.id == id }
+        containingAlbums.removeAll { $0.id == id }
+        LocalSnapshot.remove(LocalSnapshot.Key.album(id), expectedGeneration: snapshotGeneration)
+        AlbumCoverStore.shared.invalidate(id)
+    }
+
+    private func invalidateAlbumReads() {
+        albumListRequest = UUID()
+        containingAlbumsRequest = UUID()
+    }
+
+    private func updateAlbumRows(_ id: String, applying update: (inout AlbumResponseDTO) -> Void) {
+        if let index = albums.firstIndex(where: { $0.id == id }) { update(&albums[index]) }
+        if let index = containingAlbums.firstIndex(where: { $0.id == id }) { update(&containingAlbums[index]) }
     }
 
     func addToAlbum(_ id: String, album: AlbumResponseDTO) async {

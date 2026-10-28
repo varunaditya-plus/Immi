@@ -561,7 +561,8 @@ struct AssetDetailView: View {
     }
 
     private func panelBody(for detail: AssetResponseDTO) -> AssetInfoPanel {
-        AssetInfoPanel(
+        let selected = vm?.currentSelection(for: detail.id)
+        return AssetInfoPanel(
             detail: detail,
             // Daftar baru bisa di-scroll di detent tertinggi; di bawah itu
             // panel inert supaya tarikan mengubah tingginya.
@@ -594,7 +595,23 @@ struct AssetDetailView: View {
             descriptionFocus: $descriptionFocused,
             onAdjustDate: { dateTarget = currentTarget },
             onAdjustLocation: { locationTarget = currentTarget },
-            containingAlbums: vm?.containingAlbums ?? [])
+            containingAlbums: vm?.containingAlbums ?? [],
+            onAlbumContentsChanged: { id, assets in
+                guard let selected else { return }
+                vm?.applyAlbumContents(assets, to: id, for: selected)
+            },
+            onAlbumChanged: { album in
+                guard let selected else { return }
+                vm?.applyAlbumUpdate(album, for: selected)
+            },
+            onAlbumDeleted: { id in
+                guard let selected else { return }
+                vm?.removeDeletedAlbum(id, for: selected)
+            },
+            onAlbumShared: { id in
+                guard let selected else { return }
+                vm?.applyAlbumShared(id, for: selected)
+            })
     }
 
     // MARK: - Detent panel

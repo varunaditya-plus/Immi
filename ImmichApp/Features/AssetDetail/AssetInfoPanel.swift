@@ -29,6 +29,10 @@ struct AssetInfoPanel: View {
     var onAdjustLocation: (() -> Void)?
     /// Album yang memuat foto ini; kosong berarti barisnya tidak digambar.
     var containingAlbums: [AlbumResponseDTO] = []
+    var onAlbumContentsChanged: ((String, [AssetLite]) -> Void)?
+    var onAlbumChanged: ((AlbumResponseDTO) -> Void)?
+    var onAlbumDeleted: ((String) -> Void)?
+    var onAlbumShared: ((String) -> Void)?
 
     /// Dipakai membangun repository untuk tautan ke layar seseorang.
     @Environment(SessionManager.self) private var session
@@ -261,7 +265,7 @@ struct AssetInfoPanel: View {
                 VStack(spacing: 0) {
                     ForEach(containingAlbums) { album in
                         NavigationLink {
-                            AlbumDetailView(album: album)
+                            albumDestination(for: album)
                         } label: {
                             AlbumRowView(album: album)
                                 .padding(.horizontal, 16)
@@ -278,6 +282,15 @@ struct AssetInfoPanel: View {
                 .padding(.bottom, 6)
             }
         }
+    }
+
+    func albumDestination(for album: AlbumResponseDTO) -> AlbumDetailView {
+        AlbumDetailView(
+            album: album,
+            onContentsChanged: { onAlbumContentsChanged?(album.id, $0) },
+            onAlbumChanged: { onAlbumChanged?($0) },
+            onDeleted: { onAlbumDeleted?(album.id) },
+            onShared: { onAlbumShared?(album.id) })
     }
 
     /// Kartu berjudul dengan bentuk yang sama seperti kartu kamera dan peta.
