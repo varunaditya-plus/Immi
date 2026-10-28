@@ -38,6 +38,7 @@ struct AssetInfoPanel: View {
     @Environment(SessionManager.self) private var session
     @State private var headerHeight: CGFloat = 0
     @State private var contentHeight: CGFloat = 0
+    @State private var mapPosition: MapCameraPosition = .automatic
 
     var body: some View {
         VStack(spacing: 0) {
@@ -347,7 +348,7 @@ struct AssetInfoPanel: View {
     private var locationCard: some View {
         if let coordinate {
             VStack(spacing: 0) {
-                Map(initialPosition: .region(region(around: coordinate))) {
+                Map(position: $mapPosition, interactionModes: isScrollEnabled ? [.pan, .zoom] : []) {
                     Annotation("", coordinate: coordinate) {
                         AuthImage(assetId: detail.id, thumbhash: detail.thumbhash)
                             .frame(width: 44, height: 44)
@@ -359,10 +360,15 @@ struct AssetInfoPanel: View {
                             .shadow(radius: 2)
                     }
                 }
+                .id(detail.id)
                 .frame(height: 160)
-                // Peta di sini hanya pratinjau; scroll panel tidak boleh
-                // direbut oleh gesture pan milik peta.
-                .allowsHitTesting(false)
+                .allowsHitTesting(isScrollEnabled)
+                // Foto/lokasi baru mengatur kamera; perubahan metadata lain
+                // tidak menghapus area yang sedang dijelajahi pengguna.
+                .onChange(of: mapLocation, initial: true) { _, location in
+                    guard let location else { return }
+                    mapPosition = .region(region(around: location.coordinate))
+                }
 
                 Divider()
 
@@ -387,11 +393,25 @@ struct AssetInfoPanel: View {
         }
     }
 
-    private var coordinate: CLLocationCoordinate2D? {
+    private struct MapLocation: Equatable {
+        let assetID: String
+        let latitude: Double
+        let longitude: Double
+
+        var coordinate: CLLocationCoordinate2D {
+            CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+        }
+    }
+
+    private var mapLocation: MapLocation? {
         guard let lat = detail.exifInfo?.latitude,
               let lon = detail.exifInfo?.longitude,
               lat != 0 || lon != 0 else { return nil }
-        return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+        return MapLocation(assetID: detail.id, latitude: lat, longitude: lon)
+    }
+
+    private var coordinate: CLLocationCoordinate2D? {
+        mapLocation?.coordinate
     }
 
     private func region(around coordinate: CLLocationCoordinate2D) -> MKCoordinateRegion {
