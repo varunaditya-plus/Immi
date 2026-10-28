@@ -14,7 +14,8 @@ struct SearchView: View {
     // MARK: Mode pilih
     @State private var isSelecting = false
     @State private var selectedIDs: Set<String> = []
-    @State private var isPreparingShare = false
+    @State private var sharePreparation = SharePreparation()
+    private var isPreparingShare: Bool { sharePreparation.isPreparing }
     @State private var isPerformingAction = false
     @State private var shareURLs: [URL] = []
     @State private var sharedAssetIDs: [String] = []
@@ -105,6 +106,7 @@ struct SearchView: View {
         }
         .sensoryFeedback(.impact(weight: .heavy), trigger: deleteFeedback)
         .sensoryFeedback(.success, trigger: favoriteFeedback)
+        .onDisappear { sharePreparation.cancel() }
         // Menempel pada `NavigationStack`, BUKAN pada `content` di dalamnya, dan
         // bukan pula pada `TabView` di luar sana. Tiga penempatan itu memberi
         // tiga hasil berbeda:
@@ -454,18 +456,10 @@ struct SearchView: View {
     private var visibilityPolicy: AssetVisibilityPolicy { AssetVisibilityPolicy(scope: .timeline) }
 
     private func share(_ ids: [String]) {
-        guard !ids.isEmpty, ids.allSatisfy({ visibilityPolicy.allows(id: $0) }) else { return }
-        let generation = LocalSnapshot.generation
-        isPreparingShare = true
-        Task {
-            let urls = await vm?.shareURLs(for: ids) ?? []
-            isPreparingShare = false
-            guard !Task.isCancelled, generation == LocalSnapshot.generation,
-                  ids.allSatisfy({ visibilityPolicy.allows(id: $0) }) else {
-                TemporaryMediaStore.remove(urls)
-                return
-            }
-            guard !urls.isEmpty else { return }
+        guard !isSharePresented else { return }
+        sharePreparation.start(ids: ids, prepare: { await vm?.shareURLs(for: $0) ?? [] },
+            isAllowed: { visibilityPolicy.allows(id: $0) },
+            onError: { vm?.actionError = $0 }) { urls in
             shareURLs = urls
             sharedAssetIDs = ids
             isSharePresented = true

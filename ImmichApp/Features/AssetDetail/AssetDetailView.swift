@@ -1349,7 +1349,15 @@ struct AssetDetailView: View {
         let target = currentTarget
         let accountGeneration = LocalSnapshot.generation
         viewer.prepare(target, kind: .share,
-            operation: { await fileURL(for: target) },
+            operation: {
+                vm?.actionError = nil
+                let url = await fileURL(for: target)
+                if url == nil, viewer.isCurrent(target), accountGeneration == LocalSnapshot.generation,
+                   !Task.isCancelled, visibilityPolicy.allows(id: target.asset.id), vm?.actionError == nil {
+                    vm?.actionError = ErrorEvent(String(localized: "Failed to prepare share"))
+                }
+                return url
+            },
             discard: { TemporaryMediaStore.remove($0) }) { file in
                 guard accountGeneration == LocalSnapshot.generation,
                       visibilityPolicy.allows(id: target.asset.id) else {

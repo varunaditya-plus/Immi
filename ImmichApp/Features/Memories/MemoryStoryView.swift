@@ -47,7 +47,9 @@ struct MemoryStoryView: View {
     @State private var isPressing = false
     @State private var shareItem: SharedLinkPresentation?
     @State private var sharedAssetID: String?
-    @State private var isPreparingShare = false
+    @State private var sharePreparation = SharePreparation()
+    @State private var shareError: ErrorEvent?
+    private var isPreparingShare: Bool { sharePreparation.isPreparing }
 
     var body: some View {
         ZStack {
@@ -63,6 +65,9 @@ struct MemoryStoryView: View {
             .padding(.bottom, 4)
         }
         .sheet(item: $shareItem, onDismiss: { sharedAssetID = nil }) { ShareSheet(url: $0.url) }
+        .errorToast($shareError)
+        .onDisappear { sharePreparation.cancel() }
+        .onChange(of: currentAsset?.id) { _, _ in sharePreparation.cancel() }
         .onAppear {
             currentStoryID = initialStoryID ?? stories.first?.id
         }
@@ -310,19 +315,17 @@ struct MemoryStoryView: View {
     }
 
     private func share() {
-        guard let asset = currentAsset, !isPreparingShare else { return }
-        isPreparingShare = true
-        Task {
-            let url = await prepareShare(asset)
-            isPreparingShare = false
-            guard let url else { return }
-            guard !Task.isCancelled, snapshotGeneration == LocalSnapshot.generation,
-                  AssetVisibilityPolicy(scope: .timeline).allows(id: asset.id) else {
-                TemporaryMediaStore.remove(url)
-                return
-            }
+        guard let asset = currentAsset, !isPreparingShare, shareItem == nil else { return }
+        shareError = nil
+        sharePreparation.start(ids: [asset.id], prepare: { _ in
+            if let url = await prepareShare(asset) { return [url] }
+            return []
+        }, isAllowed: {
+            $0 == currentAsset?.id && snapshotGeneration == LocalSnapshot.generation
+                && AssetVisibilityPolicy(scope: .timeline).allows(id: $0)
+        }, onError: { shareError = ErrorEvent($0) }) { urls in
             sharedAssetID = asset.id
-            shareItem = SharedLinkPresentation(url: url)
+            shareItem = urls.first.map { SharedLinkPresentation(url: $0) }
         }
     }
 }

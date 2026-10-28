@@ -91,6 +91,7 @@ struct AssetCollectionView: View {
         let policy = AssetVisibilityPolicy(scope: request.visibility == "locked" ? .locked : .collection)
         guard !ids.isEmpty, ids.allSatisfy({ policy.allows(id: $0) }) else { return }
         let generation = LocalSnapshot.generation
+        let baseURL = session.baseURL
         let repo = SharedLinkRepository(api: APIClient(session: session))
         Task {
             guard !Task.isCancelled, generation == LocalSnapshot.generation,
@@ -100,12 +101,14 @@ struct AssetCollectionView: View {
                 let link = try await repo.create(assetIds: ids)
                 guard !Task.isCancelled, generation == LocalSnapshot.generation,
                       ids.allSatisfy({ policy.allows(id: $0) }) else { return }
-                guard let url = link.publicURL(base: session.baseURL) else {
+                guard let url = link.publicURL(base: baseURL) else {
                     vm?.actionError = String(localized: "Failed to create shared link")
                     return
                 }
                 sharedLink = SharedLinkPresentation(url: url)
             } catch {
+                guard !Task.isCancelled, !(error is CancellationError), generation == LocalSnapshot.generation,
+                      ids.allSatisfy({ policy.allows(id: $0) }) else { return }
                 vm?.actionError = (error as? APIError)?.errorDescription
                     ?? String(localized: "Failed to create shared link")
             }

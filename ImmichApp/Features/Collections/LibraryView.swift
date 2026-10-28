@@ -23,6 +23,7 @@ struct LibraryView: View {
     @State private var albumPickerAsset: AssetLite?
     @State private var assetToDelete: AssetLite?
     @State private var shareFileURL: SharedLinkPresentation?
+    @State private var sharePreparation = SharePreparation()
     @State private var deleteFeedback = 0
     @State private var backupSetupJourney = BackupSetupJourney.shared
     @State private var navigation = AppNavigation.shared
@@ -134,6 +135,7 @@ struct LibraryView: View {
                     }
                 }
         }
+        .onDisappear { sharePreparation.cancel() }
     }
 
     @ViewBuilder
@@ -339,9 +341,13 @@ struct LibraryView: View {
     }
 
     private func shareAsset(_ asset: AssetLite) {
-        Task {
-            guard let url = await vm?.shareURL(for: asset) else { return }
-            shareFileURL = SharedLinkPresentation(url: url)
+        guard shareFileURL == nil else { return }
+        sharePreparation.start(ids: [asset.id], prepare: { _ in
+            if let url = await vm?.shareURL(for: asset) { return [url] }
+            return []
+        }, isAllowed: { AssetVisibilityPolicy(scope: .timeline).allows(id: $0) },
+            onError: { if vm?.actionError == nil { vm?.actionError = $0 } }) { urls in
+            shareFileURL = urls.first.map { SharedLinkPresentation(url: $0) }
         }
     }
 
@@ -466,7 +472,7 @@ struct LibraryView: View {
             MemoryStoryView(
                 stories: vm.memories,
                 initialStoryID: openedStoryID,
-                prepareShare: { await vm.shareURL(for: $0) })
+                prepareShare: { await vm.shareURL(for: $0, reportsErrors: false) })
         }
     }
 

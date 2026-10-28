@@ -446,7 +446,7 @@ final class LibraryViewModel {
 
     /// Unduh berkas asli ke lokasi sementara untuk dibagikan lewat share sheet
     /// (URL server polos akan kena 401).
-    func shareURL(for asset: AssetLite) async -> URL? {
+    func shareURL(for asset: AssetLite, reportsErrors: Bool = true) async -> URL? {
         guard snapshotGeneration == LocalSnapshot.generation, !Task.isCancelled,
               AssetVisibilityPolicy(scope: .timeline, dataManager: dataManager).allows(id: asset.id) else { return nil }
         do {
@@ -458,9 +458,13 @@ final class LibraryViewModel {
             }
             return url
         } catch {
-            guard snapshotGeneration == LocalSnapshot.generation, !Task.isCancelled else { return nil }
-            actionError = (error as? APIError)?.errorDescription
-                ?? String(localized: "Failed to prepare share")
+            guard snapshotGeneration == LocalSnapshot.generation, !Task.isCancelled,
+                  !(error is CancellationError),
+                  AssetVisibilityPolicy(scope: .timeline, dataManager: dataManager).allows(id: asset.id) else { return nil }
+            if reportsErrors {
+                actionError = (error as? APIError)?.errorDescription
+                    ?? String(localized: "Failed to prepare share")
+            }
             return nil
         }
     }

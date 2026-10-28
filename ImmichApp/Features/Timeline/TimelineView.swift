@@ -32,12 +32,14 @@ struct TimelineView: View {
     @State private var showSettings = false
     @State private var albumPickerAsset: AssetLite?
     @State private var selectedIDs: Set<String> = []
-    @State private var isPreparingSelectionShare = false
+    @State private var sharePreparation = SharePreparation()
+    private var isPreparingSelectionShare: Bool { sharePreparation.isPreparing }
     @State private var isPerformingSelectionAction = false
     @State private var deviceSelectionRemoval: Task<Void, Never>?
     private var isRemovingDeviceSelection: Bool { deviceSelectionRemoval != nil }
     @State private var selectionShareURLs: [URL] = []
     @State private var isSelectionSharePresented = false
+    @State private var sharedAssetIDs: [String] = []
     /// Naik satu setiap penghapusan yang dikonfirmasi server.
     @State private var deleteFeedback = 0
     /// Naik satu setiap favorit yang dikonfirmasi server.
@@ -129,6 +131,7 @@ struct TimelineView: View {
             guard let vm else { return }
             returnToNewest(vm)
         }
+        .onDisappear { sharePreparation.cancel() }
     }
 
     private var screen: some View {
@@ -176,7 +179,10 @@ struct TimelineView: View {
                 }
             }
         }
-        .sheet(isPresented: $isSharePresented) {
+        .sheet(isPresented: $isSharePresented, onDismiss: {
+            shareFileURL = nil
+            sharedAssetIDs.removeAll()
+        }) {
             if let url = shareFileURL {
                 ShareSheet(url: url)
             }
@@ -186,8 +192,17 @@ struct TimelineView: View {
                 Task { await vm?.addToAlbum(asset, album: album) }
             }
         }
-        .sheet(isPresented: $isSelectionSharePresented) {
+        .sheet(isPresented: $isSelectionSharePresented, onDismiss: {
+            selectionShareURLs.removeAll()
+            sharedAssetIDs.removeAll()
+        }) {
             MultiShareSheet(urls: selectionShareURLs)
+        }
+        .onChange(of: AssetVisibilityPolicy(scope: .timeline).state) { _, _ in
+            if !sharedAssetIDs.allSatisfy({ AssetVisibilityPolicy(scope: .timeline).allows(id: $0) }) {
+                isSharePresented = false
+                isSelectionSharePresented = false
+            }
         }
         .sheet(item: $albumPickerSelection) { selection in
             AlbumPickerSheet(albums: vm?.albums ?? []) { album in
@@ -387,7 +402,7 @@ struct TimelineView: View {
                 systemImage: "square.and.arrow.up",
                 group: .quick
             ) {
-                Task { await shareAsset(asset, vm) }
+                shareAsset(asset, vm)
             },
         ]
         if vm.serverAssetIDs(for: [asset.id]) != nil {
@@ -727,13 +742,13 @@ struct TimelineView: View {
     }
 
     private func shareSelection() {
+        guard !isSharePresented, !isSelectionSharePresented else { return }
         let ids = Array(selectedIDs)
-        isPreparingSelectionShare = true
-        Task {
-            let urls = await vm?.shareURLs(for: ids) ?? []
-            isPreparingSelectionShare = false
-            guard !urls.isEmpty else { return }
+        sharePreparation.start(ids: ids, prepare: { await vm?.shareURLs(for: $0) ?? [] },
+            isAllowed: { AssetVisibilityPolicy(scope: .timeline).allows(id: $0) },
+            onError: { vm?.actionError = $0 }) { urls in
             selectionShareURLs = urls
+            sharedAssetIDs = ids
             isSelectionSharePresented = true
         }
     }
@@ -773,9 +788,15 @@ struct TimelineView: View {
         }
     }
 
-    private func shareAsset(_ asset: AssetLite, _ vm: TimelineViewModel) async {
-        if let url = await vm.shareURL(for: asset) {
-            shareFileURL = url
+    private func shareAsset(_ asset: AssetLite, _ vm: TimelineViewModel) {
+        guard !isSharePresented, !isSelectionSharePresented else { return }
+        sharePreparation.start(ids: [asset.id], prepare: { _ in
+            if let url = await vm.shareURL(for: asset) { return [url] }
+            return []
+        }, isAllowed: { AssetVisibilityPolicy(scope: .timeline).allows(id: $0) },
+            onError: { vm.actionError = $0 }) { urls in
+            shareFileURL = urls.first
+            sharedAssetIDs = [asset.id]
             isSharePresented = true
         }
     }

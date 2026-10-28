@@ -122,7 +122,8 @@ struct PhotoCollectionScreen<Options: View>: View {
     private var gridColumns = SettingsViewModel.defaultGridColumns
     @State private var isSelecting = false
     @State private var selectedIDs: Set<String> = []
-    @State private var isPreparingShare = false
+    @State private var sharePreparation = SharePreparation()
+    private var isPreparingShare: Bool { sharePreparation.isPreparing }
     @State private var isPerformingAction = false
     @State private var preparedURLs: [URL] = []
     @State private var preparedAssetIDs: [String] = []
@@ -262,6 +263,7 @@ struct PhotoCollectionScreen<Options: View>: View {
                 if let id = menuDeleteID, !visibilityPolicy.allows(id: id) { menuDeleteID = nil }
                 if let id = deviceDeleteID, !visibilityPolicy.allows(id: id) { deviceDeleteID = nil }
             }
+            .onDisappear { sharePreparation.cancel() }
     }
 
     // MARK: - Grid
@@ -1012,20 +1014,10 @@ struct PhotoCollectionScreen<Options: View>: View {
     // MARK: - Aksi
 
     private func share(_ ids: [String]) {
-        guard !ids.isEmpty, ids.allSatisfy({ visibilityPolicy.allows(id: $0) }) else { return }
-        isPreparingShare = true
-        Task {
-            guard !Task.isCancelled, ids.allSatisfy({ visibilityPolicy.allows(id: $0) }) else {
-                isPreparingShare = false
-                return
-            }
-            let urls = await shareURLs(ids)
-            isPreparingShare = false
-            guard !Task.isCancelled, ids.allSatisfy({ visibilityPolicy.allows(id: $0) }) else {
-                TemporaryMediaStore.remove(urls)
-                return
-            }
-            guard !urls.isEmpty else { return }
+        guard !isSharePresented else { return }
+        sharePreparation.start(ids: ids, prepare: { await shareURLs($0) },
+            isAllowed: { visibilityPolicy.allows(id: $0) },
+            onError: { actionError.wrappedValue = $0 }) { urls in
             preparedURLs = urls
             preparedAssetIDs = ids
             isSharePresented = true
