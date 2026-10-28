@@ -34,6 +34,22 @@ struct AlbumDetailView: View {
     /// tanpa menunggu daftar album di layar sebelumnya dimuat ulang.
     @State private var editedAlbum: AlbumResponseDTO?
 
+    init(
+        album: AlbumResponseDTO,
+        onContentsChanged: (([AssetLite]) -> Void)? = nil,
+        onAlbumChanged: ((AlbumResponseDTO) -> Void)? = nil,
+        onDeleted: (() -> Void)? = nil,
+        onShared: (() -> Void)? = nil,
+        viewModel: AlbumDetailViewModel? = nil
+    ) {
+        self.album = album
+        self.onContentsChanged = onContentsChanged
+        self.onAlbumChanged = onAlbumChanged
+        self.onDeleted = onDeleted
+        self.onShared = onShared
+        _vm = State(initialValue: viewModel)
+    }
+
     var body: some View {
         screen
             .sheet(isPresented: $showAddSheet) { addSheet }
@@ -50,7 +66,7 @@ struct AlbumDetailView: View {
             }
             .errorToast($actionMessage)
             .task { await start() }
-            .onChange(of: assets.count) { _, _ in reportContents() }
+            .onChange(of: assets.map(\.id)) { _, _ in reportContents() }
             .onDisappear { reportContents() }
     }
 
