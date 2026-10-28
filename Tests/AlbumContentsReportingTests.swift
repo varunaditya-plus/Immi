@@ -99,6 +99,108 @@ final class AlbumContentsReportingTests: XCTestCase {
         XCTAssertEqual(reports.count, reportCount, "Same members should not repeatedly notify the parent")
     }
 
+    func testCachedHydrationAndFailedRefreshCannotOverwriteNewerParentContents() async throws {
+        let fixture = try await cachedDetail()
+        await settlePresentation()
+        assertNewerParent(fixture)
+        XCTAssertTrue(fixture.reports.rows.isEmpty, "Hydrating an offline cache is not a server-confirmed update")
+
+        fixture.driver.complete(.failure(APIError.server(status: 503, message: "Unavailable")))
+        await settlePresentation()
+        XCTAssertEqual(fixture.model.assets.map(\.id), fixture.cached.map(\.id))
+        XCTAssertNotNil(fixture.model.phase.value)
+        assertNewerParent(fixture)
+        window?.isHidden = true
+        window?.rootViewController = nil
+        await settlePresentation()
+        assertNewerParent(fixture)
+        XCTAssertTrue(fixture.reports.rows.isEmpty, "Leaving an offline detail must not publish the stale cache")
+    }
+
+    func testFreshResponseIdenticalToCacheStillPublishesItsFirstConfirmedContents() async throws {
+        let fixture = try await cachedDetail()
+        await settlePresentation()
+        assertNewerParent(fixture)
+        XCTAssertTrue(fixture.reports.rows.isEmpty)
+
+        fixture.driver.complete(.success(fixture.cached))
+        await settlePresentation()
+        XCTAssertEqual(fixture.reports.rows, [fixture.cached.map(\.id)])
+        XCTAssertEqual(fixture.parent.albums.first?.assetCount, 2)
+        XCTAssertEqual(fixture.parent.albums.first?.albumThumbnailAssetId, fixture.cached.last?.id)
+        XCTAssertEqual(LocalSnapshot.load([AlbumResponseDTO].self,
+            for: LocalSnapshot.Key.albumsList)?.first?.assetCount, 2)
+        window?.isHidden = true
+        window?.rootViewController = nil
+        await settlePresentation()
+        XCTAssertEqual(fixture.reports.rows.count, 1, "Disappearance must not replay an already delivered update")
+    }
+
+    func testCacheOnlyRemovalCannotPublishAnIncompleteListWhenReconciliationFails() async throws {
+        let fixture = try await cachedDetail()
+        fixture.driver.complete(.failure(APIError.server(status: 503, message: "Unavailable")))
+        await settlePresentation()
+        await fixture.model.removeAssets([fixture.cached[0].id], from: fixture.albumID)
+        await settlePresentation()
+        XCTAssertEqual(fixture.model.assets.map(\.id), [fixture.cached[1].id])
+        XCTAssertEqual(fixture.driver.removals, [fixture.cached[0].id], "The server accepted the removal")
+        assertNewerParent(fixture)
+        XCTAssertTrue(fixture.reports.rows.isEmpty, "The cached remainder cannot establish the server's complete membership")
+    }
+
+    private func cachedDetail() async throws -> CachedAlbumFixture {
+        let id = UUID().uuidString
+        previousParentSnapshot = LocalSnapshot.load([AlbumResponseDTO].self, for: LocalSnapshot.Key.albumsList)
+        albumKey = LocalSnapshot.Key.album(id)
+        let cached = [photo(UUID().uuidString, date: 10), photo(UUID().uuidString, date: 20)]
+        LocalSnapshot.save(cached, for: LocalSnapshot.Key.album(id))
+        let album = AlbumResponseDTO(id: id, albumName: "Newer parent", description: nil, assetCount: 3,
+            albumThumbnailAssetId: "newer-cover", shared: false, createdAt: .distantPast, assets: nil)
+        let api = APIClient(session: MockSessionManager())
+        let driver = CachedAlbumDriver()
+        addTeardownBlock { await driver.complete(.failure(CancellationError())) }
+        let model = AlbumDetailViewModel(timelineRepo: CachedAlbumTimeline(api: api, driver: driver),
+            albumRepo: CachedAlbumRepository(api: api, driver: driver), assetRepo: AssetDetailRepository(api: api))
+        let parent = AlbumListViewModel(repo: AlbumRepository(api: api))
+        parent.albums = [album]
+        LocalSnapshot.save([album], for: LocalSnapshot.Key.albumsList)
+        let reports = CachedAlbumReports()
+        reportsEnabled = true
+        let detail = AlbumDetailView(album: album, onContentsChanged: { [weak self] assets in
+            guard self?.reportsEnabled == true else { return }
+            reports.rows.append(assets.map(\.id))
+            parent.applyContents(assets, to: id)
+        }, viewModel: model)
+        let host = UIHostingController(rootView: NavigationStack { detail }
+            .environment(MockSessionManager() as SessionManager))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        previousKeyWindow = scene.windows.first(where: \.isKeyWindow)
+        let presentedWindow = UIWindow(windowScene: scene)
+        presentedWindow.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        presentedWindow.rootViewController = host
+        presentedWindow.makeKeyAndVisible()
+        window = presentedWindow
+        await fulfillment(of: [driver.started], timeout: 3)
+        return CachedAlbumFixture(albumID: id, cached: cached, model: model, parent: parent,
+            driver: driver, reports: reports)
+    }
+
+    private func assertNewerParent(_ fixture: CachedAlbumFixture,
+        file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertEqual(fixture.parent.albums.first?.assetCount, 3, file: file, line: line)
+        XCTAssertEqual(fixture.parent.albums.first?.albumThumbnailAssetId, "newer-cover", file: file, line: line)
+        let saved = LocalSnapshot.load([AlbumResponseDTO].self, for: LocalSnapshot.Key.albumsList)?.first
+        XCTAssertEqual(saved?.assetCount, 3, file: file, line: line)
+        XCTAssertEqual(saved?.albumThumbnailAssetId, "newer-cover", file: file, line: line)
+    }
+
+    private func settlePresentation() async {
+        try? await Task.sleep(for: .milliseconds(150))
+        window?.rootViewController?.view.setNeedsLayout()
+        window?.rootViewController?.view.layoutIfNeeded()
+        await nextMainQueueTurn()
+    }
+
     private func photo(_ id: String, date: TimeInterval) -> AssetLite {
         AssetLite(id: id, isVideo: false, ratio: 1, thumbhash: nil,
             createdAt: Date(timeIntervalSince1970: date))
@@ -137,4 +239,51 @@ private final class AlbumContentsTimeline: TimelineRepository {
     private let driver: AlbumContentsDriver
     init(api: APIClient, driver: AlbumContentsDriver) { self.driver = driver; super.init(api: api) }
     override func albumAssets(_ albumId: String) async throws -> [AssetLite] { await driver.load(albumId) }
+}
+
+@MainActor
+private struct CachedAlbumFixture {
+    let albumID: String
+    let cached: [AssetLite]
+    let model: AlbumDetailViewModel
+    let parent: AlbumListViewModel
+    let driver: CachedAlbumDriver
+    let reports: CachedAlbumReports
+}
+
+@MainActor
+private final class CachedAlbumReports { var rows: [[String]] = [] }
+
+@MainActor
+private final class CachedAlbumDriver {
+    let started = XCTestExpectation(description: "The cached album is waiting for its server response")
+    var removals: [String] = []
+    func remove(_ ids: [String]) { removals.append(contentsOf: ids) }
+    private var didStart = false
+    private var result: Result<[AssetLite], Error>?
+    private var waiters: [CheckedContinuation<[AssetLite], Error>] = []
+    func load() async throws -> [AssetLite] {
+        if !didStart { didStart = true; started.fulfill() }
+        if let result { return try result.get() }
+        return try await withCheckedThrowingContinuation { waiters.append($0) }
+    }
+    func complete(_ result: Result<[AssetLite], Error>) {
+        guard self.result == nil else { return }
+        self.result = result
+        let pending = waiters
+        waiters = []
+        pending.forEach { $0.resume(with: result) }
+    }
+}
+
+private final class CachedAlbumTimeline: TimelineRepository {
+    let driver: CachedAlbumDriver
+    init(api: APIClient, driver: CachedAlbumDriver) { self.driver = driver; super.init(api: api) }
+    override func albumAssets(_ albumId: String) async throws -> [AssetLite] { try await driver.load() }
+}
+
+private final class CachedAlbumRepository: AlbumRepository {
+    let driver: CachedAlbumDriver
+    init(api: APIClient, driver: CachedAlbumDriver) { self.driver = driver; super.init(api: api) }
+    override func removeAssets(_ ids: [String], from albumId: String) async throws { await driver.remove(ids) }
 }

@@ -66,8 +66,6 @@ struct AlbumDetailView: View {
             }
             .errorToast($actionMessage)
             .task { await start() }
-            .onChange(of: assets.map(\.id)) { _, _ in reportContents() }
-            .onDisappear { reportContents() }
     }
 
     private var screen: some View {
@@ -121,6 +119,7 @@ struct AlbumDetailView: View {
                 albumRepo: AlbumRepository(api: api),
                 assetRepo: AssetDetailRepository(api: api))
         }
+        vm?.observeContents(for: album.id, onChange: onContentsChanged)
         await vm?.loadAlbumDetail(album.id)
     }
 
@@ -130,11 +129,6 @@ struct AlbumDetailView: View {
 
     private var currentAlbum: AlbumResponseDTO {
         editedAlbum ?? album
-    }
-
-    private func reportContents() {
-        guard let vm, case .loaded = vm.phase else { return }
-        onContentsChanged?(vm.assets)
     }
 
     // MARK: - Sheet khas album
@@ -238,6 +232,38 @@ struct AlbumDetailView: View {
 final class AlbumDetailViewModel {
     private let snapshotGeneration = LocalSnapshot.generation
     private var loadRevision = UUID()
+    private var hasAuthoritativeContents = false
+    private var contentsObserver: (albumID: String, notify: ([AssetLite]) -> Void)?
+    private var lastReportedIDs: [String]?
+
+    private var canWork: Bool {
+        snapshotGeneration == LocalSnapshot.generation && !Task.isCancelled
+    }
+
+    func observeContents(for albumID: String, onChange: (([AssetLite]) -> Void)?) {
+        guard canWork else { return }
+        contentsObserver = onChange.map { (albumID, $0) }
+        lastReportedIDs = nil
+    }
+
+    private func reportConfirmedContents() {
+        guard canWork, hasAuthoritativeContents,
+              let observer = contentsObserver, observer.albumID == albumId else { return }
+        let ids = assets.map(\.id)
+        guard lastReportedIDs != ids else { return }
+        lastReportedIDs = ids
+        observer.notify(assets)
+    }
+
+    private func reportMembershipMutation() async {
+        guard canWork else { return }
+        if hasAuthoritativeContents { reportConfirmedContents() }
+        else if let albumId, contentsObserver?.albumID == albumId {
+            // A successful action does not make an old disk snapshot complete.
+            await loadAlbumDetail(albumId)
+        }
+    }
+
 
     // AssetLite equality compares IDs; this storage also publishes metadata changes.
     private struct AssetStorage { var assets: [AssetLite] = [] }
@@ -379,17 +405,18 @@ final class AlbumDetailViewModel {
 
     /// Menghapus dari PERPUSTAKAAN, bukan sekadar mengeluarkan dari album.
     func deleteAssets(_ ids: [String]) async {
-        guard !ids.isEmpty, snapshotGeneration == LocalSnapshot.generation else { return }
+        guard !ids.isEmpty, canWork else { return }
         actionError = nil
         do {
             try await assetRepo.delete(ids)
-            guard snapshotGeneration == LocalSnapshot.generation else { return }
+            guard canWork else { return }
             loadRevision = UUID()
             let removed = Set(ids)
             assets.removeAll { removed.contains($0.id) }
             persist()
+            await reportMembershipMutation()
         } catch {
-            guard snapshotGeneration == LocalSnapshot.generation else { return }
+            guard canWork else { return }
             actionError = (error as? APIError)?.errorDescription
                 ?? String(localized: "Failed to delete photos")
         }
@@ -397,22 +424,26 @@ final class AlbumDetailViewModel {
 
     /// Memindahkan ke folder terkunci; fotonya keluar dari album di layar ini.
     func setLocked(_ ids: [String]) async {
-        guard !ids.isEmpty, snapshotGeneration == LocalSnapshot.generation else { return }
+        guard !ids.isEmpty, canWork else { return }
         actionError = nil
-        defer { persist() }
+        var changed = false
         do {
             for id in ids {
                 try Task.checkCancellation()
                 try await assetRepo.setVisibility(id, to: .locked)
-                guard snapshotGeneration == LocalSnapshot.generation else { return }
+                guard canWork else { return }
                 assets.removeAll { $0.id == id }
                 cacheVisibilityIfNeeded(id, inTimeline: false)
+                persist()
+                changed = true
+                reportConfirmedContents()
             }
         } catch {
-            guard snapshotGeneration == LocalSnapshot.generation else { return }
+            guard canWork else { return }
             actionError = (error as? APIError)?.errorDescription
                 ?? String(localized: "Failed to move photos")
         }
+        if changed, !hasAuthoritativeContents { await reportMembershipMutation() }
     }
 
     /// Menambahkan ke album LAIN dari dalam sebuah album.
@@ -467,23 +498,28 @@ final class AlbumDetailViewModel {
     /// Memuat ulang berarti menarik seluruh bucket lagi hanya untuk kehilangan
     /// beberapa baris — dan grid akan berkedip kosong sesaat.
     func removeAssets(_ ids: [String], from albumId: String) async {
-        guard !ids.isEmpty else { return }
+        guard canWork, !ids.isEmpty else { return }
         actionError = nil
         do {
             try await albumRepo.removeAssets(ids, from: albumId)
-            guard snapshotGeneration == LocalSnapshot.generation else { return }
+            guard canWork else { return }
             loadRevision = UUID()
             let removed = Set(ids)
             assets.removeAll { removed.contains($0.id) }
             persist()
+            await reportMembershipMutation()
         } catch {
-            guard snapshotGeneration == LocalSnapshot.generation else { return }
+            guard canWork else { return }
             if let mutation = error as? AlbumMutationError {
                 let confirmed = mutation.succeededIDs.intersection(ids)
                 if !confirmed.isEmpty { loadRevision = UUID() }
                 assets.removeAll { confirmed.contains($0.id) }
-                persist()
+                if !confirmed.isEmpty {
+                    persist()
+                    await reportMembershipMutation()
+                }
             }
+            guard canWork else { return }
             actionError = (error as? APIError)?.errorDescription
                 ?? String(localized: "Failed to remove photos")
         }
@@ -492,7 +528,7 @@ final class AlbumDetailViewModel {
     /// Setelah menambah, album dimuat ulang — urutan aset baru ditentukan
     /// server, jadi menyisipkannya sendiri berisiko meleset dari urutan asli.
     func addAssets(_ ids: [String], to albumId: String) async {
-        guard !ids.isEmpty else { return }
+        guard canWork, !ids.isEmpty else { return }
         actionError = nil
         // Duplikat di layar album itu sendiri sengaja DIABAIKAN: sheet
         // penambah foto sudah menyaring yang sudah ada (`existingIDs`), jadi
@@ -500,18 +536,20 @@ final class AlbumDetailViewModel {
         // — dan hasilnya tetap benar setelah dimuat ulang di bawah.
         do {
             _ = try await albumRepo.addAssets(ids, to: albumId)
-            guard snapshotGeneration == LocalSnapshot.generation else { return }
+            guard canWork else { return }
+            hasAuthoritativeContents = false
             if !(await loadAlbumDetail(albumId)) {
-                guard snapshotGeneration == LocalSnapshot.generation else { return }
+                guard canWork else { return }
                 actionError = String(localized: "Failed to load album")
             }
         } catch {
-            guard snapshotGeneration == LocalSnapshot.generation else { return }
+            guard canWork else { return }
             if let mutation = error as? AlbumMutationError,
                !mutation.succeededIDs.isEmpty || !mutation.duplicateIDs.isEmpty {
+                hasAuthoritativeContents = false
                 await loadAlbumDetail(albumId)
             }
-            guard snapshotGeneration == LocalSnapshot.generation else { return }
+            guard canWork else { return }
             actionError = (error as? APIError)?.errorDescription
                 ?? String(localized: "Failed to add to album")
         }
@@ -542,11 +580,20 @@ final class AlbumDetailViewModel {
     /// Potret lokal tetap dipasang lebih dulu agar offline tidak berarti kosong.
     @discardableResult
     func loadAlbumDetail(_ albumId: String) async -> Bool {
-        guard snapshotGeneration == LocalSnapshot.generation else { return false }
+        guard canWork else { return false }
         let request = UUID()
         loadRevision = request
         let cacheRevision = dataManager.assetMutationRevision
+        if let previousID = self.albumId, previousID != albumId {
+            assets = []
+            phase = .idle
+        }
+        if contentsObserver?.albumID != albumId {
+            contentsObserver = nil
+            lastReportedIDs = nil
+        }
         self.albumId = albumId
+        hasAuthoritativeContents = false
         let key = LocalSnapshot.Key.album(albumId)
         if assets.isEmpty {
             if let cached = LocalSnapshot.load([AssetLite].self, for: key) {
@@ -561,16 +608,18 @@ final class AlbumDetailViewModel {
             // GET /albums/{id} tidak lagi menyertakan daftar aset. Jangan pakai
             // `/timeline/*`: route itu Internal dan bisa berubah tanpa notice.
             let fetched = try await timelineRepo.albumAssets(albumId)
-            guard snapshotGeneration == LocalSnapshot.generation, loadRevision == request,
+            guard canWork, loadRevision == request,
                   dataManager.assetMutationRevision == cacheRevision else { return false }
             LocalSnapshot.save(fetched, for: key, expectedGeneration: snapshotGeneration)
             if !assets.elementsEqual(fetched, by: { $0.hasSameContent(as: $1) }) {
                 assets = fetched
             }
             phase = .loaded(())
+            hasAuthoritativeContents = true
+            reportConfirmedContents()
             return true
         } catch {
-            guard snapshotGeneration == LocalSnapshot.generation, loadRevision == request,
+            guard canWork, loadRevision == request,
                   dataManager.assetMutationRevision == cacheRevision else { return false }
             // Sudah ada jawaban yang sah di layar — potret maupun muatan
             // sebelumnya — jadi kegagalannya diam. Album yang memang kosong pun
