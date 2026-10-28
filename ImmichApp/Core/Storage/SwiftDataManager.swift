@@ -284,9 +284,6 @@ final class SwiftDataManager {
 
     /// Terapkan hasil satu putaran sync dalam SATU save, bukan save per aset.
     ///
-    /// - Parameter isFullReset: cache baru saja dikosongkan, jadi tidak ada yang
-    ///   perlu dicari — semuanya pasti baru.
-    ///
     /// Dua hal yang penting di sini:
     ///
     /// 1. Aset yang sudah ada dicari lewat SATU query untuk seluruh batch, bukan
@@ -301,7 +298,6 @@ final class SwiftDataManager {
     func applySyncBatch(
         upserts: [CachedAsset],
         deletedIds: [String],
-        isFullReset: Bool = false,
         expectedVisibilityRevision: UUID? = nil,
         visibilityByID: [String: String] = [:],
         removalReason: RemovedAssets.Reason? = nil
@@ -313,21 +309,13 @@ final class SwiftDataManager {
         publishRemovals(deletedIds, reason: removalReason)
         let context = ModelContext(modelContainer)
 
-        if isFullReset {
-            for asset in upserts { context.insert(asset) }
-        } else {
-            let existing = fetchAssets(ids: upserts.map(\.id) + deletedIds, in: context)
-
-            for asset in upserts {
-                if let current = existing[asset.id] {
-                    apply(asset, to: current)
-                } else {
-                    context.insert(asset)
-                }
-            }
-            for id in deletedIds {
-                if let current = existing[id] { context.delete(current) }
-            }
+        let existing = fetchAssets(ids: upserts.map(\.id) + deletedIds, in: context)
+        for asset in upserts {
+            if let current = existing[asset.id] { apply(asset, to: current) }
+            else { context.insert(asset) }
+        }
+        for id in deletedIds {
+            if let current = existing[id] { context.delete(current) }
         }
 
         try saveWithTimelineVisibility(upserts, visibilityByID: visibilityByID, in: context) {
@@ -336,6 +324,136 @@ final class SwiftDataManager {
 
         let deleted = Set(deletedIds)
         RemovedAssets.shared.restore(upserts.map(\.id).filter { !deleted.contains($0) })
+    }
+
+    /// Promotion is one synchronous save on the shared context, so existing UI
+    /// references see updates and deletions immediately. Download staging is
+    /// bounded; this final transaction still tracks the snapshot's changed models.
+    func replaceSyncCache(
+        with staging: FullSyncStaging,
+        expectedVisibilityRevision: UUID,
+        expectedAssetRevision: UUID
+    ) throws {
+        try Task.checkCancellation()
+        guard expectedVisibilityRevision == visibilityMutationRevision,
+              expectedAssetRevision == assetMutationRevision else {
+            throw CancellationError()
+        }
+        // Preserve unrelated pending edits before establishing our rollback point.
+        try modelContext.save()
+        let previousNonTimeline = nonTimelineAssetIDs
+        let previousArchived = archivedAssetIDs
+        let previousNeedsPersistence = visibilityNeedsPersistence
+        let backupRecords = try currentBackupRecordSnapshots()
+        var activeIDs: Set<String> = []
+        var visibilityByID: [String: String] = [:]
+        var trashedIDs: Set<String> = []
+        var permanentlyDeletedIDs: Set<String> = []
+        var removedIDs: Set<String> = []
+        var nonTimeline = previousNonTimeline
+        var archived = previousArchived
+        var journalWritten = false
+        do {
+            try staging.forEachBatch { entries in
+                try Task.checkCancellation()
+                let ids = Array(Set(entries.map(\.id)))
+                var existing: [String: CachedAsset] = [:]
+                for offset in stride(from: 0, to: ids.count, by: 400) {
+                    let slice = Array(ids[offset..<min(offset + 400, ids.count)])
+                    for asset in try modelContext.fetch(FetchDescriptor<CachedAsset>(
+                        predicate: #Predicate { slice.contains($0.id) })) {
+                        existing[asset.id] = asset
+                    }
+                }
+                for entry in entries {
+                    if let asset = entry.asset, let visibility = entry.visibility {
+                        let replacement = asset.cachedAsset(visibility: visibility)
+                        if let current = existing[entry.id] { apply(replacement, to: current) }
+                        else {
+                            modelContext.insert(replacement)
+                            existing[entry.id] = replacement
+                        }
+                        activeIDs.insert(entry.id)
+                        visibilityByID[entry.id] = visibility
+                        trashedIDs.remove(entry.id)
+                        permanentlyDeletedIDs.remove(entry.id)
+                    } else {
+                        activeIDs.remove(entry.id)
+                        visibilityByID.removeValue(forKey: entry.id)
+                        removedIDs.insert(entry.id)
+                        if entry.permanentlyDeleted {
+                            permanentlyDeletedIDs.insert(entry.id)
+                            trashedIDs.remove(entry.id)
+                        } else {
+                            permanentlyDeletedIDs.remove(entry.id)
+                            trashedIDs.insert(entry.id)
+                        }
+                    }
+                }
+            }
+            // SwiftData's store enumeration omits unsaved inserts. Remove a new
+            // row whose last streamed event deleted it before sweeping old rows.
+            for case let asset as CachedAsset in modelContext.insertedModelsArray {
+                if !activeIDs.contains(asset.id) { modelContext.delete(asset) }
+            }
+            try modelContext.enumerate(FetchDescriptor<CachedAsset>(),
+                batchSize: 500, allowEscapingMutations: true) { asset in
+                try Task.checkCancellation()
+                if !activeIDs.contains(asset.id) {
+                    removedIDs.insert(asset.id)
+                    modelContext.delete(asset)
+                }
+            }
+            removedIDs.subtract(activeIDs)
+            for (id, visibility) in visibilityByID {
+                if visibility == "timeline" { nonTimeline.remove(id) }
+                else { nonTimeline.insert(id) }
+                if visibility == "archive" { archived.insert(id) }
+                else { archived.remove(id) }
+            }
+            var storageUpdates = visibilityByID
+            if previousNeedsPersistence {
+                for id in nonTimeline {
+                    storageUpdates[id] = archived.contains(id) ? "archive" : "unknown"
+                }
+            }
+            try stagePrivateVisibility(storageUpdates, in: modelContext)
+            try Task.checkCancellation()
+            // A journal failure must leave the working cache untouched. Unlike
+            // delta privacy writes, full replacement must not save after failure.
+            try writeBackupRecordJournal(backupRecords,
+                nonTimelineAssetIDs: nonTimeline, archivedAssetIDs: archived)
+            journalWritten = true
+            try Task.checkCancellation()
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            if journalWritten {
+                do {
+                    try writeBackupRecordJournal(backupRecords,
+                        nonTimelineAssetIDs: previousNonTimeline,
+                        archivedAssetIDs: previousArchived)
+                } catch {
+                    // If restoring the journal also fails, keep every known
+                    // restriction until both durable copies can be reconciled.
+                    nonTimelineAssetIDs.formUnion(nonTimeline)
+                    archivedAssetIDs.formIntersection(archived)
+                    visibilityNeedsPersistence = true
+                    WidgetSnapshotExporter.clear()
+                }
+            }
+            throw error
+        }
+        nonTimelineAssetIDs = nonTimeline
+        archivedAssetIDs = archived
+        visibilityNeedsPersistence = false
+        DeletedServerAssetRegistry.shared.restore(Array(activeIDs))
+        DeletedServerAssetRegistry.shared.record(Array(trashedIDs), permanently: false)
+        DeletedServerAssetRegistry.shared.record(Array(permanentlyDeletedIDs), permanently: true)
+        publishRemovals(Array(removedIDs))
+        RemovedAssets.shared.restore(Array(activeIDs))
+        assetMutationRevision = UUID()
+        WidgetSnapshotExporter.clear()
     }
 
     private func saveWithTimelineVisibility(

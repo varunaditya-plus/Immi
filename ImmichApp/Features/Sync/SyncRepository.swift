@@ -19,22 +19,18 @@ class SyncRepository {
         try await sync(reset: false)
     }
 
-    /// Stream diproses SAMBIL DATANG, bukan dikumpulkan dulu lalu ditulis.
-    ///
-    /// Versi lama menampung seluruh isi `/sync/stream` di memori — untuk
-    /// perpustakaan puluhan ribu foto itu puluhan ribu DTO hidup bersamaan,
-    /// lalu diubah lagi jadi puluhan ribu objek `@Model`, dan puncaknya terjadi
-    /// tepat saat aplikasi baru dibuka. Sekarang tiap potongan langsung ditulis
-    /// dan dilepas, jadi memorinya rata berapa pun besar perpustakaannya.
+    /// Delta batches become visible as they arrive. Full snapshots stay in a
+    /// disposable file until the server confirms that the stream is complete.
     @MainActor
     private func sync(reset: Bool, isRetryAfterReset: Bool = false) async throws {
         let context = api.session.snapshot
         let visibilityRevision = dataManager.visibilityMutationRevision
+        let assetRevision = dataManager.assetMutationRevision
+        var staging = reset ? try FullSyncStaging() : nil
         try api.checkCurrent(context)
         try checkVisibility(visibilityRevision)
-        if reset { try dataManager.clearAllCache() }
-
-        let outcome = try await streamAndApply(reset: reset, context: context, visibilityRevision: visibilityRevision)
+        let outcome = try await streamAndApply(reset: reset, staging: staging,
+            context: context, visibilityRevision: visibilityRevision)
         try api.checkCurrent(context)
         try checkVisibility(visibilityRevision)
 
@@ -42,10 +38,26 @@ class SyncRepository {
             guard !isRetryAfterReset else {
                 throw APIError.server(status: 409, message: "Server terus meminta sync reset")
             }
+            staging = nil
             return try await sync(reset: true, isRetryAfterReset: true)
         }
 
-        // Konfirmasi checkpoint ke server.
+        if let staging {
+            guard outcome.completed else {
+                throw APIError.server(status: 502, message: "Sync berakhir sebelum snapshot lengkap")
+            }
+            guard assetRevision == dataManager.assetMutationRevision else {
+                throw CancellationError()
+            }
+            try dataManager.replaceSyncCache(with: staging,
+                expectedVisibilityRevision: visibilityRevision,
+                expectedAssetRevision: assetRevision)
+        }
+
+        // Acknowledge only after the complete snapshot is durable. A failed ack
+        // can be retried without discarding the usable cache or its old checkpoint.
+        try api.checkCurrent(context)
+        try checkVisibility(visibilityRevision)
         if !outcome.latestAcks.isEmpty {
             try await api.sendVoid(.json("/sync/ack", method: .post,
                                          body: SyncAckSetDTO(acks: Array(outcome.latestAcks.values))))
@@ -66,18 +78,13 @@ class SyncRepository {
         /// Ack terakhir per tipe entitas (format "type|updateId[|extraId]").
         var latestAcks: [String: String] = [:]
         var serverRequestedReset = false
+        var completed = false
     }
 
-    /// Membaca stream dan MENULISNYA sambil jalan.
-    ///
-    /// Potongan sengaja tidak besar: tiap kali penuh ia langsung disimpan lalu
-    /// dilepas, dan `Task.yield()` memberi main thread celah menggambar di
-    /// antaranya. Itu bedanya antara "aplikasi hang saat sync pertama" dan
-    /// "foto muncul sambil sync berjalan".
     private static let chunkSize = 500
 
     @MainActor
-    private func streamAndApply(reset: Bool, context: SessionRequestContext, visibilityRevision: UUID) async throws -> StreamOutcome {
+    private func streamAndApply(reset: Bool, staging: FullSyncStaging?, context: SessionRequestContext, visibilityRevision: UUID) async throws -> StreamOutcome {
         // Immich v3 mempertahankan nama request AssetsV1 di enum, tetapi
         // handler server-nya sengaja selalu membalas 400 karena sudah
         // deprecated. Aplikasi sebelumnya tetap memintanya, lalu background
@@ -101,6 +108,7 @@ class SyncRepository {
         var upserts: [CachedAsset] = []
         var deletes: [String] = []
         var visibilityByID: [String: String] = [:]
+        var stagedLineCount = 0
 
         let lines = try await api.streamLines(.json("/sync/stream", method: .post, body: request))
 
@@ -109,20 +117,23 @@ class SyncRepository {
             try checkVisibility(visibilityRevision)
             guard !line.isEmpty, let data = line.data(using: .utf8) else { continue }
             let envelope = try JSONDecoder.immich.decode(SyncLineEnvelopeDTO.self, from: data)
+            if staging != nil, outcome.completed {
+                throw APIError.server(status: 502, message: "Sync mengirim data setelah snapshot lengkap")
+            }
 
             switch envelope.type {
             case "AssetV1":
                 let asset = try JSONDecoder.immich.decode(
                     SyncLineDataDTO<SyncAssetV1DTO>.self, from: data).data
                 if asset.deletedAt != nil {
-                    // Delete dari web/perangkat lain juga harus menekan fallback
-                    // PhotoKit. Full sync sekaligus memperbaiki state versi app
-                    // lama yang belum sempat mencatat delete secara lokal.
-                    DeletedServerAssetRegistry.shared.record(
-                        [asset.id], permanently: false)
-                    deletes.append(asset.id)
+                    if let staging { try staging.appendDeletion(asset.id, permanently: false) }
+                    else {
+                        DeletedServerAssetRegistry.shared.record([asset.id], permanently: false)
+                        deletes.append(asset.id)
+                    }
+                } else if let staging {
+                    try staging.append(makeCachedAsset(asset), visibility: asset.visibility)
                 } else {
-                    // Restore dari klien lain datang lagi sebagai AssetV1 aktif.
                     DeletedServerAssetRegistry.shared.restore([asset.id])
                     upserts.append(makeCachedAsset(asset))
                     visibilityByID[asset.id] = asset.visibility
@@ -131,9 +142,13 @@ class SyncRepository {
                 let asset = try JSONDecoder.immich.decode(
                     SyncLineDataDTO<SyncAssetV2DTO>.self, from: data).data
                 if asset.deletedAt != nil {
-                    DeletedServerAssetRegistry.shared.record(
-                        [asset.id], permanently: false)
-                    deletes.append(asset.id)
+                    if let staging { try staging.appendDeletion(asset.id, permanently: false) }
+                    else {
+                        DeletedServerAssetRegistry.shared.record([asset.id], permanently: false)
+                        deletes.append(asset.id)
+                    }
+                } else if let staging {
+                    try staging.append(makeCachedAsset(asset), visibility: asset.visibility)
                 } else {
                     DeletedServerAssetRegistry.shared.restore([asset.id])
                     upserts.append(makeCachedAsset(asset))
@@ -142,14 +157,18 @@ class SyncRepository {
             case "AssetDeleteV1":
                 let payload = try JSONDecoder.immich.decode(
                     SyncLineDataDTO<SyncAssetDeleteV1DTO>.self, from: data).data
-                DeletedServerAssetRegistry.shared.record(
-                    [payload.assetId], permanently: true)
-                deletes.append(payload.assetId)
+                if let staging { try staging.appendDeletion(payload.assetId, permanently: true) }
+                else {
+                    DeletedServerAssetRegistry.shared.record([payload.assetId], permanently: true)
+                    deletes.append(payload.assetId)
+                }
+            case "SyncCompleteV1":
+                outcome.completed = true
             case "SyncResetV1":
                 outcome.serverRequestedReset = true
                 return outcome
             default:
-                break // SyncAckV1/SyncCompleteV1 hanya membawa ack
+                break // Other entity markers only carry acknowledgments.
             }
 
             if let ackType = envelope.ack.split(separator: "|").first {
@@ -157,12 +176,19 @@ class SyncRepository {
             }
 
             if upserts.count >= Self.chunkSize || deletes.count >= Self.chunkSize {
-                try await flush(&upserts, &deletes, &visibilityByID, isFullReset: reset,
+                try await flush(&upserts, &deletes, &visibilityByID,
                     context: context, visibilityRevision: visibilityRevision)
+            }
+            if staging != nil {
+                stagedLineCount += 1
+                if stagedLineCount == Self.chunkSize {
+                    stagedLineCount = 0
+                    await Task.yield()
+                }
             }
         }
 
-        try await flush(&upserts, &deletes, &visibilityByID, isFullReset: reset,
+        try await flush(&upserts, &deletes, &visibilityByID,
             context: context, visibilityRevision: visibilityRevision)
         return outcome
     }
@@ -172,7 +198,6 @@ class SyncRepository {
         _ upserts: inout [CachedAsset],
         _ deletes: inout [String],
         _ visibilityByID: inout [String: String],
-        isFullReset: Bool,
         context: SessionRequestContext,
         visibilityRevision: UUID
     ) async throws {
@@ -183,7 +208,6 @@ class SyncRepository {
         try dataManager.applySyncBatch(
             upserts: upserts,
             deletedIds: deletes,
-            isFullReset: isFullReset,
             expectedVisibilityRevision: visibilityRevision,
             visibilityByID: visibilityByID)
 
@@ -195,6 +219,7 @@ class SyncRepository {
 
     @MainActor
     private func checkVisibility(_ expectedRevision: UUID) throws {
+        try Task.checkCancellation()
         guard expectedRevision == dataManager.visibilityMutationRevision else {
             throw CancellationError()
         }
