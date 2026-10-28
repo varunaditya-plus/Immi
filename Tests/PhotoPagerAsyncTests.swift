@@ -6,7 +6,10 @@ import XCTest
 @MainActor
 final class PhotoPagerAsyncTests: XCTestCase {
     func testQueuedEndFromOldPlayerCannotStopTheReplacementPlayer() async throws {
+        let movieURL = try await makePagerPlaybackMovie()
+        defer { try? FileManager.default.removeItem(at: movieURL) }
         let loader = HeldPreviewLoader()
+        loader.playbackURL = movieURL
         loader.cached = ["A": image(.gray), "B": image(.gray)]
         let notifications = HeldPlaybackNotifications()
         let cell = PhotoPagerCell(frame: .zero, playbackNotifications: notifications)
@@ -320,6 +323,7 @@ private final class HeldPreviewLoader: PhotoPreviewLoader {
     var imageCancellations: [String] = []
     var matches: [(hint: LocalLivePhotoMatchHint, result: HeldValue<String?>)] = []
     var invalidations: [(id: String, result: HeldValue<Void>)] = []
+    var playbackURL: URL?
 
     init() { super.init(session: MockSessionManager()) }
 
@@ -329,7 +333,7 @@ private final class HeldPreviewLoader: PhotoPreviewLoader {
     override func prefetch(_ assetIds: [String]) {}
 
     override func playbackAsset(for assetId: String) async -> AVAsset? {
-        AVURLAsset(url: URL(fileURLWithPath: "/nonexistent-pager-test-\(assetId).mov"))
+        AVURLAsset(url: playbackURL ?? URL(fileURLWithPath: "/nonexistent-pager-test-\(assetId).mov"))
     }
 
     override func image(for assetId: String) async -> UIImage? {

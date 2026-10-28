@@ -42,6 +42,7 @@ final class PhotoPagerCell: UICollectionViewCell {
 
     private var loadTask: Task<Void, Never>?
     private var currentAssetID: String?
+    private var accountGeneration = LocalSnapshot.generation
     private var isVideo = false
     /// Disimpan supaya tombol putar bisa meminta URL videonya belakangan.
     private weak var loader: PhotoPreviewLoader?
@@ -59,6 +60,8 @@ final class PhotoPagerCell: UICollectionViewCell {
     /// Mengikuti status buffering dari AVPlayer. Pengamat ini wajib dilepas
     /// bersama pemutar supaya callback video lama tidak mengubah sel daur ulang.
     private var playbackStatusObserver: NSKeyValueObservation?
+    private var playbackItemStatusObserver: NSKeyValueObservation?
+    private var playbackFailureObserver: NSObjectProtocol?
     /// AVPlayer kadang tetap berstatus menunggu meski item sudah siap meneruskan.
     /// Perubahan ini dipakai untuk menendangnya kembali ke `play()`.
     private var playbackKeepUpObserver: NSKeyValueObservation?
@@ -70,6 +73,9 @@ final class PhotoPagerCell: UICollectionViewCell {
     private var timeObserver: Any?
     private let playButton = UIButton(type: .system)
     private let loadingIndicator = UIActivityIndicatorView(style: .large)
+    private let playbackFailureView = UIStackView()
+    private let playbackFailureLabel = UILabel()
+    private let playbackRetryButton = UIButton(type: .system)
     /// Intent pengguna, terpisah dari `timeControlStatus`. Status AVPlayer dapat
     /// menjadi paused/waiting ketika buffer habis tanpa berarti pengguna pause.
     private var wantsVideoPlayback = false
@@ -90,6 +96,8 @@ final class PhotoPagerCell: UICollectionViewCell {
     private var livePhotoHint: LocalLivePhotoMatchHint?
     private var liveEndObserver: NSObjectProtocol?
     private var livePlaybackStatusObserver: NSKeyValueObservation?
+    private var liveItemStatusObserver: NSKeyValueObservation?
+    private var liveFailureObserver: NSObjectProtocol?
     private var livePlaybackKeepUpObserver: NSKeyValueObservation?
     /// Hasil pemuatan boleh datang setelah jari dilepas. State ini memastikan
     /// video tidak tiba-tiba mulai sendiri ketika pengguna sudah berpindah.
@@ -221,6 +229,37 @@ final class PhotoPagerCell: UICollectionViewCell {
             loadingIndicator.heightAnchor.constraint(equalToConstant: 54),
         ])
 
+        playbackFailureLabel.font = .preferredFont(forTextStyle: .body)
+        playbackFailureLabel.adjustsFontForContentSizeCategory = true
+        playbackFailureLabel.textColor = .white
+        playbackFailureLabel.textAlignment = .center
+        playbackFailureLabel.numberOfLines = 0
+        var retryConfig = UIButton.Configuration.plain()
+        retryConfig.title = String(localized: "Retry")
+        retryConfig.baseForegroundColor = .white
+        playbackRetryButton.configuration = retryConfig
+        playbackRetryButton.accessibilityIdentifier = "photoPlaybackRetry"
+        playbackRetryButton.addTarget(self, action: #selector(togglePlayback), for: .touchUpInside)
+        playbackFailureView.axis = .vertical
+        playbackFailureView.spacing = 8
+        playbackFailureView.isLayoutMarginsRelativeArrangement = true
+        playbackFailureView.directionalLayoutMargins = NSDirectionalEdgeInsets(
+            top: 16, leading: 16, bottom: 16, trailing: 16)
+        playbackFailureView.backgroundColor = UIColor.black.withAlphaComponent(0.7)
+        playbackFailureView.layer.cornerRadius = 12
+        playbackFailureView.accessibilityIdentifier = "photoPlaybackFailure"
+        playbackFailureView.addArrangedSubview(playbackFailureLabel)
+        playbackFailureView.addArrangedSubview(playbackRetryButton)
+        playbackFailureView.isHidden = true
+        playbackFailureView.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(playbackFailureView)
+        NSLayoutConstraint.activate([
+            playbackFailureView.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            playbackFailureView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            playbackFailureView.widthAnchor.constraint(lessThanOrEqualTo:
+                contentView.safeAreaLayoutGuide.widthAnchor, constant: -32),
+        ])
+
         buildLiveBadge()
 
         let longPress = UILongPressGestureRecognizer(
@@ -348,7 +387,9 @@ final class PhotoPagerCell: UICollectionViewCell {
         }
         loadTask?.cancel()
         loadTask = nil
-        if currentAssetID != nil, currentAssetID != asset.id {
+        if currentAssetID != nil,
+           currentAssetID != asset.id || self.loader !== loader
+            || accountGeneration != LocalSnapshot.generation || isVideo != asset.isVideo {
             // Pertahanan tambahan di luar prepareForReuse: UICollectionView dapat
             // mengonfigurasi ulang sel terlihat tanpa reuse saat datanya ditambal.
             // Tidak satu pun konteks Live Photo lama boleh ikut ke aset baru.
@@ -360,13 +401,14 @@ final class PhotoPagerCell: UICollectionViewCell {
             localLivePhotoAssetID = nil
         }
         currentAssetID = asset.id
+        accountGeneration = LocalSnapshot.generation
         imageAspect = asset.ratio > 0 ? CGFloat(asset.ratio) : 1
         isVideo = asset.isVideo
         livePhotoVideoID = asset.livePhotoVideoID
         localLivePhotoAssetID = loader.localLivePhotoAssetID(for: asset.id)
         updateLiveBadgeVisibility(animated: false)
         metadataDuration = asset.duration ?? 0
-        playButton.isHidden = !asset.isVideo
+        playButton.isHidden = !asset.isVideo || !playbackFailureView.isHidden || wantsVideoPlayback
         self.loader = loader
         reportPlayback()
 
@@ -720,7 +762,37 @@ final class PhotoPagerCell: UICollectionViewCell {
 
     // MARK: - Video
 
+    private var isPlaybackContextCurrent: Bool {
+        guard accountGeneration == LocalSnapshot.generation,
+              let currentAssetID, let loader
+        else { return false }
+        return loader.visibilityPolicy.allows(id: currentAssetID)
+    }
+
+    private func hidePlaybackFailure() {
+        playbackFailureView.isHidden = true
+    }
+
+    private func showPlaybackFailure(isLivePhoto: Bool) {
+        loadingIndicator.stopAnimating()
+        playbackFailureLabel.text = isLivePhoto
+            ? String(localized: "Unable to play Live Photo. Touch and hold to try again.")
+            : String(localized: "Unable to play video. Try again.")
+        playbackRetryButton.isHidden = isLivePhoto
+        playbackFailureView.isUserInteractionEnabled = !isLivePhoto
+        playbackFailureView.isHidden = false
+        playButton.isHidden = true
+    }
+
+    private func failVideoPlayback() {
+        guard isPlaybackContextCurrent else { return }
+        stopPlayback()
+        showPlaybackFailure(isLivePhoto: false)
+    }
+
     @objc private func togglePlayback() {
+        guard isVideo, isPlaybackContextCurrent else { return }
+        if player?.currentItem?.status == .failed { failVideoPlayback() }
         if let player {
             wantsVideoPlayback = true
             player.play()
@@ -735,6 +807,7 @@ final class PhotoPagerCell: UICollectionViewCell {
               let loader
         else { return }
 
+        hidePlaybackFailure()
         playButton.isHidden = true
         loadingIndicator.accessibilityLabel = String(localized: "Loading video")
         loadingIndicator.startAnimating()
@@ -745,14 +818,15 @@ final class PhotoPagerCell: UICollectionViewCell {
                 return
             }
             self.videoLoadTask = nil
-            guard !Task.isCancelled,
-                  self.currentAssetID == id,
-                  loader.visibilityPolicy.allows(id: id),
-                  let asset
+            guard self.currentAssetID == id,
+                  self.loader === loader,
+                  self.isPlaybackContextCurrent
             else {
                 asset?.cancelLoading()
-                self.loadingIndicator.stopAnimating()
-                self.playButton.isHidden = !self.isVideo
+                return
+            }
+            guard let asset else {
+                self.failVideoPlayback()
                 return
             }
             self.startPlayback(with: asset)
@@ -788,7 +862,9 @@ final class PhotoPagerCell: UICollectionViewCell {
             queue: .main
         ) { [weak self, weak player] _ in
             MainActor.assumeIsolated {
-                guard let self, let player, self.player === player else { return }
+                guard let self, let player, self.player === player,
+                      self.isPlaybackContextCurrent
+                else { return }
                 self.wantsVideoPlayback = false
                 player.seek(to: .zero)
                 self.playButton.isHidden = false
@@ -809,13 +885,41 @@ final class PhotoPagerCell: UICollectionViewCell {
         self.player = player
         self.videoView = surface
         wantsVideoPlayback = true
+        playbackItemStatusObserver = item.observe(
+            \.status,
+            options: [.initial, .new]
+        ) { [weak self, weak item] _, _ in
+            DispatchQueue.main.async { [weak self, weak item] in
+                guard let self, let item,
+                      self.player?.currentItem === item,
+                      self.isPlaybackContextCurrent
+                else { return }
+                if item.status == .failed {
+                    self.failVideoPlayback()
+                }
+            }
+        }
+        playbackFailureObserver = playbackNotifications.addObserver(
+            forName: .AVPlayerItemFailedToPlayToEndTime,
+            object: item,
+            queue: .main
+        ) { [weak self, weak item] _ in
+            MainActor.assumeIsolated {
+                guard let self, let item,
+                      self.player?.currentItem === item,
+                      self.isPlaybackContextCurrent
+                else { return }
+                self.failVideoPlayback()
+            }
+        }
         playbackStatusObserver = player.observe(
             \.timeControlStatus,
             options: [.initial, .new]
         ) { [weak self] observedPlayer, _ in
             DispatchQueue.main.async { [weak self, weak observedPlayer] in
                 guard let self, let observedPlayer,
-                      self.player === observedPlayer
+                      self.player === observedPlayer,
+                      self.isPlaybackContextCurrent
                 else { return }
                 self.updateLoadingIndicator(for: observedPlayer)
                 self.reportPlayback()
@@ -829,6 +933,7 @@ final class PhotoPagerCell: UICollectionViewCell {
                 guard let self, let item,
                       observedItem === item,
                       self.player?.currentItem === item,
+                      self.isPlaybackContextCurrent,
                       item.isPlaybackLikelyToKeepUp
                 else { return }
                 self.resumeVideoPlaybackIfPossible()
@@ -841,7 +946,8 @@ final class PhotoPagerCell: UICollectionViewCell {
             DispatchQueue.main.async { [weak self, weak item] in
                 guard let self, let item,
                       observedItem === item,
-                      self.player?.currentItem === item
+                      self.player?.currentItem === item,
+                      self.isPlaybackContextCurrent
                 else { return }
                 self.resumeVideoPlaybackIfPossible()
                 self.reportPlayback()
@@ -855,6 +961,7 @@ final class PhotoPagerCell: UICollectionViewCell {
             MainActor.assumeIsolated {
                 guard let self, let item,
                       self.player?.currentItem === item,
+                      self.isPlaybackContextCurrent,
                       self.wantsVideoPlayback
                 else { return }
                 self.loadingIndicator.startAnimating()
@@ -871,7 +978,8 @@ final class PhotoPagerCell: UICollectionViewCell {
     }
 
     private func resumeVideoPlaybackIfPossible() {
-        guard wantsVideoPlayback,
+        guard isPlaybackContextCurrent,
+              wantsVideoPlayback,
               let player,
               let item = player.currentItem,
               item.status == .readyToPlay
@@ -899,6 +1007,10 @@ final class PhotoPagerCell: UICollectionViewCell {
     /// `waitingToPlayAtSpecifiedRate` mencakup pemuatan awal dan rebuffering.
     /// Status ini lebih akurat daripada menebak dari durasi atau frame pertama.
     private func updateLoadingIndicator(for player: AVPlayer) {
+        if player.currentItem?.status == .failed {
+            failVideoPlayback()
+            return
+        }
         if wantsVideoPlayback && player.timeControlStatus != .playing {
             playButton.isHidden = true
             loadingIndicator.startAnimating()
@@ -924,6 +1036,12 @@ final class PhotoPagerCell: UICollectionViewCell {
         playbackLoadedRangesObserver = nil
         playbackStatusObserver?.invalidate()
         playbackStatusObserver = nil
+        playbackItemStatusObserver?.invalidate()
+        playbackItemStatusObserver = nil
+        if let playbackFailureObserver {
+            playbackNotifications.removeObserver(playbackFailureObserver)
+            self.playbackFailureObserver = nil
+        }
         if let playbackStalledObserver {
             playbackNotifications.removeObserver(playbackStalledObserver)
             self.playbackStalledObserver = nil
@@ -943,6 +1061,7 @@ final class PhotoPagerCell: UICollectionViewCell {
             self.endObserver = nil
         }
         playButton.isHidden = !isVideo
+        hidePlaybackFailure()
         reportPlayback()
     }
 
@@ -950,6 +1069,10 @@ final class PhotoPagerCell: UICollectionViewCell {
 
     /// Memutar kalau berhenti, menjeda kalau sedang berjalan.
     func togglePlayPause() {
+        guard isPlaybackContextCurrent else { return }
+        if player?.currentItem?.status == .failed {
+            failVideoPlayback()
+        }
         guard let player else {
             togglePlayback()
             return
@@ -989,19 +1112,22 @@ final class PhotoPagerCell: UICollectionViewCell {
             startLivePhoto()
         case .ended, .cancelled, .failed:
             isLivePhotoPressed = false
-            stopLivePhoto()
+            stopLivePhoto(keepingFailure: true)
         default: break
         }
     }
 
     private func startLivePhoto() {
-        guard livePlayer == nil,
+        guard isPlaybackContextCurrent,
+              localLivePhotoAssetID != nil || livePhotoVideoID != nil,
+              livePlayer == nil,
               livePhotoView == nil,
               liveLoadTask == nil,
               let assetID = currentAssetID,
               let loader
         else { return }
 
+        hidePlaybackFailure()
         loadingIndicator.accessibilityLabel = String(localized: "Loading Live Photo")
         loadingIndicator.startAnimating()
 
@@ -1020,22 +1146,28 @@ final class PhotoPagerCell: UICollectionViewCell {
                     targetSize: targetSize)
                 guard !Task.isCancelled, let self else { return }
                 self.liveLoadTask = nil
-                guard !Task.isCancelled,
-                      self.isLivePhotoPressed,
+                guard self.isLivePhotoPressed,
                       self.currentAssetID == assetID,
-                      loader.visibilityPolicy.allows(id: assetID),
-                      let livePhoto
+                      self.loader === loader,
+                      self.isPlaybackContextCurrent
                 else {
-                    self.loadingIndicator.stopAnimating()
                     return
                 }
-                self.startLocalLivePlayback(livePhoto)
+                if let livePhoto {
+                    self.startLocalLivePlayback(livePhoto)
+                } else {
+                    self.loadLiveVideo(for: assetID, loader: loader)
+                }
             }
             return
         }
 
+        loadLiveVideo(for: assetID, loader: loader)
+    }
+
+    private func loadLiveVideo(for assetID: String, loader: PhotoPreviewLoader) {
         guard let videoID = livePhotoVideoID else {
-            loadingIndicator.stopAnimating()
+            failLivePhotoPlayback()
             return
         }
         liveLoadTask = Task { [weak self] in
@@ -1047,14 +1179,17 @@ final class PhotoPagerCell: UICollectionViewCell {
                 return
             }
             self.liveLoadTask = nil
-            guard !Task.isCancelled,
-                  self.isLivePhotoPressed,
-                  loader.visibilityPolicy.allows(id: assetID),
-                  self.livePhotoVideoID == videoID,
-                  let asset
+            guard self.isLivePhotoPressed,
+                  self.currentAssetID == assetID,
+                  self.loader === loader,
+                  self.isPlaybackContextCurrent,
+                  self.livePhotoVideoID == videoID
             else {
                 asset?.cancelLoading()
-                self.loadingIndicator.stopAnimating()
+                return
+            }
+            guard let asset else {
+                self.failLivePhotoPlayback()
                 return
             }
             self.startLivePlayback(with: asset)
@@ -1107,13 +1242,42 @@ final class PhotoPagerCell: UICollectionViewCell {
             queue: .main
         ) { [weak self, weak player] _ in
             MainActor.assumeIsolated {
-                guard let self, let player, self.livePlayer === player else { return }
+                guard let self, let player, self.livePlayer === player,
+                      self.isPlaybackContextCurrent
+                else { return }
                 self.stopLivePhoto()
             }
         }
 
         livePlayer = player
         liveLayer = layer
+        liveItemStatusObserver = item.observe(
+            \.status,
+            options: [.initial, .new]
+        ) { [weak self, weak item] _, _ in
+            DispatchQueue.main.async { [weak self, weak item] in
+                guard let self, let item,
+                      self.livePlayer?.currentItem === item,
+                      self.isPlaybackContextCurrent
+                else { return }
+                if item.status == .failed {
+                    self.failLivePhotoPlayback()
+                }
+            }
+        }
+        liveFailureObserver = playbackNotifications.addObserver(
+            forName: .AVPlayerItemFailedToPlayToEndTime,
+            object: item,
+            queue: .main
+        ) { [weak self, weak item] _ in
+            MainActor.assumeIsolated {
+                guard let self, let item,
+                      self.livePlayer?.currentItem === item,
+                      self.isPlaybackContextCurrent
+                else { return }
+                self.failLivePhotoPlayback()
+            }
+        }
         livePlaybackStatusObserver = player.observe(
             \.timeControlStatus,
             options: [.initial, .new]
@@ -1121,7 +1285,8 @@ final class PhotoPagerCell: UICollectionViewCell {
             DispatchQueue.main.async { [weak self, weak player] in
                 guard let self, let player,
                       observedPlayer === player,
-                      self.livePlayer === player
+                      self.livePlayer === player,
+                      self.isPlaybackContextCurrent
                 else { return }
                 self.updateLivePhotoLoading(for: player)
             }
@@ -1135,6 +1300,7 @@ final class PhotoPagerCell: UICollectionViewCell {
                       observedItem === item,
                       self.isLivePhotoPressed,
                       self.livePlayer?.currentItem === item,
+                      self.isPlaybackContextCurrent,
                       item.isPlaybackLikelyToKeepUp,
                       self.livePlayer?.timeControlStatus == .waitingToPlayAtSpecifiedRate
                 else { return }
@@ -1145,6 +1311,10 @@ final class PhotoPagerCell: UICollectionViewCell {
     }
 
     private func updateLivePhotoLoading(for player: AVPlayer) {
+        if player.currentItem?.status == .failed {
+            failLivePhotoPlayback()
+            return
+        }
         guard isLivePhotoPressed else {
             loadingIndicator.stopAnimating()
             return
@@ -1170,13 +1340,26 @@ final class PhotoPagerCell: UICollectionViewCell {
         }
     }
 
-    private func stopLivePhoto() {
+    private func failLivePhotoPlayback() {
+        guard isPlaybackContextCurrent, isLivePhotoPressed else { return }
+        stopLivePhoto()
+        showPlaybackFailure(isLivePhoto: true)
+    }
+
+    private func stopLivePhoto(keepingFailure: Bool = false) {
         liveLoadTask?.cancel()
         liveLoadTask = nil
         livePlaybackKeepUpObserver?.invalidate()
         livePlaybackKeepUpObserver = nil
         livePlaybackStatusObserver?.invalidate()
         livePlaybackStatusObserver = nil
+        liveItemStatusObserver?.invalidate()
+        liveItemStatusObserver = nil
+        if let liveFailureObserver {
+            playbackNotifications.removeObserver(liveFailureObserver)
+            self.liveFailureObserver = nil
+        }
+        if !keepingFailure { hidePlaybackFailure() }
         loadingIndicator.stopAnimating()
         if let oldView = livePhotoView {
             oldView.stopPlayback()
