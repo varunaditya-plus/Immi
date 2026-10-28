@@ -145,6 +145,8 @@ final class BackupService {
     private weak var session: SessionManager?
     private let dataManager: SwiftDataManager
     private let queue: BackupQueueStore
+    private let localLibrary: LocalPhotoLibrary
+    private let readOriginalFile: @MainActor (String, Bool) async -> (url: URL, filename: String)?
     private let makeAlbumRepository: @MainActor (APIClient) -> AlbumRepository
     private let automaticDiscovery: AutomaticBackupDiscovery
     private let uploadRequests: BackupUploadRequests
@@ -194,10 +196,16 @@ final class BackupService {
     init(
         dataManager: SwiftDataManager,
         queue: BackupQueueStore,
+        localLibrary: LocalPhotoLibrary? = nil,
+        readOriginalFile: @escaping @MainActor (String, Bool) async -> (url: URL, filename: String)? = {
+            await LocalPhotoLibrary.shared.originalFile(for: $0, allowsNetworkFallback: $1)
+        },
         makeAlbumRepository: @escaping @MainActor (APIClient) -> AlbumRepository = { AlbumRepository(api: $0) }
     ) {
         self.dataManager = dataManager
         self.queue = queue
+        self.localLibrary = localLibrary ?? .shared
+        self.readOriginalFile = readOriginalFile
         self.makeAlbumRepository = makeAlbumRepository
         automaticDiscovery = AutomaticBackupDiscovery(queue: queue, batchSize: BackupService.automaticBatchSize)
         uploadRequests = BackupUploadRequests(queue: queue)
@@ -936,16 +944,46 @@ final class BackupService {
         return await LocalPhotoLibrary.shared.photoMetadata(for: id)
     }
 
-    private func prepareQueuePhoto(
+    func prepareQueuePhoto(
         _ photo: LocalPhoto, repository repo: BackupRepository,
         mayReadFromICloud: Bool, ownership: BackupUploadOwnership
     ) async {
-        let sourceAlbumName = queue.item(id: photo.id)?.sourceAlbumName
-            ?? LocalPhotoLibrary.shared.albumTitles[photo.id]
         await performPreparation(localIdentifier: photo.id, isOwned: true, ownership: ownership) { claim in
-            await self.prepareQueuePhoto(photo, repository: repo,
-                mayReadFromICloud: mayReadFromICloud, ownership: ownership, claim: claim,
-                sourceAlbumName: sourceAlbumName)
+            do {
+                let motionAssetID = self.queue.item(id: photo.id)?.motionAssetID
+                try self.queue.markPreparing(photo.id,
+                    phase: photo.isLivePhoto && motionAssetID == nil ? .livePhotoMotion : .primaryAsset,
+                    motionAssetID: motionAssetID)
+            } catch {
+                self.lastError = error.localizedDescription
+                self.acceptsUploadResults = false
+                return
+            }
+            self.applyQueueSnapshot()
+            do {
+                let sourceAlbumName: String?
+                if let saved = self.queue.item(id: photo.id)?.sourceAlbumName {
+                    sourceAlbumName = saved
+                } else if self.syncAlbums {
+                    sourceAlbumName = try await self.localLibrary.sourceAlbumTitle(for: photo.id)
+                } else {
+                    sourceAlbumName = nil
+                }
+                try self.checkPreparation(photo.id, claim: claim)
+                await self.prepareQueuePhoto(photo, repository: repo,
+                    mayReadFromICloud: mayReadFromICloud, ownership: ownership, claim: claim,
+                    sourceAlbumName: sourceAlbumName)
+            } catch {
+                guard self.isCurrentPreparation(photo.id, claim: claim) else { return }
+                do {
+                    try self.queue.markRetry(photo.id, state: .retryScheduled,
+                        error: error.localizedDescription, retryAt: self.retryDate(for: photo.id))
+                } catch {
+                    self.lastError = error.localizedDescription
+                    self.acceptsUploadResults = false
+                }
+                self.applyQueueSnapshot()
+            }
         }
     }
 
@@ -1003,9 +1041,7 @@ final class BackupService {
             return
         }
 
-        guard let file = await LocalPhotoLibrary.shared.originalFile(
-            for: LocalPhotoLibrary.assetID(for: photo.id),
-            allowsNetworkFallback: mayReadFromICloud)
+        guard let file = await readOriginalFile(LocalPhotoLibrary.assetID(for: photo.id), mayReadFromICloud)
         else {
             guard isCurrentPreparation(photo.id, claim: claim) else { return }
             // Berkas iCloud yang sedang menunggu Wi‑Fi bukan kegagalan. Ia

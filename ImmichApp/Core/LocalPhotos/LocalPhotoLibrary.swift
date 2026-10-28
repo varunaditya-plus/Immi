@@ -148,6 +148,7 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
     /// album hanya bisa dibaca dari arah album ke aset — menanyakannya per foto
     /// belakangan berarti mengulang seluruh enumerasi sekali lagi.
     private(set) var albumTitles: [String: String] = [:]
+    private var albumTitlesRevision: Int?
 
     /// Dipasang layanan backup. PhotoKit tidak membangunkan aplikasi yang sudah
     /// disuspend, tetapi perubahan yang datang saat aktif atau ketika iOS
@@ -168,6 +169,7 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
             invalidateScan()
             photos = []
             albumTitles = [:]
+            albumTitlesRevision = nil
         }
     }
 
@@ -472,6 +474,33 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
         return result.photos
     }
 
+    func sourceAlbumTitle(for localID: String) async throws -> String? {
+        let albumIDs = selectedAlbumIDs
+        let requestID = scanID
+        let context = try await readContext()
+        guard requestID == scanID, albumIDs == selectedAlbumIDs else {
+            throw LocalPhotoLibraryError.libraryChanged
+        }
+        guard !albumIDs.isEmpty else {
+            try validateRead(context)
+            return nil
+        }
+        let identifier = Self.localIdentifier(from: localID)
+        if albumTitlesRevision == revision {
+            try validateRead(context)
+            return albumTitles[identifier]
+        }
+
+        let result = await reader.photosInAlbums(albumIDs)
+        try validateRead(context)
+        guard requestID == scanID, albumIDs == selectedAlbumIDs else {
+            throw LocalPhotoLibraryError.libraryChanged
+        }
+        albumTitles = result.albumTitles
+        albumTitlesRevision = revision
+        return albumTitles[identifier]
+    }
+
     // MARK: - Id
 
     nonisolated static func isLocal(_ id: String) -> Bool {
@@ -520,6 +549,7 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
         guard !albumIDs.isEmpty else {
             photos = []
             albumTitles = [:]
+            albumTitlesRevision = revision
             return
         }
         let result = await reader.photosInAlbums(albumIDs)
@@ -527,6 +557,7 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
               requestID == scanID, albumIDs == selectedAlbumIDs else { return }
         photos = result.photos
         albumTitles = result.albumTitles
+        albumTitlesRevision = revision
     }
 
     @discardableResult
