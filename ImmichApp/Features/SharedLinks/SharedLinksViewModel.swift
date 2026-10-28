@@ -8,18 +8,36 @@ final class SharedLinksViewModel {
     var phase: LoadingPhase<Void> = .idle
 
     private let repo: SharedLinkRepository
+    private let snapshotGeneration = LocalSnapshot.generation
+    private var loadID = UUID()
+    private var phaseBeforeLoad: LoadingPhase<Void> = .idle
+    private var updateIDs: [String: UUID] = [:]
 
     init(repo: SharedLinkRepository) {
         self.repo = repo
     }
 
     func load() async {
+        guard canPublish else { return }
+        let requestID = UUID()
+        loadID = requestID
+        if !phase.isLoading { phaseBeforeLoad = phase }
         phase = .loading
         do {
-            links = try await fetch()
+            let fetched = try await fetch()
+            guard isCurrentLoad(requestID) else { return }
+            try Task.checkCancellation()
+            links = fetched
             phase = .loaded(())
+            phaseBeforeLoad = phase
         } catch {
+            guard isCurrentLoad(requestID) else { return }
+            guard !Task.isCancelled, !(error is CancellationError) else {
+                phase = phaseBeforeLoad
+                return
+            }
             phase = .failed(message(for: error, fallback: "Failed to load shared links"))
+            phaseBeforeLoad = phase
         }
     }
 
@@ -32,13 +50,40 @@ final class SharedLinksViewModel {
     ///
     /// - Returns: pesan kesalahan, atau nil kalau berhasil.
     func refresh() async -> String? {
+        guard canPublish else { return nil }
+        let requestID = UUID()
+        loadID = requestID
+        if phase.isLoading { phase = phaseBeforeLoad }
         do {
-            links = try await fetch()
+            let fetched = try await fetch()
+            guard isCurrentLoad(requestID) else { return nil }
+            try Task.checkCancellation()
+            links = fetched
             phase = .loaded(())
+            phaseBeforeLoad = phase
             return nil
         } catch {
+            guard isCurrentLoad(requestID), !Task.isCancelled, !(error is CancellationError) else { return nil }
             return message(for: error, fallback: "Failed to load shared links")
         }
+    }
+
+    private var canPublish: Bool {
+        !Task.isCancelled && snapshotGeneration == LocalSnapshot.generation
+    }
+
+    private func isCurrentLoad(_ id: UUID) -> Bool {
+        snapshotGeneration == LocalSnapshot.generation && loadID == id
+    }
+
+    private func invalidateLoads() {
+        loadID = UUID()
+        phase = .loaded(())
+        phaseBeforeLoad = phase
+    }
+
+    private func finishUpdate(_ id: String, requestID: UUID) {
+        if updateIDs[id] == requestID { updateIDs[id] = nil }
     }
 
     func retry() async {
@@ -47,8 +92,14 @@ final class SharedLinksViewModel {
 
     /// - Returns: pesan kesalahan, atau nil kalau berhasil.
     func update(_ id: String, edit: SharedLinkEditDTO) async -> String? {
+        guard canPublish else { return nil }
+        let requestID = UUID()
+        updateIDs[id] = requestID
+        defer { finishUpdate(id, requestID: requestID) }
         do {
             let updated = try await repo.update(id, edit: edit)
+            guard canPublish, updateIDs[id] == requestID else { return nil }
+            invalidateLoads()
             guard let index = links.firstIndex(where: { $0.id == id }) else { return nil }
 
             // Ditambal DI TEMPAT, bukan memuat ulang seluruh daftar: hasil PATCH
@@ -65,17 +116,23 @@ final class SharedLinksViewModel {
             links[index] = merged
             return nil
         } catch {
+            guard canPublish, updateIDs[id] == requestID else { return nil }
             return message(for: error, fallback: "Failed to update link")
         }
     }
 
     /// - Returns: pesan kesalahan, atau nil kalau berhasil.
     func delete(_ id: String) async -> String? {
+        guard canPublish else { return nil }
         do {
             try await repo.delete(id)
+            guard canPublish else { return nil }
+            invalidateLoads()
+            updateIDs[id] = nil
             links.removeAll { $0.id == id }
             return nil
         } catch {
+            guard canPublish else { return nil }
             return message(for: error, fallback: "Failed to delete link")
         }
     }
