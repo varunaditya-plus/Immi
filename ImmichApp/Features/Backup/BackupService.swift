@@ -145,6 +145,7 @@ final class BackupService {
     private weak var session: SessionManager?
     private let dataManager: SwiftDataManager
     private let queue: BackupQueueStore
+    private let makeAlbumRepository: @MainActor (APIClient) -> AlbumRepository
     private let automaticDiscovery: AutomaticBackupDiscovery
     private let uploadRequests: BackupUploadRequests
     private var task: Task<Void, Never>?
@@ -168,6 +169,12 @@ final class BackupService {
     /// untuk setiap foto. Dikosongkan tiap putaran karena album bisa dibuat atau
     /// dihapus dari tempat lain di antara dua putaran.
     private var albumIDsByName: [String: String] = [:]
+    private struct AlbumLookup {
+        let id: UUID
+        let task: Task<String?, Never>
+    }
+    private var albumLookupOwnership: BackupUploadOwnership?
+    private var albumLookups: [String: AlbumLookup] = [:]
     /// Foto yang sudah diserahkan ke sistem tapi hasilnya belum kembali.
     ///
     /// Hanya di memori, dan itu memang cukup: satu-satunya gunanya adalah
@@ -190,9 +197,14 @@ final class BackupService {
     /// berhenti membawa token lama sampai pengguna masuk kembali.
     private var hasAuthenticatedSession = true
 
-    init(dataManager: SwiftDataManager, queue: BackupQueueStore) {
+    init(
+        dataManager: SwiftDataManager,
+        queue: BackupQueueStore,
+        makeAlbumRepository: @escaping @MainActor (APIClient) -> AlbumRepository = { AlbumRepository(api: $0) }
+    ) {
         self.dataManager = dataManager
         self.queue = queue
+        self.makeAlbumRepository = makeAlbumRepository
         automaticDiscovery = AutomaticBackupDiscovery(queue: queue, batchSize: BackupService.automaticBatchSize)
         uploadRequests = BackupUploadRequests(queue: queue)
         isEnabled = UserDefaults.standard.bool(forKey: Self.enabledKey)
@@ -277,7 +289,7 @@ final class BackupService {
         self.session = session
         let api = APIClient(session: session)
         repo = BackupRepository(api: api)
-        albumRepo = AlbumRepository(api: api)
+        albumRepo = makeAlbumRepository(api)
         acceptsUploadResults = dataManager.isPersistentStoreAvailable
         hasAuthenticatedSession = true
         do {
@@ -293,6 +305,7 @@ final class BackupService {
             lastError = error.localizedDescription
             acceptsUploadResults = false
         }
+        resetAlbumResolution(for: uploadOwnership)
     }
 
     /// Dipanggil sejak launch, termasuk cold launch yang hanya terjadi karena
@@ -708,7 +721,7 @@ final class BackupService {
         repo = nil
         albumRepo = nil
         session = nil
-        albumIDsByName.removeAll()
+        resetAlbumResolution(for: nil)
         total = 0
         backedUp = 0
         uploadedThisRun = 0
@@ -743,6 +756,7 @@ final class BackupService {
         hasAuthenticatedSession = false
         repo = nil
         albumRepo = nil
+        resetAlbumResolution(for: nil)
         task?.cancel()
         task = nil
         workID = nil
@@ -1728,22 +1742,54 @@ final class BackupService {
         _ = try? await albumRepo?.addAssets([assetID], to: albumID)
     }
 
-    /// Id album server dengan nama ini, dibuatkan kalau belum ada.
-    private func albumID(named name: String, ownership: BackupUploadOwnership) async -> String? {
+    /// Resolve a name once while concurrent upload completions await the same
+    /// lookup and creation. A failed lookup never establishes that it is absent.
+    func albumID(named name: String, ownership: BackupUploadOwnership) async -> String? {
         guard !Task.isCancelled, uploadOwnership == ownership else { return nil }
+        resetAlbumResolution(for: ownership)
         if let cached = albumIDsByName[name] { return cached }
-        guard let albumRepo else { return nil }
-
-        if let existing = try? await albumRepo.all().first(where: { $0.albumName == name }) {
-            guard !Task.isCancelled, uploadOwnership == ownership else { return nil }
-            albumIDsByName[name] = existing.id
-            return existing.id
+        if let lookup = albumLookups[name] {
+            let result = await lookup.task.value
+            return !Task.isCancelled && uploadOwnership == ownership ? result : nil
         }
-        guard !Task.isCancelled, uploadOwnership == ownership,
-              let created = try? await albumRepo.create(name: name),
-              uploadOwnership == ownership else { return nil }
-        albumIDsByName[name] = created.id
-        return created.id
+        guard let albumRepo else { return nil }
+        let lookupID = UUID()
+        let worker = Task { @MainActor [weak self] () -> String? in
+            guard let self, self.isCurrentAlbumLookup(name, id: lookupID, ownership: ownership) else { return nil }
+            do {
+                let albums = try await albumRepo.all()
+                guard self.isCurrentAlbumLookup(name, id: lookupID, ownership: ownership) else { return nil }
+                let albumID: String
+                if let existing = albums.first(where: { $0.albumName == name }) {
+                    albumID = existing.id
+                } else {
+                    let created = try await albumRepo.create(name: name)
+                    guard self.isCurrentAlbumLookup(name, id: lookupID, ownership: ownership) else { return nil }
+                    albumID = created.id
+                }
+                self.albumIDsByName[name] = albumID
+                return albumID
+            } catch {
+                return nil
+            }
+        }
+        albumLookups[name] = AlbumLookup(id: lookupID, task: worker)
+        let result = await worker.value
+        if albumLookups[name]?.id == lookupID { albumLookups[name] = nil }
+        return !Task.isCancelled && uploadOwnership == ownership ? result : nil
+    }
+
+    private func isCurrentAlbumLookup(_ name: String, id: UUID, ownership: BackupUploadOwnership) -> Bool {
+        !Task.isCancelled && uploadOwnership == ownership && albumLookupOwnership == ownership
+            && albumLookups[name]?.id == id
+    }
+
+    private func resetAlbumResolution(for ownership: BackupUploadOwnership?) {
+        guard albumLookupOwnership != ownership else { return }
+        for lookup in albumLookups.values { lookup.task.cancel() }
+        albumLookups.removeAll()
+        albumIDsByName.removeAll()
+        albumLookupOwnership = ownership
     }
 
     /// "Organize into Albums": menyusun ulang aset yang SUDAH ada di server ke
