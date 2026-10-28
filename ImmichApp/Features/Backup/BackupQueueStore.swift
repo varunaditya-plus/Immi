@@ -74,6 +74,14 @@ struct BackupUploadOwnership: Codable, Equatable, Sendable {
     let generation: UUID
 }
 
+struct BackupAlbumPlacement: Codable, Equatable, Identifiable, Sendable {
+    let localIdentifier: String
+    let assetID: String
+    let albumName: String
+
+    var id: String { localIdentifier }
+}
+
 struct BackupActiveTask: Equatable, Sendable {
     let taskIdentifier: Int
     let context: BackupUploadTaskContext
@@ -196,6 +204,8 @@ final class BackupQueueStore {
         var generation: UUID?
         var completed = 0
         var items: [BackupQueueItem] = []
+        // Optional keeps older ledgers decodable without losing queued work.
+        var pendingAlbumPlacements: [BackupAlbumPlacement]?
         // Optional keeps queues written by older app versions decodable. An
         // absent value is treated as already consumed so an old completion is
         // not replayed immediately after upgrading.
@@ -249,6 +259,7 @@ final class BackupQueueStore {
         return BackupUploadOwnership(owner: owner, generation: generation)
     }
     var items: [BackupQueueItem] { ledger.items }
+    var pendingAlbumPlacements: [BackupAlbumPlacement] { ledger.pendingAlbumPlacements ?? [] }
     var failedIDs: [String] {
         ledger.items.filter { $0.state == .failed }.map(\.id)
     }
@@ -261,14 +272,15 @@ final class BackupQueueStore {
     @discardableResult
     func bind(to owner: BackupQueueOwner) throws -> Bool {
         guard ledger.owner != owner || ledger.generation == nil else { return false }
-        if ledger.owner == owner || (ledger.owner == nil && ledger.items.isEmpty && ledger.completed == 0) {
+        if ledger.owner == owner || (ledger.owner == nil && ledger.items.isEmpty && ledger.completed == 0
+            && pendingAlbumPlacements.isEmpty) {
             var proposed = ledger
             proposed.owner = owner
             proposed.generation = UUID()
             try persist(proposed)
             return false
         }
-        let replacedExistingOwner = ledger.owner != nil || !ledger.items.isEmpty
+        let replacedExistingOwner = ledger.owner != nil || !ledger.items.isEmpty || !pendingAlbumPlacements.isEmpty
         try persist(Ledger(owner: owner, generation: UUID()))
         return replacedExistingOwner
     }
@@ -470,13 +482,47 @@ final class BackupQueueStore {
         try persist(proposed)
     }
 
-    func markCompleted(_ id: String) throws {
-        guard let index = ledger.items.firstIndex(where: { $0.id == id }) else { return }
+    func markCompleted(_ id: String, albumPlacement: BackupAlbumPlacement? = nil) throws {
+        if let albumPlacement, albumPlacement.localIdentifier != id {
+            throw BackupQueueStoreError.invalidTransition
+        }
         var proposed = ledger
-        proposed.items.remove(at: index)
-        proposed.completed += 1
-        proposed.completionNotificationPending = true
+        var changed = false
+        if let index = proposed.items.firstIndex(where: { $0.id == id }) {
+            proposed.items.remove(at: index)
+            proposed.completed += 1
+            proposed.completionNotificationPending = true
+            changed = true
+        }
+        if let albumPlacement, Self.storeAlbumPlacement(albumPlacement, in: &proposed) { changed = true }
+        guard changed else { return }
         try persist(proposed)
+    }
+
+    func recordAlbumPlacement(_ placement: BackupAlbumPlacement) throws {
+        var proposed = ledger
+        guard Self.storeAlbumPlacement(placement, in: &proposed) else { return }
+        try persist(proposed)
+    }
+
+    func completeAlbumPlacement(_ placement: BackupAlbumPlacement) throws {
+        guard pendingAlbumPlacements.contains(placement) else { return }
+        var proposed = ledger
+        let remaining = pendingAlbumPlacements.filter { $0 != placement }
+        proposed.pendingAlbumPlacements = remaining.isEmpty ? nil : remaining
+        try persist(proposed)
+    }
+
+    private static func storeAlbumPlacement(_ placement: BackupAlbumPlacement, in ledger: inout Ledger) -> Bool {
+        var pending = ledger.pendingAlbumPlacements ?? []
+        if let index = pending.firstIndex(where: { $0.localIdentifier == placement.localIdentifier }) {
+            guard pending[index] != placement else { return false }
+            pending[index] = placement
+        } else {
+            pending.append(placement)
+        }
+        ledger.pendingAlbumPlacements = pending
+        return true
     }
 
     /// Atomically records that the terminal result for the current batch has
