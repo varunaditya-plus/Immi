@@ -40,12 +40,12 @@ final class BackupAlbumResolutionTests: XCTestCase {
         extraLookup.isInverted = true
         extraCreation.isInverted = true
         fixture.driver.list = { [weak driver = fixture.driver] in
-            if (driver?.lookups ?? 0) > 1 { extraLookup.fulfill() }
+            if driver?.lookups == 2 { extraLookup.fulfill() }
             return try await lookup.value()
         }
         fixture.driver.create = { [weak driver = fixture.driver] name in
             XCTAssertEqual(name, "Camera")
-            if (driver?.createdNames.count ?? 0) > 1 { extraCreation.fulfill() }
+            if driver?.createdNames.count == 2 { extraCreation.fulfill() }
             return try await creation.value()
         }
         let first = Task { await fixture.service.albumID(named: "Camera", ownership: ownership) }
@@ -174,7 +174,7 @@ final class BackupAlbumResolutionTests: XCTestCase {
             let extraLookup = expectation(description: "Old cleanup cannot remove the new owner's active lookup")
             extraLookup.isInverted = true
             currentDriver.list = { [weak currentDriver] in
-                if (currentDriver?.lookups ?? 0) > 1 { extraLookup.fulfill() }
+                if currentDriver?.lookups == 2 { extraLookup.fulfill() }
                 return try await currentLookup.value()
             }
             currentDriver.create = { name in resolutionAlbum("current-owner-album", name: name) }
