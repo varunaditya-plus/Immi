@@ -345,7 +345,7 @@ final class BackupStatusReportingTests: XCTestCase {
     func testNativeWaitingUploadsUseTheActualCellularPolicyForTheSuppliedNetwork() throws {
         let automatic = try fixture(queueState: .queued, queueIntent: nil)
         XCTAssertEqual(automatic.status, .waiting)
-        XCTAssertFalse(automatic.service.allowsCellularUploads)
+        XCTAssertEqual(automatic.service.cellularUploadStatus, .blocked)
         let cheap = automatic.status.explanation(backup: automatic.service,
             backgroundRefreshAvailable: true, isOnline: true, isExpensive: false).lowercased()
         let expensive = automatic.status.explanation(backup: automatic.service,
@@ -357,7 +357,7 @@ final class BackupStatusReportingTests: XCTestCase {
 
         let manual = try fixture(queueState: .queued)
         XCTAssertEqual(manual.status, .waiting)
-        XCTAssertTrue(manual.service.allowsCellularUploads)
+        XCTAssertEqual(manual.service.cellularUploadStatus, .allowed)
         let manualExpensive = manual.status.explanation(backup: manual.service,
             backgroundRefreshAvailable: true, isOnline: true, isExpensive: true).lowercased()
         XCTAssertTrue(manualExpensive.contains("ready"))
@@ -398,7 +398,7 @@ final class BackupStatusReportingTests: XCTestCase {
             XCTAssertEqual(fixture.service.selectionStatus, .remaining)
             XCTAssertEqual(fixture.service.remainder, 1)
             XCTAssertEqual(fixture.status, .waiting)
-            XCTAssertEqual(fixture.service.allowsCellularUploads, allowVideos,
+            XCTAssertEqual(fixture.service.cellularUploadStatus, allowVideos ? .allowed : .blocked,
                 "The photo preference cannot authorize the remaining video")
             XCTAssertEqual(message.contains("wi-fi"), !allowVideos)
             XCTAssertEqual(message.contains("ready"), allowVideos)
@@ -418,11 +418,68 @@ final class BackupStatusReportingTests: XCTestCase {
             XCTAssertEqual(fixture.service.selectionStatus, .remaining)
             XCTAssertEqual(fixture.service.remainder, 1)
             XCTAssertEqual(fixture.status, .waiting)
-            XCTAssertEqual(fixture.service.allowsCellularUploads, allowPhotos,
+            XCTAssertEqual(fixture.service.cellularUploadStatus, allowPhotos ? .allowed : .blocked,
                 "The video preference cannot authorize the remaining photo")
             XCTAssertEqual(message.contains("wi-fi"), !allowPhotos)
             XCTAssertEqual(message.contains("ready"), allowPhotos)
         }
+    }
+
+    func testAutomaticQueueOutsideTheSelectionHasUnknownCellularRequirements() async throws {
+        for state in [BackupQueueItemState.queued, .waitingForNetwork] {
+            for allowPhotos in [false, true] {
+                let fixture = try fixture(photos: ["mapped"], cellularPhotos: allowPhotos,
+                    cellularVideos: !allowPhotos, queueState: state, queueIntent: nil)
+                try fixture.map("mapped")
+                await fixture.library.load()
+                fixture.service.refreshCounts()
+
+                let message = fixture.status.explanation(backup: fixture.service,
+                    backgroundRefreshAvailable: true, isOnline: true, isExpensive: true).lowercased()
+
+                XCTAssertEqual(fixture.service.selectionStatus, .backedUp)
+                XCTAssertEqual(fixture.service.cellularUploadStatus, .unknown)
+                XCTAssertEqual(fixture.status, .waiting)
+                XCTAssertTrue(message.contains("check"))
+                XCTAssertTrue(message.contains("cellular"))
+                XCTAssertFalse(message.contains("ready"))
+                XCTAssertFalse(message.contains("wi-fi"), "Unknown media does not prove cellular access is blocked")
+            }
+        }
+    }
+
+    func testKnownQueuedMediaUsesItsOwnTypeEvenWhenTheSelectionIsAlreadyMapped() async throws {
+        for (isVideo, photosAllowed, videosAllowed, expected) in [
+            (true, true, false, BackupCellularStatus.blocked),
+            (true, false, true, .allowed),
+            (false, false, true, .blocked),
+            (false, true, false, .allowed),
+        ] {
+            let fixture = try fixture(photos: ["mapped", "manual-photo"],
+                videoIDs: isVideo ? ["manual-photo"] : [],
+                cellularPhotos: photosAllowed, cellularVideos: videosAllowed,
+                queueState: .queued, queueIntent: nil)
+            try fixture.map("mapped")
+            try fixture.map("manual-photo")
+            await fixture.library.load()
+            fixture.service.refreshCounts()
+
+            XCTAssertEqual(fixture.service.selectionStatus, .backedUp)
+            XCTAssertEqual(fixture.service.cellularUploadStatus, expected)
+            let message = fixture.status.explanation(backup: fixture.service,
+                backgroundRefreshAvailable: true, isOnline: true, isExpensive: true).lowercased()
+            XCTAssertEqual(message.contains("wi-fi"), expected == .blocked)
+            XCTAssertEqual(message.contains("ready"), expected == .allowed)
+        }
+    }
+
+    func testUnknownQueuedMediaRespectsManualOverridesAndTheCombinedCellularPolicy() throws {
+        let manual = try fixture(queueState: .queued)
+        XCTAssertEqual(manual.service.cellularUploadStatus, .allowed)
+        let both = try fixture(cellularPhotos: true, cellularVideos: true, queueState: .queued, queueIntent: nil)
+        XCTAssertEqual(both.service.cellularUploadStatus, .allowed)
+        let neither = try fixture(queueState: .queued, queueIntent: nil)
+        XCTAssertEqual(neither.service.cellularUploadStatus, .blocked)
     }
 
     func testRequeuedNetworkWaitDoesNotTurnItsRetainedMessageIntoAStandaloneError() throws {

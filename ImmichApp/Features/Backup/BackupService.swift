@@ -130,17 +130,20 @@ final class BackupService {
     private var countedMappingRevision: UUID?
     private var hasRemainingPhotos = false
     private var hasRemainingVideos = false
+    private var countedMediaTypes: [String: Bool] = [:]
     private var lastQueueError: String?
 
     var hasLimitedPhotosAccess: Bool { localLibrary.authorizationStatus == .limited }
 
+    private var hasCurrentCounts: Bool {
+        guard dataManager.isPersistentStoreAvailable, let scan = localLibrary.currentSelectionScanID else { return false }
+        return countedSelectionScanID == scan && countedMappingRevision == dataManager.backupMappingRevision
+    }
+
     var selectionStatus: BackupSelectionStatus {
         guard !localLibrary.selectedAlbumIDs.isEmpty else { return .noSelection }
         guard localLibrary.isAuthorized else { return .accessRequired }
-        guard dataManager.isPersistentStoreAvailable,
-              let scan = localLibrary.currentSelectionScanID,
-              countedSelectionScanID == scan,
-              countedMappingRevision == dataManager.backupMappingRevision else { return .unchecked }
+        guard hasCurrentCounts else { return .unchecked }
         guard total > 0 else { return .empty }
         return remainder > 0 ? .remaining : .backedUp
     }
@@ -502,13 +505,16 @@ final class BackupService {
         total = photos.count
         var remainingPhotos = false
         var remainingVideos = false
+        var mediaTypes: [String: Bool] = [:]
         backedUp = photos.reduce(into: 0) { count, photo in
+            mediaTypes[photo.id] = photo.isVideo
             if uploaded.contains(photo.id) { count += 1 }
             else if photo.isVideo { remainingVideos = true }
             else { remainingPhotos = true }
         }
         hasRemainingPhotos = remainingPhotos
         hasRemainingVideos = remainingVideos
+        countedMediaTypes = mediaTypes
         countedSelectionScanID = localLibrary.currentSelectionScanID
         countedMappingRevision = dataManager.backupMappingRevision
     }
@@ -792,6 +798,7 @@ final class BackupService {
         countedMappingRevision = nil
         hasRemainingPhotos = false
         hasRemainingVideos = false
+        countedMediaTypes = [:]
         uploadedThisRun = 0
         pendingThisRun = 0
         failures = []
@@ -955,14 +962,21 @@ final class BackupService {
 
     private var canDiscoverAutomaticallyNow: Bool { networkPolicy.allowsAutomaticDiscovery }
 
-    var allowsCellularUploads: Bool {
-        if queue.items.contains(where: {
-            $0.allowsCellularOverride && $0.state != .failed && $0.state != .cancelling
-        }) { return true }
-        if selectionStatus == .remaining {
-            return (hasRemainingPhotos && cellularPhotos) || (hasRemainingVideos && cellularVideos)
+    var cellularUploadStatus: BackupCellularStatus {
+        let pending = queue.items.filter { $0.state != .failed && $0.state != .cancelling }
+        if pending.contains(where: \.allowsCellularOverride) || (cellularPhotos && cellularVideos) { return .allowed }
+        if !cellularPhotos && !cellularVideos { return .blocked }
+        guard hasCurrentCounts else { return .unknown }
+        if (hasRemainingPhotos && cellularPhotos) || (hasRemainingVideos && cellularVideos) { return .allowed }
+        var hasUnknownMedia = false
+        for item in pending {
+            guard let isVideo = countedMediaTypes[item.id] else {
+                hasUnknownMedia = true
+                continue
+            }
+            if isVideo ? cellularVideos : cellularPhotos { return .allowed }
         }
-        return cellularPhotos || cellularVideos
+        return hasUnknownMedia ? .unknown : .blocked
     }
 
     /// Prepare only a small window of originals. The rest of the queue remains

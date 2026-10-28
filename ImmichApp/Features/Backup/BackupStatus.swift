@@ -9,6 +9,12 @@ enum BackupSelectionStatus: Equatable {
     case backedUp
 }
 
+enum BackupCellularStatus: Equatable {
+    case allowed
+    case blocked
+    case unknown
+}
+
 enum BackupStatus: Equatable {
     case off
     case needsSelection
@@ -134,8 +140,15 @@ enum BackupStatus: Equatable {
         if !hasNativeUploads {
             return String(localized: "Shared uploads are waiting to finish.")
         }
-        if isExpensive && !backup.allowsCellularUploads {
-            return String(localized: "Waiting for Wi-Fi. Allow cellular data in Backup Options to continue now.")
+        if isExpensive {
+            switch backup.cellularUploadStatus {
+            case .blocked:
+                return String(localized: "Waiting for Wi-Fi. Allow cellular data in Backup Options to continue now.")
+            case .unknown:
+                return String(localized: "Waiting to check whether queued uploads can use cellular data.")
+            case .allowed:
+                break
+            }
         }
         if backup.waitingForNetwork > 0 {
             return String(localized: "Waiting for a network connection.")
