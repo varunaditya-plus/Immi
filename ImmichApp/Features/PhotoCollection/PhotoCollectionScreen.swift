@@ -398,7 +398,8 @@ struct PhotoCollectionScreen<Options: View>: View {
             heroHeight: layout == .hero ? 420 : 0,
             // Petak "+" disembunyikan selama memilih: ia bukan foto, jadi tidak
             // punya arti dalam seleksi dan hanya mengacaukan barisnya.
-            showsAddTile: onAddPhotos != nil && !isSelecting,
+            showsAddTile: onAddPhotos != nil && !isSelecting
+                && (!visibleAssets.isEmpty || phase.value != nil),
             extendsUnderTopBar: layout == .hero)
     }
 

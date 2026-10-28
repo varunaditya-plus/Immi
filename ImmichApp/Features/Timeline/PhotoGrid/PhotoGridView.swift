@@ -257,6 +257,7 @@ final class PhotoGridController: UIViewController {
     private enum SectionID: Hashable {
         case hero
         case month(String)
+        case add
     }
 
     private let loader: PhotoThumbnailLoader
@@ -510,13 +511,8 @@ final class PhotoGridController: UIViewController {
 
     // MARK: - Tata letak
 
-    /// Layout dibangun dari SALINAN konfigurasi, bukan dari `self`.
-    ///
-    /// `sectionProvider` dipanggil oleh UIKit kapan saja ia perlu mengukur
-    /// ulang, dan closure-nya ditahan oleh layout selama layout itu hidup.
-    /// Menangkap controller di dalamnya berarti satu lagi jalur kepemilikan yang
-    /// harus dijaga; menangkap nilai konfigurasinya cukup, karena setiap
-    /// perubahan konfigurasi memang sudah menyusun layout baru.
+    /// The layout owns its configuration. A weak controller reference only
+    /// identifies the add-only section, which has no month header.
     private func makeLayout() -> UICollectionViewCompositionalLayout {
         appliedConfiguration = configuration
         let config = configuration
@@ -527,10 +523,15 @@ final class PhotoGridController: UIViewController {
         let store = justifiedStore
 
         return UICollectionViewCompositionalLayout(
-            sectionProvider: { index, environment in
+            sectionProvider: { [weak self] index, environment in
                 // Sampul selalu section pertama kalau ada — lihat `apply`.
                 if config.heroHeight > 0 && index == 0 {
                     return heroLayoutSection(config)
+                }
+                if self?.dataSource?.sectionIdentifier(for: index) == .add {
+                    var addConfiguration = config
+                    addConfiguration.showsSectionHeaders = false
+                    return photoLayoutSection(addConfiguration, environment)
                 }
                 switch config.layoutStyle {
                 case .square:
@@ -693,10 +694,10 @@ final class PhotoGridController: UIViewController {
             lastSectionID = id
         }
 
-        // Petak "+" menutup baris terakhir, bukan berdiri sendiri di baris baru —
-        // karena itu ia ikut ke section terakhir, bukan jadi section sendiri.
-        if configuration.showsAddTile, let lastSectionID {
-            snapshot.appendItems([addItemID], toSection: lastSectionID)
+        if configuration.showsAddTile {
+            let addSection = lastSectionID ?? .add
+            if lastSectionID == nil { snapshot.appendSections([addSection]) }
+            snapshot.appendItems([addItemID], toSection: addSection)
         }
 
         pending = PendingContent(
@@ -1900,6 +1901,10 @@ final class PhotoGridAddCell: UICollectionViewCell {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+
+        isAccessibilityElement = true
+        accessibilityLabel = String(localized: "Add Photos")
+        accessibilityTraits = .button
 
         let background = UIView()
         background.backgroundColor = .tertiarySystemFill
