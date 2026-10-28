@@ -25,6 +25,7 @@ import Foundation
 @MainActor
 enum LocalSnapshot {
     private(set) static var generation = UUID()
+    private static var invalidations: [String: UInt64] = [:]
     // MARK: - Kunci
 
     enum Key {
@@ -75,13 +76,20 @@ enum LocalSnapshot {
     /// Membuang satu potret — untuk hal yang memang sudah tidak ada lagi.
     static func remove(_ key: String, expectedGeneration: UUID? = nil) {
         if let expectedGeneration, expectedGeneration != generation { return }
+        invalidations[key, default: 0] &+= 1
         try? FileManager.default.removeItem(at: url(for: key))
+    }
+
+    /// Tracks invalidation across model instances. Ordinary saves keep readers valid.
+    static func invalidationRevision(for key: String) -> UInt64 {
+        invalidations[key, default: 0]
     }
 
     /// Dipanggil saat keluar akun: potret milik server lain bukan sekadar basi,
     /// ia menampilkan foto orang lain.
     static func clearAll() {
         generation = UUID()
+        invalidations.removeAll()
         try? FileManager.default.removeItem(at: directory)
     }
 
