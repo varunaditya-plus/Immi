@@ -58,9 +58,30 @@ final class CollectionEmptyPresentationTests: XCTestCase {
         XCTAssertFalse(text.contains("Retry"), text)
     }
 
+    func testSharedEmptyScopeExplainsSharingAndOffersAllAlbumsInsteadOfCreation() async throws {
+        let model = AlbumListViewModel(repo: AlbumRepository(api: makeStubAPIClient()))
+        model.albums = [.init(id: "personal", albumName: "Personal", description: nil, assetCount: 0,
+            albumThumbnailAssetId: nil, shared: false, createdAt: .distantPast, assets: nil)]
+        let view = AlbumsListView(viewModel: model)
+        try show(view.emptyState(model, scope: .shared))
+        let text = try await visibleText()
+        XCTAssertTrue(text.contains("No Shared Albums"), text)
+        XCTAssertTrue(text.contains("View All Albums"), text)
+        XCTAssertFalse(text.contains("Create Album"), text)
+        XCTAssertFalse(model.showCreateSheet)
+        XCTAssertEqual(model.albums.map(\.id), ["personal"])
+    }
 
-
-
+    func testUnfilteredEmptyAlbumsStillOfferCreation() async throws {
+        let model = AlbumListViewModel(repo: AlbumRepository(api: makeStubAPIClient()))
+        let view = AlbumsListView(viewModel: model)
+        try show(view.emptyState(model, scope: .all))
+        let text = try await visibleText()
+        XCTAssertTrue(text.contains("No Albums"), text)
+        XCTAssertTrue(text.contains("Create Album"), text)
+        XCTAssertFalse(text.contains("No Shared Albums"), text)
+        XCTAssertFalse(text.contains("View All Albums"), text)
+    }
 
     func testConfirmedSameIDMetadataUpdatesRenderedAlbumRowsAndCards() async throws {
         let model = AlbumListViewModel(repo: AlbumRepository(api: makeStubAPIClient()))

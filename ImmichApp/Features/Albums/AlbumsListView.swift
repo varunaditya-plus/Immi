@@ -225,7 +225,7 @@ struct AlbumsListView: View {
 
         if albums.isEmpty {
             if normalizedSearchText.isEmpty {
-                emptyState(vm)
+                emptyState(vm, scope: scope)
             } else {
                 ContentUnavailableView.search(text: normalizedSearchText)
             }
@@ -478,14 +478,26 @@ struct AlbumsListView: View {
 
     // MARK: - Keadaan kosong & gagal
 
-    private func emptyState(_ vm: AlbumListViewModel) -> some View {
-        ContentUnavailableView {
-            Label("No Albums", systemImage: "rectangle.stack")
-        } description: {
-            Text("Create an album to organize your photos.")
-        } actions: {
-            Button("Create Album") { vm.showCreateSheet = true }
-                .buttonStyle(.borderedProminent)
+    @ViewBuilder
+    func emptyState(_ vm: AlbumListViewModel, scope: Scope) -> some View {
+        if scope == .shared {
+            ContentUnavailableView {
+                Label("No Shared Albums", systemImage: "person.2")
+            } description: {
+                Text("Albums you share or that others share with you will appear here.")
+            } actions: {
+                Button("View All Albums") { self.scope = .all }
+                    .buttonStyle(.borderedProminent)
+            }
+        } else {
+            ContentUnavailableView {
+                Label("No Albums", systemImage: "rectangle.stack")
+            } description: {
+                Text("Create an album to organize your photos.")
+            } actions: {
+                Button("Create Album") { vm.showCreateSheet = true }
+                    .buttonStyle(.borderedProminent)
+            }
         }
     }
 
