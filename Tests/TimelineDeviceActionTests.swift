@@ -87,6 +87,67 @@ final class TimelineDeviceActionTests: XCTestCase {
         XCTAssertTrue(fixture.reopen().archivedAssetIDs.contains(fixture.mappedServerID))
     }
 
+    func testDeleteUsesANewServerMappingInsteadOfItsRetainedDeviceOnlyOrigin() async throws {
+        let fixture = try await fixture(aliases: 2, includeUnuploaded: true)
+        let retainedAsset = try XCTUnwrap(fixture.model.asset(for: fixture.unuploadedID))
+        XCTAssertEqual(retainedAsset.origin, .device)
+        let newServerID = fixture.mappedServerID
+        let localID = LocalPhotoLibrary.localIdentifier(from: retainedAsset.id)
+        try fixture.manager.upsertBackupRecord(assetID: newServerID, checksum: "uploaded", localIdentifier: localID)
+        fixture.respond(204)
+
+        let accepted = await fixture.model.delete(retainedAsset)
+
+        XCTAssertTrue(accepted)
+        XCTAssertEqual(MockURLProtocol.lastRequest?.httpMethod, "DELETE")
+        XCTAssertEqual(MockURLProtocol.lastRequest?.url?.path, "/api/assets")
+        XCTAssertEqual(try body()["ids"] as? [String], [newServerID])
+        XCTAssertEqual(try body()["force"] as? Bool, false)
+        XCTAssertNil(fixture.model.asset(for: retainedAsset.id))
+        XCTAssertEqual(fixture.model.allAssets.map(\.id), [fixture.serverID],
+            "A confirmed server deletion removes every current display alias")
+        XCTAssertEqual(fixture.manager.getBackupRecord(localIdentifier: localID)?.assetId, newServerID,
+            "Server trash must preserve the device-copy mapping")
+        XCTAssertTrue(DeletedServerAssetRegistry.shared.isTrashed(newServerID))
+        XCTAssertNil(fixture.model.actionError)
+    }
+
+    func testBulkDeleteUsesCurrentMappingsForRetainedDeviceTilesAndDeduplicatesAliases() async throws {
+        let fixture = try await fixture(aliases: 2, includeUnuploaded: true)
+        let retainedAsset = try XCTUnwrap(fixture.model.asset(for: fixture.unuploadedID))
+        XCTAssertEqual(retainedAsset.origin, .device)
+        let localID = LocalPhotoLibrary.localIdentifier(from: retainedAsset.id)
+        try fixture.manager.upsertBackupRecord(assetID: fixture.mappedServerID,
+            checksum: "uploaded", localIdentifier: localID)
+        let selectedIDs = [retainedAsset.id] + fixture.mappedIDs + [fixture.serverID]
+        var requests = 0
+        MockURLProtocol.responseProvider = { request in
+            requests += 1
+            XCTAssertEqual(request.httpMethod, "DELETE")
+            XCTAssertEqual(request.url?.path, "/api/assets")
+            XCTAssertEqual(Set(Self.body(request)["ids"] as? [String] ?? []),
+                [fixture.mappedServerID, fixture.serverID])
+            XCTAssertEqual((Self.body(request)["ids"] as? [String])?.count, 2,
+                "Display aliases share one server deletion")
+            XCTAssertEqual(Self.body(request)["force"] as? Bool, false)
+            return Self.response(request, status: 204)
+        }
+
+        let accepted = await fixture.model.deleteSelected(selectedIDs)
+
+        XCTAssertTrue(accepted)
+        XCTAssertEqual(requests, 1)
+        XCTAssertTrue(fixture.model.allAssets.isEmpty)
+        XCTAssertEqual(fixture.manager.getBackupRecord(localIdentifier: localID)?.assetId, fixture.mappedServerID)
+        for displayID in fixture.mappedIDs {
+            XCTAssertEqual(fixture.manager.getBackupRecord(
+                localIdentifier: LocalPhotoLibrary.localIdentifier(from: displayID))?.assetId, fixture.mappedServerID)
+        }
+        XCTAssertTrue(DeletedServerAssetRegistry.shared.isTrashed(fixture.mappedServerID))
+        XCTAssertTrue(DeletedServerAssetRegistry.shared.isTrashed(fixture.serverID))
+        XCTAssertNil(fixture.model.actionError)
+    }
+
     func testMixedSelectionDeduplicatesMappedServerIDsForFavoriteAndAlbumRequests() async throws {
         let fixture = try await fixture(aliases: 2)
         let ids = fixture.mappedIDs + [fixture.serverID]

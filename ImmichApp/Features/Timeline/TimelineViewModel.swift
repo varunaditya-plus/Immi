@@ -689,9 +689,10 @@ final class TimelineViewModel {
     func delete(_ asset: AssetLite) async -> Bool {
         guard canMutate else { return false }
         actionError = nil
+        let serverTarget = serverDeleteTargets(for: [asset]).first
         // Foto yang belum ada di server bukan kegagalan API: tempatnya memang
         // hanya di PhotoKit, jadi penghapusannya harus lewat Photos.
-        if asset.origin == .device {
+        if asset.origin == .device, serverTarget == nil {
             guard await LocalPhotoLibrary.shared.delete([asset.id]) else { return false }
             guard accountGeneration == LocalSnapshot.generation else { return false }
             removeAsset(asset.id)
@@ -699,7 +700,7 @@ final class TimelineViewModel {
         }
 
         guard let assetRepo,
-              let target = serverDeleteTargets(for: [asset]).first
+              let target = serverTarget
         else {
             actionError = String(localized: "Failed to find this photo on the server")
             return false
@@ -710,7 +711,7 @@ final class TimelineViewModel {
             // `device:…`. Endpoint DELETE /assets hanya menerima UUID server.
             try await assetRepo.delete(target.serverID)
             guard accountGeneration == LocalSnapshot.generation else { return false }
-            removeAsset(target.displayID)
+            removeServerAsset(target.serverID)
             return true
         } catch {
             actionError = Self.describe(error)
@@ -800,9 +801,9 @@ final class TimelineViewModel {
         // - both dengan petak lokal: id tampilannya `device:…`, tetapi request
         //   harus memakai pasangan UUID server;
         // - device: belum ada di server dan harus dihapus lewat PhotoKit.
-        let localOnly = selected.filter { $0.origin == .device }
-        let serverTargets = serverDeleteTargets(
-            for: selected.filter { $0.origin != .device })
+        let serverTargets = serverDeleteTargets(for: selected)
+        let mappedDisplayIDs = Set(serverTargets.map(\.displayID))
+        let localOnly = selected.filter { $0.origin == .device && !mappedDisplayIDs.contains($0.id) }
         let unresolvedServerCount = selected.count - localOnly.count - serverTargets.count
 
         var removedDisplayIDs = Set<String>()
