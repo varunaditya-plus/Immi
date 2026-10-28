@@ -69,6 +69,7 @@ struct AssetDetailView: View {
     /// Posisi scroll daftar di dalam panel, dipakai recognizer untuk memutuskan
     /// kapan harus mengalah ke daftar.
     @State private var panelScrollOffset: CGFloat = 0
+    @State private var viewportSize: CGSize = .zero
     /// Kotak card terakhir saat chrome masih utuh. Navigation bar menghilang
     /// ketika panel dibuka; memakai GeometryReader live pada saat itu mengubah
     /// titik awal interpolasi di tengah gesture dan membuat foto tersentak.
@@ -173,6 +174,14 @@ struct AssetDetailView: View {
             } else {
                 Color(.systemBackground)
             }
+        }
+        .background {
+            GeometryReader { _ in
+                Color.clear
+                    .onGeometryChange(for: CGSize.self) { $0.size } action: { updateViewport($0) }
+            }
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
         }
         .onChange(of: visibilityPolicy.state, initial: true) { _, _ in discardDisallowedPages() }
         .onChange(of: LocalPhotoLibrary.shared.revision, initial: true) { _, _ in
@@ -623,27 +632,22 @@ struct AssetDetailView: View {
 
     // MARK: - Detent panel
 
-    /// Dihitung sekali, bukan setiap kali dibaca.
-    ///
-    /// Nilainya mengalir ke `expandProgress`, yang dibaca oleh SETIAP halaman
-    /// pager pada setiap evaluasi body. Menelusuri daftar scene sebanyak itu —
-    /// hanya untuk tinggi layar yang tidak berubah — biaya yang tidak perlu ada.
-    private var screenHeight: CGFloat { Self.screenHeightValue }
+    private var panelLayout: AssetInfoPanelLayout {
+        AssetInfoPanelLayout(viewportHeight: viewportSize.height, contentHeight: panelContentHeight)
+    }
 
-    private static let screenHeightValue: CGFloat = {
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .first?
-            .screen.bounds.height ?? 800
-    }()
-
-    /// Tinggi standar saat panel dibuka — SELALU proporsi layar, tidak pernah
-    /// bergantung pada tinggi isi.
-    ///
-    /// Dulu nilai ini ikut di-clamp oleh `panelContentHeight`, sehingga bukaan
-    /// pertama (saat isi belum terukur) berbeda dari bukaan berikutnya.
-    private var panelMediumHeight: CGFloat {
-        screenHeight * 0.55
+    private func updateViewport(_ size: CGSize) {
+        guard size.width > 0, size.height > 0, size != viewportSize else { return }
+        let next = AssetInfoPanelLayout(viewportHeight: size.height, contentHeight: panelContentHeight)
+        let height = next.resizedHeight(panelHeight, from: panelLayout)
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            viewportSize = size
+            panelHeight = height
+            panelDragStart = nil
+            cardViewport = nil
+        }
     }
 
     /// Batas atas tarikan: menyisakan seperempat layar teratas untuk foto, dan
@@ -651,19 +655,13 @@ struct AssetDetailView: View {
     /// ditarik lebih tinggi dari isinya. Tidak pernah lebih pendek dari tinggi
     /// standar, supaya bukaan normal selalu bisa dicapai.
     private var panelMaxHeight: CGFloat {
-        let ceiling = screenHeight * 0.75
-        guard panelContentHeight > 0 else { return ceiling }
-        return min(ceiling, max(panelMediumHeight, panelContentHeight))
+        panelLayout.maximumHeight
     }
 
     /// Tertutup, standar, dan penuh — panel di-snap ke salah satunya saat jari
     /// dilepas. Detent penuh dilewati kalau isinya memang tidak setinggi itu.
     private var panelDetents: [CGFloat] {
-        var detents: [CGFloat] = [0, panelMediumHeight]
-        if panelMaxHeight > panelMediumHeight + 24 {
-            detents.append(panelMaxHeight)
-        }
-        return detents
+        panelLayout.detents
     }
 
     /// Satu-satunya gesture untuk panel — berlaku di area foto maupun di badan
@@ -674,6 +672,7 @@ struct AssetDetailView: View {
             panelHeight: panelHeight,
             panelScrollEnabled: isPanelAtMax,
             panelScrollAtTop: panelScrollOffset <= 0.5,
+            viewportSize: viewportSize,
             onChanged: { translationY in
                 guard trashActions == nil, !isZoomed else { return }
                 // Menarik ke atas dari layar detail yang belum punya info hanya
@@ -1208,8 +1207,9 @@ struct AssetDetailView: View {
         Button {
             setInfo(!showInfo)
         } label: {
-            Image(systemName: showInfo ? "info.circle.fill" : "info.circle")
+            Label("Info", systemImage: showInfo ? "info.circle.fill" : "info.circle")
         }
+        .labelStyle(.iconOnly)
         .disabled(!hasDetail)
     }
 

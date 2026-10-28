@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import MapKit
 
 /// SATU pan recognizer untuk seluruh interaksi panel info — area foto maupun
 /// badan panel.
@@ -27,6 +28,7 @@ struct PanelPanGesture: UIGestureRecognizerRepresentable {
     var panelScrollEnabled: Bool
     /// true kalau daftar itu sedang mentok di paling atas.
     var panelScrollAtTop: Bool
+    var viewportSize: CGSize
     var onChanged: (CGFloat) -> Void
     /// (translation.y, velocity.y)
     var onEnded: (CGFloat, CGFloat) -> Void
@@ -46,6 +48,7 @@ struct PanelPanGesture: UIGestureRecognizerRepresentable {
         recognizer.panelHeight = panelHeight
         recognizer.panelScrollEnabled = panelScrollEnabled
         recognizer.panelScrollAtTop = panelScrollAtTop
+        recognizer.resetForViewportChange(to: viewportSize)
     }
 
     func handleUIGestureRecognizerAction(_ recognizer: PanelPanRecognizer, context: Context) {
@@ -95,6 +98,14 @@ final class PanelPanRecognizer: UIPanGestureRecognizer {
     private(set) var startedInPanel = false
     /// Arah dinilai sekali saja; setelah itu jari boleh bergerak ke mana pun.
     private var hasDecided = false
+    private var viewportSize: CGSize = .zero
+
+    func resetForViewportChange(to size: CGSize) {
+        guard size != viewportSize else { return }
+        viewportSize = size
+        isEnabled = false
+        isEnabled = true
+    }
 
     override func reset() {
         super.reset()
@@ -112,11 +123,26 @@ final class PanelPanRecognizer: UIPanGestureRecognizer {
         let panelTop = view.bounds.height - panelHeight
         startedInPanel = panelHeight > 0 && touch.location(in: view).y >= panelTop
 
+        if shouldYieldToMap(at: view.hitTest(touch.location(in: view), with: event)) {
+            state = .failed
+            return
+        }
+
         // Daftar sedang bisa di-scroll dan tidak di paling atas → serahkan
         // sepenuhnya ke scroll view.
         if startedInPanel && panelScrollEnabled && !panelScrollAtTop {
             state = .failed
         }
+    }
+
+    func shouldYieldToMap(at hitView: UIView?) -> Bool {
+        guard panelScrollEnabled else { return false }
+        var ancestor = hitView
+        while let view = ancestor {
+            if view is MKMapView { return true }
+            ancestor = view.superview
+        }
+        return false
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
