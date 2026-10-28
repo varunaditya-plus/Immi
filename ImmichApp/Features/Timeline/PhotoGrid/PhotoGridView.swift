@@ -597,12 +597,35 @@ final class PhotoGridController: UIViewController {
         guard let photoCell = cell as? PhotoGridCell, let asset = assetsByID[itemID]
         else { return cell }
 
-        photoCell.configure(with: asset, loader: loader)
+        configure(photoCell, with: asset)
         photoCell.contentView.isHidden = (itemID == hiddenZoomID)
-        photoCell.setSelectionState(
-            showsSelection: collectionView.isEditing,
-            isPicked: collectionView.indexPathsForSelectedItems?.contains(indexPath) ?? false)
         return photoCell
+    }
+
+    private func configure(_ cell: PhotoGridCell, with asset: AssetLite) {
+        cell.configure(with: asset, loader: loader)
+        guard cell.isAccessibilityElement else { return }
+        let isPicked = dataSource.indexPath(for: asset.id).map {
+            collectionView.indexPathsForSelectedItems?.contains($0) ?? false
+        } ?? false
+        cell.setSelectionState(showsSelection: collectionView.isEditing, isPicked: isPicked)
+        cell.onAccessibilityActivate = { [weak self, weak cell] in
+            guard let self, let cell,
+                  let path = self.collectionView.indexPath(for: cell),
+                  let id = self.dataSource.itemIdentifier(for: path),
+                  self.assetsByID[id] != nil, self.visibilityPolicy.allows(id: id)
+            else { return false }
+
+            if self.collectionView.isEditing, cell.isSelected {
+                self.collectionView.deselectItem(at: path, animated: false)
+                self.collectionView(self.collectionView, didDeselectItemAt: path)
+            } else {
+                guard self.collectionView(self.collectionView, shouldSelectItemAt: path) else { return false }
+                self.collectionView.selectItem(at: path, animated: false, scrollPosition: [])
+                self.collectionView(self.collectionView, didSelectItemAt: path)
+            }
+            return true
+        }
     }
 
     // MARK: - Data
@@ -1251,7 +1274,7 @@ final class PhotoGridController: UIViewController {
                   let asset = assetsByID[itemID],
                   let cell = collectionView.cellForItem(at: indexPath) as? PhotoGridCell
             else { continue }
-            cell.configure(with: asset, loader: loader)
+            configure(cell, with: asset)
         }
     }
 
@@ -1308,7 +1331,7 @@ final class PhotoGridController: UIViewController {
                 cell.prepareForReuse()
                 cell.contentView.isHidden = true
             } else if cell.contentView.isHidden, id != hiddenZoomID {
-                cell.configure(with: asset, loader: loader)
+                configure(cell, with: asset)
                 cell.contentView.isHidden = false
             }
         }

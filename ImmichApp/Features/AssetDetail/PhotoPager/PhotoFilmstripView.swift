@@ -287,6 +287,15 @@ extension PhotoFilmstripController: UICollectionViewDataSource {
 
         stripCell.configure(with: assets[indexPath.item], loader: loader)
         stripCell.setCurrent(indexPath.item == currentIndex)
+        stripCell.onAccessibilityActivate = { [weak self, weak stripCell] in
+            guard let self, let stripCell,
+                  let path = self.collectionView.indexPath(for: stripCell),
+                  self.assets.indices.contains(path.item),
+                  self.visibilityPolicy.allows(id: self.assets[path.item].id)
+            else { return false }
+            self.collectionView(self.collectionView, didSelectItemAt: path)
+            return true
+        }
         return stripCell
     }
 }
@@ -347,6 +356,7 @@ final class PhotoFilmstripCell: UICollectionViewCell {
     private let imageView = UIImageView()
     private var loadTask: Task<Void, Never>?
     private var currentAssetID: String?
+    var onAccessibilityActivate: (() -> Bool)?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -359,6 +369,7 @@ final class PhotoFilmstripCell: UICollectionViewCell {
         imageView.frame = contentView.bounds
         imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         contentView.addSubview(imageView)
+        contentView.accessibilityElementsHidden = true
     }
 
     @available(*, unavailable)
@@ -370,6 +381,13 @@ final class PhotoFilmstripCell: UICollectionViewCell {
         loadTask = nil
         currentAssetID = nil
         imageView.image = nil
+        setCurrent(false)
+        isAccessibilityElement = false
+        accessibilityLabel = nil
+        accessibilityValue = nil
+        accessibilityHint = nil
+        accessibilityTraits = []
+        onAccessibilityActivate = nil
     }
 
     func configure(with asset: AssetLite, loader: PhotoThumbnailLoader) {
@@ -380,6 +398,11 @@ final class PhotoFilmstripCell: UICollectionViewCell {
         loadTask?.cancel()
         loadTask = nil
         currentAssetID = asset.id
+        isAccessibilityElement = true
+        accessibilityLabel = PhotoAssetAccessibility.label(for: asset)
+        accessibilityValue = PhotoAssetAccessibility.value(for: asset)
+        accessibilityHint = String(localized: "Shows this item in the viewer.")
+        setCurrent(false)
 
         if let cached = loader.cachedImage(for: asset.id) {
             imageView.image = cached
@@ -402,5 +425,12 @@ final class PhotoFilmstripCell: UICollectionViewCell {
     func setCurrent(_ isCurrent: Bool) {
         imageView.alpha = isCurrent ? 1 : 0.6
         imageView.layer.borderWidth = isCurrent ? 2 : 0
+        accessibilityTraits = [.image, .button]
+        if isCurrent { accessibilityTraits.insert(.selected) }
+    }
+
+    override func accessibilityActivate() -> Bool {
+        guard isAccessibilityElement else { return false }
+        return onAccessibilityActivate?() ?? false
     }
 }

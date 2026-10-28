@@ -1,5 +1,23 @@
 import UIKit
 
+enum PhotoAssetAccessibility {
+    static func label(for asset: AssetLite) -> String {
+        let kind = asset.isVideo
+            ? String(localized: "Video")
+            : asset.isLivePhoto ? String(localized: "Live Photo") : String(localized: "Photo")
+        return "\(kind), \(asset.createdAt.formatted(date: .long, time: .shortened))"
+    }
+
+    static func value(for asset: AssetLite) -> String? {
+        var details: [String] = []
+        if asset.isFavorite { details.append(String(localized: "Favorite")) }
+        if asset.isVideo, let duration = asset.durationText {
+            details.append(String(localized: "Duration: \(duration)"))
+        }
+        return details.isEmpty ? nil : details.joined(separator: ", ")
+    }
+}
+
 /// Satu petak foto di grid.
 ///
 /// Kelas, bukan struct view — dan itulah intinya. `UICollectionView` MENDAUR
@@ -34,6 +52,7 @@ final class PhotoGridCell: UICollectionViewCell {
     private var loadTask: Task<Void, Never>?
     /// Kunci foto yang sedang dituju, untuk menolak hasil yang sudah basi.
     private var currentKey: String?
+    var onAccessibilityActivate: (() -> Bool)?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -111,6 +130,7 @@ final class PhotoGridCell: UICollectionViewCell {
         ])
 
         contentView.clipsToBounds = true
+        contentView.accessibilityElementsHidden = true
     }
 
     @available(*, unavailable)
@@ -128,6 +148,12 @@ final class PhotoGridCell: UICollectionViewCell {
         originBadge.isHidden = true
         originBadge.image = nil
         setSelectionState(showsSelection: false, isPicked: false)
+        isAccessibilityElement = false
+        accessibilityLabel = nil
+        accessibilityValue = nil
+        accessibilityHint = nil
+        accessibilityTraits = []
+        onAccessibilityActivate = nil
     }
 
     func configure(with asset: AssetLite, loader: PhotoThumbnailLoader) {
@@ -144,6 +170,10 @@ final class PhotoGridCell: UICollectionViewCell {
 
         let key = loader.cacheKey(for: asset.id)
         currentKey = key
+        isAccessibilityElement = true
+        accessibilityLabel = PhotoAssetAccessibility.label(for: asset)
+        accessibilityValue = PhotoAssetAccessibility.value(for: asset)
+        setSelectionState(showsSelection: false, isPicked: false)
 
         durationLabel.text = asset.durationText
         durationLabel.isHidden = asset.durationText == nil
@@ -200,10 +230,20 @@ final class PhotoGridCell: UICollectionViewCell {
     /// berangkat, termasuk kalau yang tampil masih placeholder thumbhash.
     var displayedImage: UIImage? { imageView.image }
 
+    override func accessibilityActivate() -> Bool {
+        guard isAccessibilityElement else { return false }
+        return onAccessibilityActivate?() ?? false
+    }
+
     func setSelectionState(showsSelection: Bool, isPicked: Bool) {
         badge.isHidden = !(showsSelection && isPicked)
         dimmer.isHidden = !(showsSelection && isPicked)
         // Keduanya sama-sama di pojok kanan bawah; tanda centang yang menang.
         durationLabel.alpha = badge.isHidden ? 1 : 0
+        accessibilityTraits = [.image, .button]
+        if showsSelection && isPicked { accessibilityTraits.insert(.selected) }
+        accessibilityHint = showsSelection
+            ? (isPicked ? String(localized: "Deselects this item.") : String(localized: "Selects this item."))
+            : String(localized: "Opens the viewer.")
     }
 }
