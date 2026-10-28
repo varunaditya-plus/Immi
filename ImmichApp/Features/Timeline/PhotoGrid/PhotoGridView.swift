@@ -1544,7 +1544,7 @@ extension PhotoGridController: UICollectionViewDelegate {
         didBeginMultipleSelectionInteractionAt indexPath: IndexPath
     ) {
         guard !collectionView.isEditing else { return }
-        collectionView.isEditing = true
+        setSelecting(true)
         onSelectingChanged?(true)
     }
 

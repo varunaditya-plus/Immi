@@ -163,6 +163,55 @@ final class PhotoCellAccessibilityTests: XCTestCase {
         XCTAssertFalse(cell.accessibilityTraits.contains(.selected))
     }
 
+    func testGridTwoFingerSelectionRefreshesAllVisibleAccessibilityHints() async throws {
+        let first = asset(), second = asset()
+        let controller = makeGrid([first, second])
+        let collection = try collectionView(in: controller)
+        let firstPath = IndexPath(item: 0, section: 0)
+        let secondPath = IndexPath(item: 1, section: 0)
+        try await waitUntil {
+            collection.cellForItem(at: firstPath) is PhotoGridCell
+                && collection.cellForItem(at: secondPath) is PhotoGridCell
+        }
+        let firstCell = try XCTUnwrap(collection.cellForItem(at: firstPath) as? PhotoGridCell)
+        let secondCell = try XCTUnwrap(collection.cellForItem(at: secondPath) as? PhotoGridCell)
+        var selecting: [Bool] = []
+        var selected: Set<String>?
+        controller.onSelectingChanged = { selecting.append($0) }
+        controller.onSelectionChanged = { selected = $0 }
+        XCTAssertEqual(firstCell.accessibilityHint, String(localized: "Opens the viewer."))
+        XCTAssertEqual(secondCell.accessibilityHint, String(localized: "Opens the viewer."))
+
+        XCTAssertTrue(controller.collectionView(collection, shouldBeginMultipleSelectionInteractionAt: firstPath))
+        controller.collectionView(collection, didBeginMultipleSelectionInteractionAt: firstPath)
+
+        XCTAssertTrue(collection.isEditing)
+        XCTAssertEqual(selecting, [true])
+        XCTAssertEqual(firstCell.accessibilityHint, String(localized: "Selects this item."))
+        XCTAssertEqual(secondCell.accessibilityHint, String(localized: "Selects this item."))
+        controller.setSelecting(true)
+        collection.selectItem(at: firstPath, animated: false, scrollPosition: [])
+        controller.collectionView(collection, didSelectItemAt: firstPath)
+
+        XCTAssertEqual(selected, [first.id])
+        XCTAssertTrue(firstCell.isSelected)
+        XCTAssertTrue(firstCell.accessibilityTraits.contains(.selected))
+        XCTAssertEqual(firstCell.accessibilityHint, String(localized: "Deselects this item."))
+        XCTAssertFalse(secondCell.isSelected)
+        XCTAssertFalse(secondCell.accessibilityTraits.contains(.selected))
+        XCTAssertEqual(secondCell.accessibilityHint, String(localized: "Selects this item."))
+
+        controller.setSelecting(false)
+
+        XCTAssertFalse(collection.isEditing)
+        XCTAssertTrue(collection.indexPathsForSelectedItems?.isEmpty ?? true)
+        for cell in [firstCell, secondCell] {
+            XCTAssertFalse(cell.isSelected)
+            XCTAssertFalse(cell.accessibilityTraits.contains(.selected))
+            XCTAssertEqual(cell.accessibilityHint, String(localized: "Opens the viewer."))
+        }
+    }
+
     func testFilmstripVoiceOverUsesCurrentMetadataAndTracksThePagerSelection() throws {
         let first = asset()
         var second = asset()
