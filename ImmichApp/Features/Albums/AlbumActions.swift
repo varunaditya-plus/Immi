@@ -130,6 +130,7 @@ struct AlbumEditSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                        .disabled(isSaving)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { save() }
@@ -146,6 +147,7 @@ struct AlbumEditSheet: View {
             .sensoryFeedback(.success, trigger: successFeedback)
             .onAppear { isNameFocused = true }
         }
+        .interactiveDismissDisabled(isSaving)
     }
 
     private var trimmedName: String {
@@ -154,6 +156,7 @@ struct AlbumEditSheet: View {
 
     @MainActor
     private func save() {
+        guard !isSaving, !trimmedName.isEmpty else { return }
         // Jangan membaca DynamicProperty milik View dari dalam task. SwiftUI
         // bebas mengganti value `AlbumEditSheet` setelah tombol ditekan; pada
         // build teroptimasi capture itu pernah meninggalkan backing String yang
@@ -185,10 +188,10 @@ struct AlbumEditSheet: View {
                 updated.updatedAt = Date()
                 savedAction(updated)
 
-                isSaving = false
                 successFeedback += 1
                 try? await Task.sleep(for: .milliseconds(50))
                 dismiss()
+                isSaving = false
             } catch {
                 isSaving = false
                 errorMessage = (error as? APIError)?.errorDescription
