@@ -262,6 +262,88 @@ final class WidgetPrivacyInvalidationTests: XCTestCase {
         XCTAssertNotNil(memories.first?["imageName"] as? String)
     }
 
+    func testFreshTrashEvidenceInvalidatesAHeldWidgetThumbnail() async throws {
+        let directory = try temporaryDirectory()
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let store = SwiftDataManager(storeURL: directory.appendingPathComponent("test.store"),
+            backupJournalURL: directory.appendingPathComponent("backup.json"))
+        let started = expectation(description: "The old widget thumbnail is held")
+        let gate = WidgetPrivacyGate(started: started)
+        let oldAPI = try makeAPI(imageGate: gate, assetID: "newly-discovered-trash")
+        let export = Task {
+            await WidgetSnapshotExporter.refresh(api: oldAPI, imageAPI: oldAPI,
+                container: directory, selectedAlbumIDs: [], dataManager: store)
+        }
+        addTeardownBlock { await gate.close(); await export.value }
+        await fulfillment(of: [started], timeout: 2)
+
+        let trashed = try await readTrash("newly-discovered-trash", using: store)
+        XCTAssertEqual(trashed.map(\.id), ["newly-discovered-trash"])
+        XCTAssertTrue(DeletedServerAssetRegistry.shared.isTrashed("newly-discovered-trash"))
+        let currentAPI = try makeAPI(assetID: "current-widget-photo")
+        await WidgetSnapshotExporter.refresh(api: currentAPI, imageAPI: currentAPI,
+            container: directory, selectedAlbumIDs: [], dataManager: store)
+        let snapshotURL = directory.appendingPathComponent("Widgets/snapshot.json")
+        let currentSnapshot = try Data(contentsOf: snapshotURL)
+        await gate.release()
+        await export.value
+
+        XCTAssertEqual(try Data(contentsOf: snapshotURL), currentSnapshot,
+            "A thumbnail for a photo just discovered in Trash cannot replace the current widget")
+        let generations = try FileManager.default.contentsOfDirectory(
+            at: directory.appendingPathComponent("Widgets"), includingPropertiesForKeys: nil)
+            .filter(\.hasDirectoryPath)
+        XCTAssertEqual(generations.count, 1, "The invalidated widget must discard its staged image files")
+    }
+
+    func testUnchangedTrashEvidenceDoesNotInvalidateAnUnrelatedCurrentWidget() async throws {
+        let directory = try temporaryDirectory()
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let store = SwiftDataManager(storeURL: directory.appendingPathComponent("test.store"),
+            backupJournalURL: directory.appendingPathComponent("backup.json"))
+        _ = try await readTrash("already-known-trash", using: store)
+        let started = expectation(description: "The current widget thumbnail is held")
+        let gate = WidgetPrivacyGate(started: started)
+        let api = try makeAPI(imageGate: gate, assetID: "unrelated-current-photo")
+        let export = Task {
+            await WidgetSnapshotExporter.refresh(api: api, imageAPI: api,
+                container: directory, selectedAlbumIDs: [], dataManager: store)
+        }
+        addTeardownBlock { await gate.close(); await export.value }
+        await fulfillment(of: [started], timeout: 2)
+
+        _ = try await readTrash("already-known-trash", using: store)
+        await gate.release()
+        await export.value
+
+        XCTAssertEqual(try imageNames(in: directory).count, 1,
+            "Reopening unchanged Trash must not blank an unrelated current widget export")
+    }
+
+    private func readTrash(_ id: String, using store: SwiftDataManager) async throws -> [AssetResponseDTO] {
+        MockURLProtocol.reset()
+        defer { MockURLProtocol.reset() }
+        let session = MockSessionManager()
+        try session.setServer("https://trash-widget.example")
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let transport = URLSession(configuration: configuration)
+        defer { transport.invalidateAndCancel() }
+        MockURLProtocol.responseProvider = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/search/metadata")
+            let asset: [String: Any] = ["id": id, "type": "IMAGE", "originalFileName": "photo.jpg",
+                "fileCreatedAt": "2020-01-01T00:00:00Z", "localDateTime": "2020-01-01T00:00:00Z",
+                "isFavorite": false, "isArchived": false, "isTrashed": true, "visibility": "timeline"]
+            let data = try! JSONSerialization.data(withJSONObject: ["assets": ["items": [asset],
+                "total": 1, "nextPage": NSNull()]])
+            return (data, HTTPURLResponse(url: request.url!, statusCode: 200,
+                httpVersion: nil, headerFields: nil), nil)
+        }
+        return try await TrashRepository(api: APIClient(session: session, urlSession: transport),
+            dataManager: store).assets()
+    }
+
     private func temporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("widget-invalidation-\(UUID())")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)

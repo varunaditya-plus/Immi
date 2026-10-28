@@ -40,10 +40,12 @@ class TrashRepository {
         }.map(\.id))
         if assetRevision == manager.assetMutationRevision,
            RemovedAssets.shared.confirmTrashed(ids, expectedRevision: removedRevision) {
+            let newlySuppressed = Set(ids).subtracting(DeletedServerAssetRegistry.shared.suppressedIDs)
             try? manager.recordTrashRestrictions(items)
             // Private rows stay out of Trash, but their device/cache copies must
             // also stay out of the library after the app restarts.
             DeletedServerAssetRegistry.shared.record(ids, permanently: false)
+            if !newlySuppressed.isEmpty { WidgetSnapshotExporter.clear() }
         }
         let policy = AssetVisibilityPolicy(scope: .collection, removalScope: .trash, dataManager: manager)
         var positions: [String: Int] = [:]
