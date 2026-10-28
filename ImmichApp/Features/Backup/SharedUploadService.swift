@@ -22,7 +22,9 @@ final class SharedUploadService {
     static let shared = SharedUploadService()
 
     private(set) var items: [SharedUploadQueueItem] = []
-    private(set) var lastError: String?
+    private var listingError: String?
+    private var processingError: String?
+    var lastError: String? { processingError ?? listingError }
     private let store: SharedUploadStore
     private let upload: @MainActor (SharedUploadCredential, SharedUploadItem, URL, URL) async throws -> Void
     @ObservationIgnored private var task: Task<Void, Never>?
@@ -48,11 +50,14 @@ final class SharedUploadService {
         if let task { return task }
         let credential = credential(for: session)
         let context = session.snapshot
-        lastError = nil
+        listingError = nil
+        processingError = nil
+        let initialListingID = listingID
         let id = UUID()
         workID = id
         let work = Task { [weak self] in
             guard let self else { return }
+            var readBatches = false
             defer {
                 if self.workID == id {
                     self.task = nil
@@ -68,6 +73,7 @@ final class SharedUploadService {
                 _ = try? await self.store.cleanupAbandonedDrafts()
                 guard let credential else { return }
                 let batches = try await self.store.batches(for: credential.owner)
+                readBatches = true
                 try session.checkCurrent(context)
                 await self.refreshPending(session: session)
                 let processor = SharedUploadProcessor(store: self.store)
@@ -86,14 +92,18 @@ final class SharedUploadService {
                     } catch {
                         try Task.checkCancellation()
                         try session.checkCurrent(context)
-                        self.lastError = error.localizedDescription
+                        self.processingError = error.localizedDescription
                     }
                     await self.refreshPending(session: session)
                 }
             } catch {
                 guard !Task.isCancelled, self.workID == id,
                       (try? session.checkCurrent(context)) != nil else { return }
-                self.lastError = error.localizedDescription
+                if readBatches {
+                    self.processingError = error.localizedDescription
+                } else if self.listingID == initialListingID {
+                    self.listingError = error.localizedDescription
+                }
             }
         }
         task = work
@@ -106,7 +116,8 @@ final class SharedUploadService {
         listingID = id
         guard let credential = credential(for: session) else {
             items = []
-            lastError = nil
+            listingError = nil
+            processingError = nil
             return
         }
         let context = session.snapshot
@@ -119,10 +130,11 @@ final class SharedUploadService {
                     SharedUploadQueueItem(batchID: batch.id, owner: batch.owner, item: $0)
                 }
             }
+            listingError = nil
         } catch {
             guard !Task.isCancelled, listingID == id,
                   (try? session.checkCurrent(context)) != nil else { return }
-            lastError = error.localizedDescription
+            listingError = error.localizedDescription
         }
     }
 
@@ -160,7 +172,8 @@ final class SharedUploadService {
         listingID = UUID()
         retryRequested = false
         items = []
-        lastError = nil
+        listingError = nil
+        processingError = nil
     }
 
     private func credential(for session: SessionManager) -> SharedUploadCredential? {
