@@ -112,6 +112,18 @@ final class TimelineOriginalSharingTests: XCTestCase {
         XCTAssertNil(model.actionError)
     }
 
+    func testSingleServerFallbackDiscardsLatePrivateOriginalAfterItsMappingChanges() async throws {
+        for unlinks in [false, true] {
+            try await assertObsoleteMappedFallbackIsDiscarded(bulk: false, unlinks: unlinks)
+        }
+    }
+
+    func testBulkServerFallbackDiscardsLatePrivateOriginalAndPreparedPrefixAfterItsMappingChanges() async throws {
+        for unlinks in [false, true] {
+            try await assertObsoleteMappedFallbackIsDiscarded(bulk: true, unlinks: unlinks)
+        }
+    }
+
     func testUnavailableDeviceOnlyOriginalFailsWithoutInventingAServerRequest() async {
         let model = model { _ in nil }
         MockURLProtocol.responseProvider = { request in
@@ -166,6 +178,73 @@ final class TimelineOriginalSharingTests: XCTestCase {
         XCTAssertTrue(capture.ids.isEmpty)
         XCTAssertNil(MockURLProtocol.lastRequest)
         XCTAssertNil(model.actionError)
+    }
+
+    private func assertObsoleteMappedFallbackIsDiscarded(bulk: Bool, unlinks: Bool) async throws {
+        let token = UUID().uuidString
+        let localID = "held-\(token)"
+        let displayID = LocalPhotoLibrary.assetID(for: localID)
+        let originalServerID = "old-\(token)"
+        let prefixID = "prefix-\(token)"
+        try manager.linkDeviceAsset(localIdentifier: localID, to: originalServerID)
+        let capture = LocalSharingCapture()
+        let model = model { capture.ids.append($0); return nil }
+        let started = expectation(description: "The mapped original download is held")
+        let release = DispatchSemaphore(value: 0)
+        var requests: [String] = []
+        MockURLProtocol.responseProvider = { request in
+            let path = request.url?.path ?? ""
+            requests.append(path)
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertNil(request.url?.query)
+            XCTAssertFalse(path.contains("device:"))
+            if path == "/api/assets/\(originalServerID)/original" {
+                started.fulfill()
+                guard release.wait(timeout: .now() + 5) == .success else {
+                    return (nil, nil, URLError(.timedOut))
+                }
+            } else {
+                XCTAssertTrue(bulk)
+                XCTAssertEqual(path, "/api/assets/\(prefixID)/original")
+            }
+            return (Data(path.utf8), HTTPURLResponse(url: request.url!, statusCode: 200,
+                httpVersion: nil, headerFields: ["Content-Type": "video/mp4",
+                    "Content-Disposition": "attachment; filename=\"\(token)-\(path.contains(prefixID) ? "prefix" : "private").mp4\""]), nil)
+        }
+        let task = Task { () -> [URL] in
+            if bulk { return await model.shareURLs(for: [prefixID, displayID]) }
+            if let file = await model.shareURL(for: photo(displayID, origin: .both)) { return [file] }
+            return []
+        }
+        addTeardownBlock { release.signal(); _ = await task.value }
+        await fulfillment(of: [started], timeout: 2)
+        let shareDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("selfphotos-share")
+        if bulk {
+            let prefix = try FileManager.default.contentsOfDirectory(at: shareDirectory, includingPropertiesForKeys: nil)
+                .filter { $0.lastPathComponent.contains(token) }
+            XCTAssertEqual(prefix.count, 1, "The batch prefix must be prepared before the mapping changes")
+            files.append(contentsOf: prefix)
+        }
+        if unlinks { try manager.unlinkDeviceAsset(localIdentifier: localID) }
+        else {
+            try manager.upsertBackupRecord(assetID: "replacement-\(token)", checksum: "replacement", localIdentifier: localID)
+        }
+        try manager.setAssetVisibility([originalServerID], to: "locked")
+        XCTAssertTrue(AssetVisibilityPolicy(scope: .timeline, dataManager: manager).allows(id: displayID),
+            "The display ID now resolves elsewhere; its privacy check cannot authorize the old server file")
+        release.signal()
+        let result = await task.value
+        files.append(contentsOf: result)
+
+        XCTAssertTrue(result.isEmpty, "A stale server original must not be returned under a changed display identity")
+        XCTAssertNil(model.actionError, "Discarding an obsolete share must remain silent")
+        XCTAssertEqual(capture.ids, [displayID])
+        XCTAssertEqual(requests, (bulk ? ["/api/assets/\(prefixID)/original"] : [])
+            + ["/api/assets/\(originalServerID)/original"])
+        let remaining = (try? FileManager.default.contentsOfDirectory(at: shareDirectory, includingPropertiesForKeys: nil))?
+            .filter { $0.lastPathComponent.contains(token) } ?? []
+        files.append(contentsOf: remaining)
+        XCTAssertTrue(remaining.isEmpty, "The obsolete original and any prepared prefix must be removed")
     }
 
     private func model(

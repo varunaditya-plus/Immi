@@ -1353,13 +1353,15 @@ struct AssetDetailView: View {
                 vm?.actionError = nil
                 let url = await fileURL(for: target)
                 if url == nil, viewer.isCurrent(target), accountGeneration == LocalSnapshot.generation,
-                   !Task.isCancelled, visibilityPolicy.allows(id: target.asset.id), vm?.actionError == nil {
+                   !Task.isCancelled, serverAssetID(for: target.asset) == target.serverID,
+                   visibilityPolicy.allows(id: target.asset.id), vm?.actionError == nil {
                     vm?.actionError = ErrorEvent(String(localized: "Failed to prepare share"))
                 }
                 return url
             },
             discard: { TemporaryMediaStore.remove($0) }) { file in
                 guard accountGeneration == LocalSnapshot.generation,
+                      serverAssetID(for: target.asset) == target.serverID,
                       visibilityPolicy.allows(id: target.asset.id) else {
                     TemporaryMediaStore.remove(file)
                     return
@@ -1425,11 +1427,14 @@ struct AssetDetailView: View {
         }
         guard viewer.isCurrent(target), accountGeneration == LocalSnapshot.generation,
               visibilityPolicy.allows(id: target.asset.id),
-              !Task.isCancelled, let serverID = target.serverID, let vm else { return nil }
+              !Task.isCancelled, let serverID = target.serverID,
+              serverAssetID(for: target.asset) == serverID,
+              visibilityPolicy.allows(id: serverID), let vm else { return nil }
         let filename = target.detail?.originalFileName ?? serverID
         guard let file = await vm.downloadOriginalFile(serverID, filename: filename) else { return nil }
         guard viewer.isCurrent(target), accountGeneration == LocalSnapshot.generation,
-              visibilityPolicy.allows(id: target.asset.id),
+              serverAssetID(for: target.asset) == serverID,
+              visibilityPolicy.allows(id: target.asset.id), visibilityPolicy.allows(id: serverID),
               !Task.isCancelled else {
             TemporaryMediaStore.remove(file)
             return nil

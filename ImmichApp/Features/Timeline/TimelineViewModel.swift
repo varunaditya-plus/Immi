@@ -1012,7 +1012,14 @@ final class TimelineViewModel {
         guard let serverID = AssetServerIdentity.resolve(asset, using: manager) else {
             throw CocoaError(.fileNoSuchFile)
         }
-        return try await repository.shareFile(serverID)
+        let url = try await repository.shareFile(serverID)
+        guard !Task.isCancelled, accountGeneration == LocalSnapshot.generation,
+              AssetServerIdentity.resolve(asset, using: manager) == serverID,
+              policy.allows(id: asset.id), policy.allows(id: serverID) else {
+            TemporaryMediaStore.remove(url)
+            throw CancellationError()
+        }
+        return url
     }
 
     /// Buang aset dari grid setelah dipindah/dihapus di layar detail.
