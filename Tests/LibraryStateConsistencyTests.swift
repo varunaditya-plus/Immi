@@ -213,6 +213,98 @@ final class LibraryStateConsistencyTests: XCTestCase {
         XCTAssertEqual(cachedAlbums().first?.assetCount, 1)
     }
 
+    func testAcceptedSharingPublishesAndPersistsWhenReconciliationFails() async {
+        let driver = LibraryConsistencyDriver()
+        var accepted = false
+        driver.addUsers = { accepted = true }
+        driver.albums = {
+            XCTAssertTrue(accepted, "Reconciliation follows the confirmed sharing request")
+            throw APIError.unknown
+        }
+        let model = model(driver)
+        var original = album("album", name: "Kept name", count: 8, cover: "kept-cover")
+        original.description = "Kept description"
+        original.ownerId = "owner"
+        model.albums = [original]
+        LocalSnapshot.save([original], for: LocalSnapshot.Key.libraryAlbums)
+        let changed = LibraryPublicationProbe()
+        withObservationTracking { _ = model.albums } onChange: {
+            MainActor.assumeIsolated { changed.albums = true }
+        }
+
+        await model.addUsers(["friend"], to: "album")
+
+        XCTAssertTrue(accepted)
+        XCTAssertTrue(changed.albums)
+        XCTAssertNil(model.actionError)
+        XCTAssertEqual(model.albums.first?.shared, true)
+        XCTAssertEqual(model.albums.first?.albumName, "Kept name")
+        XCTAssertEqual(model.albums.first?.description, "Kept description")
+        XCTAssertEqual(model.albums.first?.assetCount, 8)
+        XCTAssertEqual(model.albums.first?.albumThumbnailAssetId, "kept-cover")
+        XCTAssertEqual(model.albums.first?.ownerId, "owner")
+        XCTAssertEqual(cachedAlbums().first?.shared, true)
+        XCTAssertEqual(cachedAlbums().first?.albumName, "Kept name")
+        XCTAssertEqual(driver.albumCalls, 1)
+    }
+
+    func testSharingSurvivesLaterCallbacksAndCannotRestoreAnAcceptedDeletion() async {
+        for callback in ["metadata", "contents", "delete"] {
+            LocalSnapshot.clearAll()
+            let driver = LibraryConsistencyDriver()
+            let reconciliation = LibraryConsistencyGate<[AlbumResponseDTO]>()
+            driver.albums = { try await reconciliation.value() }
+            let model = model(driver)
+            model.albums = [album("album", name: "Old", count: 8, cover: "old-cover")]
+            let share = Task { await model.addUsers(["friend"], to: "album") }
+            addTeardownBlock {
+                await reconciliation.complete(.failure(CancellationError()))
+                await share.value
+            }
+            await fulfillment(of: [reconciliation.started], timeout: 2)
+            XCTAssertEqual(model.albums.first?.shared, true, "Sharing is published before its read finishes")
+            XCTAssertEqual(cachedAlbums().first?.shared, true)
+            switch callback {
+            case "metadata": model.applyAlbumUpdate(album("album", name: "Saved name"))
+            case "contents":
+                XCTAssertTrue(model.applyAlbumContents([AssetLite(makeTestAsset(id: "kept"))], to: "album"))
+            default: await model.deleteAlbum("album")
+            }
+            reconciliation.complete(.success([album("album", name: "Obsolete", count: 99)]))
+            await share.value
+
+            XCTAssertNil(model.actionError)
+            if callback == "delete" {
+                XCTAssertTrue(model.albums.isEmpty)
+                XCTAssertTrue(cachedAlbums().isEmpty)
+            } else {
+                XCTAssertEqual(model.albums.first?.shared, true)
+                XCTAssertEqual(cachedAlbums().first?.shared, true)
+                XCTAssertEqual(model.albums.first?.albumName, callback == "metadata" ? "Saved name" : "Old")
+                XCTAssertEqual(model.albums.first?.assetCount, callback == "contents" ? 1 : 8)
+                XCTAssertEqual(model.albums.first?.albumThumbnailAssetId,
+                    callback == "contents" ? "kept" : "old-cover")
+                XCTAssertEqual(cachedAlbums().first?.albumName, model.albums.first?.albumName)
+                XCTAssertEqual(cachedAlbums().first?.assetCount, model.albums.first?.assetCount)
+            }
+        }
+    }
+
+    func testRejectedSharingDoesNotMarkTheAlbumSharedOrRequestReconciliation() async {
+        let driver = LibraryConsistencyDriver()
+        driver.addUsers = { throw APIError.unknown }
+        let model = model(driver)
+        model.albums = [album("album")]
+        LocalSnapshot.save(model.albums, for: LocalSnapshot.Key.libraryAlbums)
+
+        await model.addUsers(["friend"], to: "album")
+
+        XCTAssertNotNil(model.actionError)
+        XCTAssertEqual(model.albums.first?.shared, false)
+        XCTAssertEqual(cachedAlbums().first?.shared, false)
+        XCTAssertEqual(driver.albumCalls, 0)
+    }
+
     func testAcceptedDeleteDominatesALaterMetadataEdit() async {
         let driver = LibraryConsistencyDriver()
         let deletion = LibraryConsistencyGate<Void>()
@@ -414,6 +506,7 @@ private final class LibraryConsistencyDriver {
     var people: @MainActor () async throws -> [PersonDTO] = { [] }
     var update: @MainActor (String, String?, String??) async throws -> Void = { _, _, _ in }
     var delete: @MainActor (String) async throws -> Void = { _ in }
+    var addUsers: @MainActor () async throws -> Void = {}
     private(set) var albumCalls = 0
     private(set) var peopleCalls = 0
 
@@ -435,6 +528,7 @@ private final class LibraryConsistencyAlbums: AlbumRepository {
         try await driver.update(id, name, description)
     }
     override func delete(_ id: String) async throws { try await driver.delete(id) }
+    override func addUsers(_ userIds: [String], to albumId: String) async throws { try await driver.addUsers() }
 }
 
 private final class LibraryConsistencyPeople: PeopleRepository {

@@ -247,6 +247,13 @@ final class LibraryViewModel {
         do {
             try await albumRepo.addUsers(userIDs, to: albumId)
             guard canPublish else { return }
+            if let index = albums.firstIndex(where: { $0.id == albumId }) {
+                var updated = albums[index]
+                updated.shared = true
+                albums[index] = updated
+                LocalSnapshot.save(albums, for: LocalSnapshot.Key.libraryAlbums,
+                    expectedGeneration: snapshotGeneration)
+            }
             await refreshAlbums()
         } catch {
             guard canPublish, actionErrorID == errorID, !(error is CancellationError) else { return }
