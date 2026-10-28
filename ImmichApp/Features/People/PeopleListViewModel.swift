@@ -5,6 +5,10 @@ import Observation
 @Observable
 final class PeopleListViewModel {
     private let snapshotGeneration = LocalSnapshot.generation
+    private var loadID = UUID()
+    private var phaseBeforeLoad: LoadingPhase<Void> = .idle
+    private var hiddenRequests: [String: UUID] = [:]
+    private var restoredSnapshot = false
 
     var people: [PersonDTO] = []
     var phase: LoadingPhase<Void> = .idle
@@ -17,25 +21,36 @@ final class PeopleListViewModel {
 
     /// Potret lokal dulu, jaringan menyusul — lihat `LocalSnapshot`.
     func loadPeople() async {
-        guard snapshotGeneration == LocalSnapshot.generation else { return }
-        if people.isEmpty {
-            if let cached = LocalSnapshot.load(
+        guard !Task.isCancelled, snapshotGeneration == LocalSnapshot.generation else { return }
+        let requestID = UUID()
+        loadID = requestID
+        if !phase.isLoading { phaseBeforeLoad = phase }
+        if !restoredSnapshot {
+            restoredSnapshot = true
+            if people.isEmpty, let cached = LocalSnapshot.load(
                 [PersonDTO].self, for: LocalSnapshot.Key.peopleList) {
                 people = cached
                 phase = .loaded(())
-            } else {
-                phase = .loading
             }
         }
+        if people.isEmpty, phase.value == nil { phase = .loading }
 
         do {
             let fetched = try await repo.all()
-            guard snapshotGeneration == LocalSnapshot.generation else { return }
-            if LocalSnapshot.save(fetched, for: LocalSnapshot.Key.peopleList, expectedGeneration: snapshotGeneration) || people.isEmpty {
-                people = fetched
+            guard isCurrentLoad(requestID) else { return }
+            guard !Task.isCancelled else {
+                if phase.isLoading { phase = phaseBeforeLoad }
+                return
             }
+            LocalSnapshot.save(fetched, for: LocalSnapshot.Key.peopleList, expectedGeneration: snapshotGeneration)
+            people = fetched
             phase = .loaded(())
         } catch {
+            guard isCurrentLoad(requestID) else { return }
+            guard !Task.isCancelled, !(error is CancellationError) else {
+                if phase.isLoading { phase = phaseBeforeLoad }
+                return
+            }
             // Sudah ada jawaban yang SAH di layar — entah dari potret, entah
             // dari muatan sebelumnya — jadi kegagalannya diam.
             //
@@ -49,12 +64,17 @@ final class PeopleListViewModel {
     }
 
     func setHidden(_ personId: String, to value: Bool) async {
+        guard !Task.isCancelled, snapshotGeneration == LocalSnapshot.generation else { return }
+        let requestID = UUID()
+        hiddenRequests[personId] = requestID
+        defer {
+            if hiddenRequests[personId] == requestID { hiddenRequests[personId] = nil }
+        }
         do {
             try await repo.setHidden(personId, to: value)
-            if let index = people.firstIndex(where: { $0.id == personId }) {
-                people[index].isHidden = value
-            }
-            persist()
+            guard !Task.isCancelled, snapshotGeneration == LocalSnapshot.generation,
+                  hiddenRequests[personId] == requestID else { return }
+            applyHidden(personId, to: value)
         } catch {
             // Handle silently
         }
@@ -69,16 +89,34 @@ final class PeopleListViewModel {
     }
 
     func applyRename(_ personId: String, to name: String) {
+        guard !Task.isCancelled, snapshotGeneration == LocalSnapshot.generation else { return }
+        invalidateLoads()
         if let index = people.firstIndex(where: { $0.id == personId }) {
-            people[index].name = name
+            var updated = people[index]
+            updated.name = name
+            people[index] = updated
             persist()
         }
     }
 
     func applyHidden(_ personId: String, to value: Bool) {
+        guard !Task.isCancelled, snapshotGeneration == LocalSnapshot.generation else { return }
+        invalidateLoads()
+        hiddenRequests[personId] = nil
         if let index = people.firstIndex(where: { $0.id == personId }) {
-            people[index].isHidden = value
+            var updated = people[index]
+            updated.isHidden = value
+            people[index] = updated
             persist()
         }
+    }
+
+    private func isCurrentLoad(_ requestID: UUID) -> Bool {
+        snapshotGeneration == LocalSnapshot.generation && loadID == requestID
+    }
+
+    private func invalidateLoads() {
+        loadID = UUID()
+        if phase.isLoading { phase = phaseBeforeLoad }
     }
 }
