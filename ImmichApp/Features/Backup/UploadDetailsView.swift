@@ -2,9 +2,12 @@ import SwiftUI
 
 /// Rincian antrean yang sama dengan pekerjaan background sebenarnya.
 /// Tidak ada model UI bayangan: state, cancel, dan retry semuanya melewati
-/// `BackupService` agar tetap benar ketika callback URLSession datang belakangan.
+/// layanan masing-masing agar callback URLSession tetap terikat antreannya.
 struct UploadDetailsView: View {
+    @Environment(SessionManager.self) private var session
     @State private var backup = BackupService.shared
+    @State private var sharedUploads = SharedUploadService.shared
+    @State private var actionError: ErrorEvent?
 
     private var uploading: [BackupQueueItem] {
         backup.uploadItems.filter { $0.state.isActive }
@@ -22,7 +25,7 @@ struct UploadDetailsView: View {
 
     var body: some View {
         Group {
-            if backup.uploadItems.isEmpty {
+            if backup.uploadItems.isEmpty && sharedUploads.items.isEmpty && sharedUploads.lastError == nil {
                 ContentUnavailableView(
                     "No Uploads",
                     systemImage: "checkmark.icloud",
@@ -32,6 +35,7 @@ struct UploadDetailsView: View {
                     uploadSection("Uploading", items: uploading)
                     uploadSection("Waiting", items: waiting)
                     uploadSection("Failed", items: failed)
+                    sharedUploadSection
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
@@ -39,6 +43,63 @@ struct UploadDetailsView: View {
         }
         .navigationTitle("Upload Details")
         .navigationBarTitleDisplayMode(.inline)
+        .task { await sharedUploads.refreshPending(session: session) }
+        .refreshable { await sharedUploads.refreshPending(session: session) }
+        .errorToast($actionError)
+    }
+
+    @ViewBuilder
+    private var sharedUploadSection: some View {
+        if !sharedUploads.items.isEmpty || sharedUploads.lastError != nil {
+            Section("Shared Uploads") {
+                if let error = sharedUploads.lastError {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                }
+                ForEach(sharedUploads.items) { entry in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(entry.item.filename)
+                            .font(.headline)
+                        Text(sharedUploadStatus(entry.item.state))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if let error = entry.item.lastError {
+                            Text(error)
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
+                        if entry.item.state == .failed {
+                            HStack {
+                                Button("Retry", systemImage: "arrow.clockwise") {
+                                    performSharedAction { try await sharedUploads.retry(entry, session: session) }
+                                }
+                                Button("Remove", systemImage: "trash", role: .destructive) {
+                                    performSharedAction { try await sharedUploads.remove(entry, session: session) }
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                    .padding(.vertical, 6)
+                }
+            }
+        }
+    }
+
+    private func performSharedAction(_ action: @escaping @MainActor () async throws -> Void) {
+        Task {
+            do { try await action() }
+            catch is CancellationError {}
+            catch { actionError = ErrorEvent(error.localizedDescription) }
+        }
+    }
+
+    private func sharedUploadStatus(_ state: SharedUploadItemState) -> LocalizedStringKey {
+        switch state {
+        case .failed: "Failed"
+        case .uploading: "Uploading"
+        default: "Queued"
+        }
     }
 
     @ViewBuilder
@@ -270,5 +331,6 @@ private struct UploadDetailCard: View {
 #Preview {
     NavigationStack {
         UploadDetailsView()
+            .environment(SessionManager(restoresSession: false))
     }
 }

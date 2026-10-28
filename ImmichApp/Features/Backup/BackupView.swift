@@ -11,6 +11,7 @@ struct BackupView: View {
     @Environment(SessionManager.self) private var session
     @Environment(\.scenePhase) private var scenePhase
     @State private var backup = BackupService.shared
+    @State private var sharedUploads = SharedUploadService.shared
     @State private var library = LocalPhotoLibrary.shared
     @State private var albums: [LocalAlbum] = []
     @State private var isExpanded = false
@@ -48,6 +49,7 @@ struct BackupView: View {
         .navigationDestination(isPresented: $showUploadDetails) { UploadDetailsView() }
         .task {
             backup.configure(session: session)
+            await sharedUploads.refreshPending(session: session)
             albums = await library.albums()
             await backup.prepare()
         }
@@ -243,9 +245,20 @@ struct BackupView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text(statusText)
 
+                if sharedUploads.items.contains(where: { $0.item.state == .failed }) {
+                    Label("Some shared uploads need attention. View Details to retry or remove them.",
+                          systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                }
+                if let error = sharedUploads.lastError {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                }
+
                 // Rincian antrean sengaja menjadi aksi paling bawah di layar,
                 // mengikuti penempatan footer aplikasi Immich resmi.
-                if backup.remainder > 0 || !backup.uploadItems.isEmpty {
+                if backup.remainder > 0 || !backup.uploadItems.isEmpty
+                    || !sharedUploads.items.isEmpty || sharedUploads.lastError != nil {
                     Button {
                         showUploadDetails = true
                     } label: {
