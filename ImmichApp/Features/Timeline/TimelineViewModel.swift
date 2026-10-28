@@ -85,6 +85,7 @@ final class TimelineViewModel {
     /// tanpa jaringan (pratinjau, tes).
     private let matcher: DeviceAssetMatcher?
     private let calendar: Calendar
+    private let localOriginalFile: @MainActor (String) async -> (url: URL, filename: String)?
     private let localPhotos: @MainActor () -> [LocalPhoto]
     /// Accepted favorites for uploaded local fallbacks, until sync supplies the server row.
     private var pendingLocalFavorites: [String: Bool] = [:]
@@ -106,6 +107,9 @@ final class TimelineViewModel {
         albumRepo: AlbumRepository? = nil,
         matcher: DeviceAssetMatcher? = nil,
         calendar: Calendar = .current,
+        localOriginalFile: @escaping @MainActor (String) async -> (url: URL, filename: String)? = {
+            await LocalPhotoLibrary.shared.originalFile(for: $0)
+        },
         localPhotos: @escaping @MainActor () -> [LocalPhoto] = { LocalPhotoLibrary.shared.photos }
     ) {
         self.dataManager = dataManager
@@ -113,6 +117,7 @@ final class TimelineViewModel {
         self.albumRepo = albumRepo
         self.matcher = matcher
         self.localPhotos = localPhotos
+        self.localOriginalFile = localOriginalFile
         // MonthKey memakai kalender Gregorian. Preferensi kalender sistem
         // tidak boleh membuat label harinya memakai bulan/tahun yang berbeda.
         var timelineCalendar = Calendar(identifier: .gregorian)
@@ -901,10 +906,17 @@ final class TimelineViewModel {
     /// Unduh beberapa file asli sekaligus untuk share sheet. Yang gagal dilewati,
     /// bukan membatalkan seluruh operasi.
     func shareURLs(for ids: [String]) async -> [URL] {
+        let policy = AssetVisibilityPolicy(scope: .timeline, dataManager: dataManager)
         guard let assetRepo, accountGeneration == LocalSnapshot.generation,
-              !Task.isCancelled else { return [] }
-        let urls = await assetRepo.shareFiles(ids)
-        guard accountGeneration == LocalSnapshot.generation, !Task.isCancelled else {
+              !Task.isCancelled, ids.allSatisfy({ policy.allows(id: $0) }) else { return [] }
+        let selected = Set(ids)
+        let candidates = Dictionary(uniqueKeysWithValues: allAssets.filter { selected.contains($0.id) }.map { ($0.id, $0) })
+        let urls = await assetRepo.shareFiles(ids, preparingFile: { id in
+            let asset = candidates[id] ?? AssetLite(id: id, isVideo: false, ratio: 1, thumbhash: nil, createdAt: .distantPast)
+            return try await self.prepareShareFile(for: asset, using: assetRepo)
+        })
+        guard accountGeneration == LocalSnapshot.generation, !Task.isCancelled,
+              ids.allSatisfy({ policy.allows(id: $0) }) else {
             TemporaryMediaStore.remove(urls)
             return []
         }
@@ -959,20 +971,47 @@ final class TimelineViewModel {
     /// Unduh file asli ke lokasi sementara untuk dibagikan lewat share sheet
     /// (URL server polos akan kena 401).
     func shareURL(for asset: AssetLite) async -> URL? {
+        let policy = AssetVisibilityPolicy(scope: .timeline, dataManager: dataManager)
         guard let assetRepo, accountGeneration == LocalSnapshot.generation,
-              !Task.isCancelled else { return nil }
+              !Task.isCancelled, policy.allows(id: asset.id) else { return nil }
         do {
-            let url = try await assetRepo.shareFile(asset.id)
-            guard accountGeneration == LocalSnapshot.generation, !Task.isCancelled else {
+            let url = try await prepareShareFile(for: asset, using: assetRepo)
+            guard accountGeneration == LocalSnapshot.generation, !Task.isCancelled,
+                  policy.allows(id: asset.id) else {
                 TemporaryMediaStore.remove(url)
                 return nil
             }
             return url
         } catch {
-            guard accountGeneration == LocalSnapshot.generation, !Task.isCancelled else { return nil }
+            guard accountGeneration == LocalSnapshot.generation, !Task.isCancelled,
+                  !(error is CancellationError), policy.allows(id: asset.id) else { return nil }
             actionError = Self.describe(error)
             return nil
         }
+    }
+
+    private func prepareShareFile(for asset: AssetLite, using repository: AssetDetailRepository) async throws -> URL {
+        let manager = dataManager ?? .shared
+        let policy = AssetVisibilityPolicy(scope: .timeline, dataManager: manager)
+        if LocalPhotoLibrary.isLocal(asset.id) || asset.isOnDevice {
+            let localID = LocalPhotoLibrary.isLocal(asset.id)
+                ? LocalPhotoLibrary.localIdentifier(from: asset.id)
+                : manager.localIdentifier(forServerAsset: asset.id)
+            if let localID, let file = await localOriginalFile(LocalPhotoLibrary.assetID(for: localID)) {
+                defer { try? FileManager.default.removeItem(at: file.url) }
+                try Task.checkCancellation()
+                guard accountGeneration == LocalSnapshot.generation, policy.allows(id: asset.id) else {
+                    throw CancellationError()
+                }
+                return try TemporaryMediaStore.adoptShareFile(at: file.url, suggestedFilename: file.filename)
+            }
+        }
+        try Task.checkCancellation()
+        guard accountGeneration == LocalSnapshot.generation, policy.allows(id: asset.id) else { throw CancellationError() }
+        guard let serverID = AssetServerIdentity.resolve(asset, using: manager) else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        return try await repository.shareFile(serverID)
     }
 
     /// Buang aset dari grid setelah dipindah/dihapus di layar detail.

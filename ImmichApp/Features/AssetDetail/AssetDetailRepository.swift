@@ -194,6 +194,13 @@ class AssetDetailRepository {
 
     @MainActor
     func shareFiles(_ ids: [String]) async -> [URL] {
+        await shareFiles(ids, preparingFile: { try await self.shareFile($0) })
+    }
+
+    @MainActor
+    func shareFiles(
+        _ ids: [String], preparingFile: @MainActor (String) async throws -> URL
+    ) async -> [URL] {
         let context = api.session.snapshot
         let snapshotGeneration = LocalSnapshot.generation
         var urls: [URL] = []
@@ -202,7 +209,7 @@ class AssetDetailRepository {
                 try Task.checkCancellation()
                 try api.checkCurrent(context)
                 guard snapshotGeneration == LocalSnapshot.generation else { throw CancellationError() }
-                let url = try await shareFile(id)
+                let url = try await preparingFile(id)
                 urls.append(url)
                 try Task.checkCancellation()
                 try api.checkCurrent(context)
