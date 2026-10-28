@@ -201,7 +201,8 @@ struct SearchView: View {
                             isSelecting: isSelecting,
                             selectedIDs: selectedIDs,
                             actions: assetActions,
-                            onReachEnd: { Task { await vm.loadMore() } })
+                            onReachEnd: { Task { await vm.loadMore() } },
+                            onOpen: { _ in sharePreparation.cancel() })
                     }
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) {

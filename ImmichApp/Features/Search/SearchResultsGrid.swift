@@ -44,6 +44,7 @@ struct SearchResultsGrid: View {
     /// Aksi context menu per foto, dan kabar balik dari layar detail.
     let actions: SearchAssetActions
     let onReachEnd: () -> Void
+    let onOpen: (String) -> Void
 
     @Environment(SessionManager.self) private var session
     @AppStorage(SettingsViewModel.gridColumnsKey) private var gridColumns = 3
@@ -56,6 +57,7 @@ struct SearchResultsGrid: View {
             configuration: configuration,
             isSelecting: $isSelecting,
             selectedIDs: $selectedIDs,
+            onOpen: onOpen,
             detailScreen: { detailScreen(for: $0) },
             menuActions: { menuActions(for: $0) },
             onReachEnd: onReachEnd,

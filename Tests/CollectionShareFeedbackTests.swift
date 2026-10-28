@@ -91,6 +91,57 @@ final class CollectionShareFeedbackTests: XCTestCase {
             "Covering the collection must not delete a file still being read by its activity controller")
     }
 
+    func testOpeningTheViewerCancelsAHeldContextMenuShare() async throws {
+        try showCollection(status: 200)
+        let gate = CollectionShareNavigationGate()
+        observation.gate = gate
+        let prepared = expectation(description: "The held preparation returns after navigation")
+        observation.preparationReturned = prepared
+        let root = try XCTUnwrap(window?.rootViewController)
+        await waitUntil("The collection grid is mounted") { [self] in
+            self.findPresented(PhotoGridController.self, from: root) != nil
+        }
+        let grid = try XCTUnwrap(findPresented(PhotoGridController.self, from: root))
+        let id = try XCTUnwrap(observation.assetID)
+        let share = try XCTUnwrap(grid.menuActions?(id).first { $0.title == String(localized: "Share") })
+        share.handler()
+        addTeardownBlock { await gate.release() }
+        await fulfillment(of: [gate.started], timeout: 3)
+        XCTAssertEqual(observation.preparations, 1)
+
+        let collection = try XCTUnwrap(collectionView(in: grid.view))
+        await waitUntil("The photo cell is available") {
+            collection.visibleCells.contains { $0 is PhotoGridCell }
+        }
+        let cell = try XCTUnwrap(collection.visibleCells.first { $0 is PhotoGridCell })
+        let index = try XCTUnwrap(collection.indexPath(for: cell))
+        grid.collectionView(collection, didSelectItemAt: index)
+        await waitUntil("The viewer is presented over the collection") { grid.presentedViewController != nil }
+        let detail = try XCTUnwrap(grid.presentedViewController)
+        XCTAssertEqual(detail.modalPresentationStyle, .overFullScreen)
+        await waitForTransition(detail)
+
+        gate.release()
+        await fulfillment(of: [prepared], timeout: 3)
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+
+        XCTAssertTrue(observation.files.isEmpty,
+            "Opening the viewer must cancel the old grid download before it can publish share files")
+        XCTAssertNil(observation.error)
+        XCTAssertNil(findPresented(UIActivityViewController.self, from: root))
+        XCTAssertTrue(grid.presentedViewController === detail)
+        await withCheckedContinuation { continuation in
+            grid.dismiss(animated: false) { continuation.resume() }
+        }
+    }
+
+    private func collectionView(in view: UIView) -> UICollectionView? {
+        if let collection = view as? UICollectionView { return collection }
+        return view.subviews.compactMap { collectionView(in: $0) }.first
+    }
+
     private func showCollection(status: Int) throws {
         let session = MockSessionManager()
         try session.setServer("https://collection-sharing.example")
@@ -111,6 +162,8 @@ final class CollectionShareFeedbackTests: XCTestCase {
                 observation.preparations += 1
                 observation.requestedIDs.append(ids)
                 observation.unexpectedPreparation?.fulfill()
+                if let gate = observation.gate { await gate.wait() }
+                defer { observation.preparationReturned?.fulfill() }
                 let files = await model.shareURLs(for: ids)
                 observation.files.append(contentsOf: files)
                 return files
@@ -218,4 +271,19 @@ private final class CollectionShareObservation {
     var requestedIDs: [[String]] = []
     var files: [URL] = []
     var unexpectedPreparation: XCTestExpectation?
+    var preparationReturned: XCTestExpectation?
+    var gate: CollectionShareNavigationGate?
+}
+
+@MainActor
+private final class CollectionShareNavigationGate {
+    let started = XCTestExpectation(description: "The grid share is held before downloading")
+    private var continuation: CheckedContinuation<Void, Never>?
+    func wait() async {
+        await withCheckedContinuation {
+            continuation = $0
+            started.fulfill()
+        }
+    }
+    func release() { continuation?.resume(); continuation = nil }
 }

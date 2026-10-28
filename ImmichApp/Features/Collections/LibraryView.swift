@@ -80,6 +80,7 @@ struct LibraryView: View {
     var body: some View {
         NavigationStack(path: $navigationPath) {
             assetActionPresentations
+                .onDisappear { sharePreparation.cancel() }
                 // Nav bar TETAP dipakai — blur tepi progresifnya digambar oleh
                 // bar itu; menyembunyikannya berarti kehilangan blurnya. Yang
                 // dimatikan hanya latar solidnya.
@@ -135,7 +136,6 @@ struct LibraryView: View {
                     }
                 }
         }
-        .onDisappear { sharePreparation.cancel() }
     }
 
     @ViewBuilder

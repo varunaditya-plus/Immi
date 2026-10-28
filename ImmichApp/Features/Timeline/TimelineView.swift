@@ -343,6 +343,7 @@ struct TimelineView: View {
                 padsFirstRow: true),
             isSelecting: isSelectingBinding,
             selectedIDs: $selectedIDs,
+            onOpen: { _ in sharePreparation.cancel() },
             detailScreen: { id in detailScreen(for: id, vm) },
             onVisibleSectionChanged: { monthTracker.show($0) },
             menuActions: { id in menuActions(for: id, vm) },

@@ -303,6 +303,7 @@ struct PhotoCollectionScreen<Options: View>: View {
             hero: heroView,
             isSelecting: $isSelecting,
             selectedIDs: $selectedIDs,
+            onOpen: { _ in sharePreparation.cancel() },
             detailScreen: { id in detailScreen(for: id) },
             onAddTapped: onAddPhotos,
             // Ambangnya diukur dari judul sungguhan; mode bulanan tidak punya
