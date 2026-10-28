@@ -127,6 +127,8 @@ final class BackupService {
     var remainder: Int { max(0, total - backedUp) }
     private var countedSelectionScanID: UUID?
     private var countedMappingRevision: UUID?
+    private var hasRemainingPhotos = false
+    private var hasRemainingVideos = false
 
     var selectionStatus: BackupSelectionStatus {
         guard !localLibrary.selectedAlbumIDs.isEmpty else { return .noSelection }
@@ -494,9 +496,15 @@ final class BackupService {
         let photos = localLibrary.photos
         let uploaded = dataManager.uploadedLocalIdentifiers()
         total = photos.count
+        var remainingPhotos = false
+        var remainingVideos = false
         backedUp = photos.reduce(into: 0) { count, photo in
             if uploaded.contains(photo.id) { count += 1 }
+            else if photo.isVideo { remainingVideos = true }
+            else { remainingPhotos = true }
         }
+        hasRemainingPhotos = remainingPhotos
+        hasRemainingVideos = remainingVideos
         countedSelectionScanID = localLibrary.currentSelectionScanID
         countedMappingRevision = dataManager.backupMappingRevision
     }
@@ -778,6 +786,8 @@ final class BackupService {
         backedUp = 0
         countedSelectionScanID = nil
         countedMappingRevision = nil
+        hasRemainingPhotos = false
+        hasRemainingVideos = false
         uploadedThisRun = 0
         pendingThisRun = 0
         failures = []
@@ -940,16 +950,14 @@ final class BackupService {
 
     private var canDiscoverAutomaticallyNow: Bool { networkPolicy.allowsAutomaticDiscovery }
 
-    /// Ada sesuatu yang bisa naik dengan jaringan yang ada sekarang.
-    var canUploadNow: Bool {
-        guard NetworkMonitor.shared.isOnline else { return false }
-        return !NetworkMonitor.shared.isExpensive || allowsCellularUploads
-    }
-
     var allowsCellularUploads: Bool {
-        cellularPhotos || cellularVideos || queue.items.contains {
+        if queue.items.contains(where: {
             $0.allowsCellularOverride && $0.state != .failed && $0.state != .cancelling
+        }) { return true }
+        if selectionStatus == .remaining {
+            return (hasRemainingPhotos && cellularPhotos) || (hasRemainingVideos && cellularVideos)
         }
+        return cellularPhotos || cellularVideos
     }
 
     /// Prepare only a small window of originals. The rest of the queue remains

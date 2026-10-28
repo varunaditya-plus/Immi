@@ -377,6 +377,46 @@ final class BackupStatusReportingTests: XCTestCase {
         XCTAssertFalse(message.contains("retry or remove"))
     }
 
+    func testRemainingVideosWaitForWiFiUntilVideoCellularUploadsAreAllowed() async throws {
+        for allowVideos in [false, true] {
+            let fixture = try fixture(photos: ["video"], videoIDs: ["video"],
+                cellularPhotos: true, cellularVideos: allowVideos)
+            await fixture.library.load()
+            fixture.service.refreshCounts()
+
+            let message = fixture.status.explanation(backup: fixture.service,
+                backgroundRefreshAvailable: true, isOnline: true, isExpensive: true).lowercased()
+
+            XCTAssertEqual(fixture.service.selectionStatus, .remaining)
+            XCTAssertEqual(fixture.service.remainder, 1)
+            XCTAssertEqual(fixture.status, .waiting)
+            XCTAssertEqual(fixture.service.allowsCellularUploads, allowVideos,
+                "The photo preference cannot authorize the remaining video")
+            XCTAssertEqual(message.contains("wi-fi"), !allowVideos)
+            XCTAssertEqual(message.contains("ready"), allowVideos)
+        }
+    }
+
+    func testRemainingPhotosWaitForWiFiUntilPhotoCellularUploadsAreAllowed() async throws {
+        for allowPhotos in [false, true] {
+            let fixture = try fixture(photos: ["photo"],
+                cellularPhotos: allowPhotos, cellularVideos: true)
+            await fixture.library.load()
+            fixture.service.refreshCounts()
+
+            let message = fixture.status.explanation(backup: fixture.service,
+                backgroundRefreshAvailable: true, isOnline: true, isExpensive: true).lowercased()
+
+            XCTAssertEqual(fixture.service.selectionStatus, .remaining)
+            XCTAssertEqual(fixture.service.remainder, 1)
+            XCTAssertEqual(fixture.status, .waiting)
+            XCTAssertEqual(fixture.service.allowsCellularUploads, allowPhotos,
+                "The video preference cannot authorize the remaining photo")
+            XCTAssertEqual(message.contains("wi-fi"), !allowPhotos)
+            XCTAssertEqual(message.contains("ready"), allowPhotos)
+        }
+    }
+
     func testDisabledExplanationDoesNotPromiseAutomaticUploadsForQueuedOrIdleStates() throws {
         for state in [BackupQueueItemState?.none, .some(.queued), .some(.preparing), .some(.failed)] {
             let fixture = try fixture(enabled: false, queueState: state)
@@ -423,12 +463,15 @@ final class BackupStatusReportingTests: XCTestCase {
 
     private func fixture(
         enabled: Bool = true, selection: Set<String> = ["selected"], photos: [String] = [],
+        videoIDs: Set<String> = [], cellularPhotos: Bool = false, cellularVideos: Bool = false,
         queueState: BackupQueueItemState? = nil, queueIntent: BackupQueueIntent? = .manualUpload,
         pendingAlbum: Bool = false,
         scan: ((Set<String>) async -> LocalPhotoScan)? = nil
     ) throws -> BackupStatusFixture {
         UserDefaults.standard.set(enabled, forKey: "backup.enabled")
-        let fixture = try BackupStatusFixture(selection: selection, photoIDs: photos,
+        UserDefaults.standard.set(cellularPhotos, forKey: "backup.cellularPhotos")
+        UserDefaults.standard.set(cellularVideos, forKey: "backup.cellularVideos")
+        let fixture = try BackupStatusFixture(selection: selection, photoIDs: photos, videoIDs: videoIDs,
             queueState: queueState, queueIntent: queueIntent, pendingAlbum: pendingAlbum, scan: scan)
         fixtures.append(fixture)
         return fixture
@@ -452,7 +495,8 @@ private final class BackupStatusFixture {
     var session: BackupStatusSession { retainedSession! }
     var status: BackupStatus { BackupStatus(backup: service, sharedUploads: sharedUploads) }
 
-    init(selection: Set<String>, photoIDs: [String], queueState: BackupQueueItemState?, queueIntent: BackupQueueIntent?,
+    init(selection: Set<String>, photoIDs: [String], videoIDs: Set<String>,
+         queueState: BackupQueueItemState?, queueIntent: BackupQueueIntent?,
          pendingAlbum: Bool, scan: ((Set<String>) async -> LocalPhotoScan)?) throws {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("backup-status-\(UUID())")
         suiteName = "BackupStatusReportingTests.\(UUID())"
@@ -481,6 +525,7 @@ private final class BackupStatusFixture {
             try queue.recordAlbumPlacement(.init(localIdentifier: "mapped", assetID: "server-mapped", albumName: "Selected Album"))
         }
         let access = BackupStatusAccess(photoIDs: photoIDs)
+        access.videoIDs = videoIDs
         self.access = access
         library = LocalPhotoLibrary(defaults: UserDefaults(suiteName: suiteName)!, reader: .init(
             authorizationStatus: { access.authorization },
@@ -546,6 +591,7 @@ private final class BackupStatusSession: SessionManager {
 private final class BackupStatusAccess {
     var authorization = PHAuthorizationStatus.authorized
     var photoIDs: [String]
+    var videoIDs: Set<String> = []
     var reads = 0
     var permissionRequests = 0
 
@@ -555,7 +601,7 @@ private final class BackupStatusAccess {
         let date = Date(timeIntervalSince1970: 1_700_000_000)
         return .init(photos: photoIDs.map {
             LocalPhoto(id: $0, createdAt: date, modifiedAt: date,
-                isVideo: false, isLivePhoto: false, duration: nil, ratio: 1)
+                isVideo: videoIDs.contains($0), isLivePhoto: false, duration: nil, ratio: 1)
         }, albumTitles: Dictionary(uniqueKeysWithValues: photoIDs.map { ($0, "Selected Album") }))
     }
 }
