@@ -77,6 +77,28 @@ final class PhotoPagerPlaybackFailureTests: XCTestCase {
         XCTAssertTrue(try failureView(in: cell).isHidden)
     }
 
+    func testSameAssetReconfiguredWithoutLivePhotoSourceClearsItsFailure() async throws {
+        let loader = PlaybackFailureLoader(sources: [nil])
+        let cell = makeCell(loader: loader, isVideo: false, motionID: "motion-A")
+        defer { cell.stopPlayback() }
+        let failure = try failureView(in: cell)
+        hold(.began, on: cell)
+        try await waitUntil { !failure.isHidden }
+        hold(.ended, on: cell)
+
+        cell.configure(with: asset("A", isVideo: false), loader: loader)
+
+        XCTAssertTrue(failure.isHidden, "A still photo must not retain a message offering to retry its removed Live Photo source")
+        XCTAssertNil(livePlayer(in: cell))
+        hold(.began, on: cell)
+        await fence()
+        XCTAssertEqual(loader.requestedIDs, ["motion-A"])
+        XCTAssertEqual(loader.nativeRequests, 0)
+        XCTAssertFalse(try loadingIndicator(in: cell).isAnimating)
+        XCTAssertNil(livePlayer(in: cell))
+        hold(.ended, on: cell)
+    }
+
     func testQueuedFailureFromReplacedItemCannotFailTheCurrentVideo() async throws {
         let movieURL = try await makePagerPlaybackMovie()
         defer { try? FileManager.default.removeItem(at: movieURL) }

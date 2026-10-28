@@ -387,9 +387,12 @@ final class PhotoPagerCell: UICollectionViewCell {
         }
         loadTask?.cancel()
         loadTask = nil
+        let newLocalLivePhotoAssetID = loader.localLivePhotoAssetID(for: asset.id)
         if currentAssetID != nil,
            currentAssetID != asset.id || self.loader !== loader
-            || accountGeneration != LocalSnapshot.generation || isVideo != asset.isVideo {
+            || accountGeneration != LocalSnapshot.generation || isVideo != asset.isVideo
+            || livePhotoVideoID != asset.livePhotoVideoID
+            || localLivePhotoAssetID != newLocalLivePhotoAssetID {
             // Pertahanan tambahan di luar prepareForReuse: UICollectionView dapat
             // mengonfigurasi ulang sel terlihat tanpa reuse saat datanya ditambal.
             // Tidak satu pun konteks Live Photo lama boleh ikut ke aset baru.
@@ -397,15 +400,13 @@ final class PhotoPagerCell: UICollectionViewCell {
             livePhotoDetectionTask = nil
             livePhotoHint = nil
             stopPlayback()
-            livePhotoVideoID = nil
-            localLivePhotoAssetID = nil
         }
         currentAssetID = asset.id
         accountGeneration = LocalSnapshot.generation
         imageAspect = asset.ratio > 0 ? CGFloat(asset.ratio) : 1
         isVideo = asset.isVideo
         livePhotoVideoID = asset.livePhotoVideoID
-        localLivePhotoAssetID = loader.localLivePhotoAssetID(for: asset.id)
+        localLivePhotoAssetID = newLocalLivePhotoAssetID
         updateLiveBadgeVisibility(animated: false)
         metadataDuration = asset.duration ?? 0
         playButton.isHidden = !asset.isVideo || !playbackFailureView.isHidden || wantsVideoPlayback
