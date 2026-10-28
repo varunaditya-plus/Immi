@@ -37,6 +37,12 @@ class SearchRepository {
     /// Metadata search returns a page-number continuation on supported servers.
     /// A terminal response wins over counts, which can be stale or page-local.
     func allMetadata(_ initialRequest: SearchRequestDTO) async throws -> [AssetResponseDTO] {
+        try await allMetadata(initialRequest, includingRepeatedIDs: false)
+    }
+
+    func allMetadata(
+        _ initialRequest: SearchRequestDTO, includingRepeatedIDs: Bool
+    ) async throws -> [AssetResponseDTO] {
         let visibility = recordsVisibility ? await AssetVisibilityRequest(api: api, dataManager: dataManager) : nil
         var request = initialRequest
         var page = request.page ?? 1
@@ -51,8 +57,9 @@ class SearchRepository {
             await visibility?.record(response.assets.items)
 
             let previousCount = seenIDs.count
-            for item in response.assets.items where seenIDs.insert(item.id).inserted {
-                items.append(item)
+            for item in response.assets.items {
+                let isNew = seenIDs.insert(item.id).inserted
+                if isNew || includingRepeatedIDs { items.append(item) }
             }
             try Task.checkCancellation()
             guard let nextPage = response.assets.nextPage else { return items }

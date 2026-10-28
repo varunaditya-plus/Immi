@@ -419,6 +419,99 @@ final class TrashAssetRetrievalTests: XCTestCase {
         }
     }
 
+    func testLaterPrivateDuplicatesHideEarlierPublicRowsAndProtectMappedCopies() async throws {
+        for (visibility, isTrashed) in [("locked", true), ("hidden", true),
+            ("future-private-visibility", true), ("locked", false)] {
+            let id = "later-private-\(visibility)-\(isTrashed)"
+            try store.restoreToTimeline([AssetLite(makeTestAsset(id: id))])
+            try store.linkDeviceAsset(localIdentifier: "local-\(id)", to: id)
+            var pages: [Int] = []
+            MockURLProtocol.responseProvider = { request in
+                if request.url?.path == "/api/trash/restore" {
+                    XCTAssertEqual(request.httpMethod, "POST")
+                    return (Data(), HTTPURLResponse(url: request.url!, statusCode: 204,
+                        httpVersion: nil, headerFields: nil), nil)
+                }
+                let page = Self.body(request)["page"] as? Int ?? 0
+                pages.append(page)
+                if page == 1 { return Self.response(request, items: [Self.asset(id)], next: "4") }
+                XCTAssertEqual(page, 4)
+                return Self.response(request, items: [Self.asset(id, visibility: visibility, trashed: isTrashed),
+                    Self.asset("public-\(id)")])
+            }
+
+            let result = try await repository.assets()
+
+            XCTAssertEqual(result.map(\.id), ["public-\(id)"],
+                "A later private row must override an earlier public duplicate")
+            XCTAssertEqual(pages, [1, 4])
+            XCTAssertTrue(store.privateAssetIDs.contains(id))
+            let policy = AssetVisibilityPolicy(dataManager: store)
+            XCTAssertFalse(policy.allows(id: id))
+            XCTAssertFalse(policy.allows(id: "device:local-\(id)"))
+            let api = APIClient(session: session, urlSession: transport)
+            let model = AssetGridViewModel(assetRepo: AssetDetailRepository(api: api, dataManager: store),
+                albumRepo: AlbumRepository(api: api), dataManager: store) { result.map(AssetLite.init) }
+            await model.load()
+            let restored = await model.restoreAll(using: repository)
+            XCTAssertTrue(restored)
+            XCTAssertTrue(DeletedServerAssetRegistry.shared.suppressedIDs.isEmpty,
+                "Deletion markers must not be left behind as a substitute for private classification")
+            XCTAssertFalse(policy.allows(id: id))
+            XCTAssertFalse(policy.allows(id: "device:local-\(id)"))
+            let reopened = SwiftDataManager(storeURL: directory.appendingPathComponent("test.store"),
+                backupJournalURL: directory.appendingPathComponent("backup.json"))
+            XCTAssertTrue(reopened.privateAssetIDs.contains(id))
+            let reopenedPolicy = AssetVisibilityPolicy(dataManager: reopened)
+            XCTAssertFalse(reopenedPolicy.allows(id: id))
+            XCTAssertFalse(reopenedPolicy.allows(id: "device:local-\(id)"))
+            XCTAssertFalse(reopened.timelineAssets().contains { $0.asset.id == id })
+        }
+    }
+
+    func testPrivateDuplicateStillWinsWhenANewerMutationPreventsPersistence() async throws {
+        let received = expectation(description: "First raw page is held before a newer mutation")
+        let api = HeldValidatedTrashReadClient(session: session, urlSession: transport, received: received)
+        let repo = TrashRepository(api: api, dataManager: store)
+        MockURLProtocol.responseProvider = { request in
+            if Self.body(request)["page"] as? Int == 1 {
+                return Self.response(request, items: [Self.asset("changed-duplicate")], next: "4")
+            }
+            return Self.response(request, items: [Self.asset("changed-duplicate", visibility: "locked"),
+                Self.asset("retained-public")])
+        }
+        let read = Task { try await repo.assets() }
+        addTeardownBlock { await api.release(); _ = try? await read.value }
+        await fulfillment(of: [received], timeout: 2)
+        try store.patchCachedAsset("unrelated", isFavorite: true)
+        api.release()
+
+        let result = try await read.value
+
+        XCTAssertEqual(result.map(\.id), ["retained-public"],
+            "Raw privacy must still filter the response when its stale context cannot write classifications")
+        XCTAssertTrue(store.privateAssetIDs.isEmpty)
+        XCTAssertTrue(DeletedServerAssetRegistry.shared.suppressedIDs.isEmpty)
+        XCTAssertTrue(RemovedAssets.shared.ids.isEmpty)
+    }
+
+    func testRepeatedPublicRowsRemainUniqueAndKeepTheirArchiveEvidence() async throws {
+        MockURLProtocol.responseProvider = { request in
+            if Self.body(request)["page"] as? Int == 1 {
+                return Self.response(request, items: [Self.asset("repeated-public")], next: "4")
+            }
+            return Self.response(request, items: [Self.asset("repeated-public", visibility: "archive"),
+                Self.asset("another-public"), Self.asset("another-public")])
+        }
+
+        let result = try await repository.assets()
+
+        XCTAssertEqual(result.map(\.id), ["repeated-public", "another-public"])
+        XCTAssertEqual(result.first?.visibility, "archive")
+        XCTAssertEqual(AssetLite(try XCTUnwrap(result.first)).trashVisibility, "archive")
+        XCTAssertTrue(store.privateAssetIDs.isEmpty)
+    }
+
     private nonisolated static func body(_ request: URLRequest) -> [String: Any] {
         let bytes = request.httpBody ?? MockURLProtocol.lastRequestBody ?? Data()
         return (try? JSONSerialization.jsonObject(with: bytes)) as? [String: Any] ?? [:]
