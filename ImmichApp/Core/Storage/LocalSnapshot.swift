@@ -52,23 +52,15 @@ enum LocalSnapshot {
         return try? decoder.decode(T.self, from: data)
     }
 
-    /// - Returns: true kalau isinya BERBEDA dari yang tersimpan.
-    ///
-    /// Nilai baliknya yang membuat penyegaran tidak terasa. Layar sudah
-    /// menggambar potret lama; kalau server menjawab hal yang sama persis,
-    /// memasangnya ulang hanya menyuruh SwiftUI membangun ulang daftar yang
-    /// tidak berubah — dan di grid, itu terlihat sebagai kedipan.
+    /// Best-effort persistence. Returns false when the encoded bytes already
+    /// match or the account generation changed; true otherwise. The result does
+    /// not indicate write success or whether a view needs fresh data published.
     @discardableResult
     static func save<T: Encodable>(
         _ value: T, for key: String, expectedGeneration: UUID? = nil
     ) -> Bool {
         if let expectedGeneration, expectedGeneration != generation { return false }
-        // Gagal mengodekan dilaporkan sebagai BERUBAH, bukan sebagai sama.
-        //
-        // Nilai balik ini dipakai pemanggil untuk memutuskan apakah data segar
-        // dari server perlu dipasang. "Sama" berarti tidak perlu — dan menjawab
-        // itu untuk sesuatu yang bahkan tidak berhasil dibandingkan berarti
-        // membuang jawaban server dan membiarkan potret basi di layar.
+        // A failed comparison cannot establish that the bytes are unchanged.
         guard let data = try? encoder.encode(value) else { return true }
         let destination = url(for: key)
         let existing = try? Data(contentsOf: destination)
