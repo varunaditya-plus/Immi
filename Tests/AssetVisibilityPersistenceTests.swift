@@ -20,7 +20,7 @@ final class AssetVisibilityPersistenceTests: XCTestCase {
         XCTAssertEqual(store.privateAssetIDs, ["locked", "hidden", "unknown"])
         let privateRecords = try store.modelContext.fetch(FetchDescriptor<PrivateAssetRecord>())
         XCTAssertEqual(Set(privateRecords.map(\.id)), ["locked", "hidden", "unknown"])
-        try store.clearAllCache()
+        try store.resetSyncDatabase()
         let reopened = fixture.open()
         XCTAssertEqual(reopened.cachedAssetCount(), 0)
         XCTAssertEqual(reopened.nonTimelineAssetIDs, store.nonTimelineAssetIDs)

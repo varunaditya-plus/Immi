@@ -49,7 +49,6 @@ final class BackupMappingObservationTests: XCTestCase {
         let before = fixture.manager.backupMappingRevision
 
         try fixture.manager.storeChecksums([(localIdentifier: "device-photo", checksum: "hashed-but-not-uploaded")])
-        try fixture.manager.clearAllCache()
         try fixture.manager.resetSyncDatabase()
 
         XCTAssertEqual(fixture.manager.backupMappingRevision, before)

@@ -37,7 +37,7 @@ final class PrivateDeviceCopyTests: XCTestCase {
             let store = fixture.store()
             try store.linkDeviceAsset(localIdentifier: "private-device", to: "private-server")
             try store.applySyncBatch(upserts: [cached("private-server", private: true)], deletedIds: [])
-            try store.clearAllCache()
+            try store.resetSyncDatabase()
             XCTAssertEqual(store.cachedAssetCount(), 0)
         }
         let restored = fixture.store()
@@ -132,7 +132,7 @@ final class PrivateDeviceCopyTests: XCTestCase {
         try store.setTimelineVisibility(["server", "other-private"], inTimeline: false)
         try store.applySyncBatch(upserts: [cached("server", private: false)], deletedIds: [])
         XCTAssertEqual(store.nonTimelineAssetIDs, ["other-private"])
-        try store.clearAllCache()
+        try store.resetSyncDatabase()
         let restored = fixture.store()
         let model = timeline(restored, photos: [photo("device")])
 
@@ -224,7 +224,7 @@ final class PrivateDeviceCopyTests: XCTestCase {
         XCTAssertTrue(restored.uploadedLocalIdentifiers().isEmpty)
     }
 
-    func testOldJournalSeedsPrivacyFromExistingCacheBeforeFullSync() throws {
+    func testOldJournalSeedsPrivacyFromExistingCacheBeforeCacheReset() throws {
         let fixture = try Fixture()
         defer { fixture.cleanup() }
         do {
@@ -237,7 +237,7 @@ final class PrivateDeviceCopyTests: XCTestCase {
         do {
             let upgraded = fixture.store()
             XCTAssertEqual(upgraded.nonTimelineAssetIDs, ["legacy-private"])
-            try upgraded.clearAllCache()
+            try upgraded.resetSyncDatabase()
         }
         XCTAssertEqual(fixture.store().nonTimelineAssetIDs, ["legacy-private"])
     }
@@ -295,7 +295,7 @@ final class PrivateDeviceCopyTests: XCTestCase {
         do {
             let store = fixture.store()
             try store.linkDeviceAsset(localIdentifier: "mapped-device", to: "mapped-server")
-            try store.clearAllCache()
+            try store.resetSyncDatabase()
         }
         try Data("corrupt journal".utf8).write(to: fixture.journalURL, options: .atomic)
         let restored = fixture.store()

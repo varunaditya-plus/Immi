@@ -761,14 +761,6 @@ final class SwiftDataManager {
         }
     }
 
-    func clearAllCache() throws {
-        // Preserve known private visibility before a full sync removes the rows
-        // that identified it. The server may omit locked assets until unlocked.
-        try writeBackupRecordJournal(currentBackupRecordSnapshots())
-        try modelContext.delete(model: CachedAsset.self)
-        try modelContext.save()
-    }
-
     /// Snapshot SQLite yang konsisten untuk dibagikan lewat Sync Status.
     ///
     /// Menyalin file `.store` biasa tidak cukup karena perubahan terbaru bisa
@@ -992,8 +984,7 @@ final class SwiftDataManager {
 
     /// Menghapus seluruh data yang terikat akun dari penyimpanan lokal.
     ///
-    /// Berbeda dari `clearAllCache()`, yang sengaja hanya membuang linimasa saat
-    /// full sync. Logout juga harus menghapus checkpoint sync, pasangan backup,
+    /// Logout juga harus menghapus checkpoint sync, pasangan backup,
     /// dan checksum lokal agar akun berikutnya tidak mewarisi keadaan akun lama.
     func clearAllAccountData() throws {
         visibilityMutationRevision = UUID()
