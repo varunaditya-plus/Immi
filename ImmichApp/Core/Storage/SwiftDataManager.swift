@@ -690,11 +690,23 @@ final class SwiftDataManager {
     /// Only current network responses may refine legacy unknown visibility.
     /// Metadata reads never restore deletions or publish an asset-action revision.
     func recordServerVisibility(_ assets: [AssetResponseDTO]) throws {
+        try recordVisibility(assets.filter { !$0.isTrashed })
+    }
+
+    /// A Trash read may add private restrictions, but cannot release one.
+    func recordTrashRestrictions(_ assets: [AssetResponseDTO]) throws {
+        try recordVisibility(assets.filter {
+            guard $0.isTrashed, let visibility = $0.visibility else { return false }
+            return visibility != "timeline" && visibility != "archive"
+        })
+    }
+
+    private func recordVisibility(_ assets: [AssetResponseDTO]) throws {
         let previousNonTimeline = nonTimelineAssetIDs
         let privateIDs = privateAssetIDs
         var classifications: [String: String] = [:]
         var observedPrivate = false
-        for asset in assets where !asset.isTrashed {
+        for asset in assets {
             let visibility = asset.visibility ?? (asset.isArchived ? "archive" : "timeline")
             let isPrivate = visibility != "timeline" && visibility != "archive"
             if isPrivate { observedPrivate = true }

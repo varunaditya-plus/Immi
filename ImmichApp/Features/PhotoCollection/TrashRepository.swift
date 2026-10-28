@@ -34,6 +34,7 @@ class TrashRepository {
         let ids = trashed.map(\.id)
         if assetRevision == manager.assetMutationRevision,
            RemovedAssets.shared.confirmTrashed(ids, expectedRevision: removedRevision) {
+            try? manager.recordTrashRestrictions(trashed)
             // Private rows stay out of Trash, but their device/cache copies must
             // also stay out of the library after the app restarts.
             DeletedServerAssetRegistry.shared.record(ids, permanently: false)

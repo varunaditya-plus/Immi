@@ -122,7 +122,9 @@ final class TrashAssetRetrievalTests: XCTestCase {
     }
 
     func testCurrentPrivacyAndRemovalStateOverrideTrashResponseRows() async throws {
-        try store.setAssetVisibility(["known-private", "malformed-live-private"], to: "locked")
+        let privateIDs: Set<String> = ["known-private", "archive-labelled-private", "timeline-labelled-private",
+            "malformed-live-private"]
+        try store.setAssetVisibility(Array(privateIDs), to: "locked")
         try store.setAssetVisibility(["known-archive"], to: "archive")
         RemovedAssets.shared.remove(["unavailable"])
         RemovedAssets.shared.remove(["soft-deleted"], reason: .trashed)
@@ -130,6 +132,8 @@ final class TrashAssetRetrievalTests: XCTestCase {
         DeletedServerAssetRegistry.shared.record(["soft-deleted"], permanently: false)
         MockURLProtocol.responseProvider = { request in
             Self.response(request, items: [Self.asset("known-private", visibility: nil),
+                Self.asset("archive-labelled-private", visibility: "archive"),
+                Self.asset("timeline-labelled-private", visibility: "timeline"),
                 Self.asset("known-archive", visibility: "archive"), Self.asset("unavailable"),
                 Self.asset("permanent"), Self.asset("soft-deleted"),
                 Self.asset("malformed-live-private", trashed: false)])
@@ -138,7 +142,7 @@ final class TrashAssetRetrievalTests: XCTestCase {
         let items = try await repository.assets()
 
         XCTAssertEqual(items.map(\.id), ["known-archive", "soft-deleted"])
-        XCTAssertEqual(store.privateAssetIDs, ["known-private", "malformed-live-private"],
+        XCTAssertEqual(store.privateAssetIDs, privateIDs,
             "Trash metadata cannot release privacy protection, including malformed live response rows")
         XCTAssertTrue(DeletedServerAssetRegistry.shared.isPermanentlyDeleted("permanent"))
         XCTAssertTrue(DeletedServerAssetRegistry.shared.isTrashed("soft-deleted"))
@@ -271,7 +275,8 @@ final class TrashAssetRetrievalTests: XCTestCase {
             guard release.wait(timeout: .now() + 5) == .success else {
                 return (nil, nil, URLError(.timedOut))
             }
-            return Self.response(request, items: [Self.asset("old-query-row")])
+            return Self.response(request, items: [Self.asset("old-query-row"),
+                Self.asset("stale-private-row", visibility: "locked")])
         }
         let repo = try XCTUnwrap(repository)
         let load = Task { try await repo.assets() }
@@ -284,6 +289,8 @@ final class TrashAssetRetrievalTests: XCTestCase {
 
         XCTAssertEqual(items.map(\.id), ["old-query-row"])
         XCTAssertFalse(RemovedAssets.shared.contains("old-query-row"))
+        XCTAssertTrue(store.privateAssetIDs.isEmpty,
+            "A response predating a mutation cannot publish raw private classifications")
         XCTAssertTrue(DeletedServerAssetRegistry.shared.suppressedIDs.isEmpty)
     }
 
@@ -353,6 +360,63 @@ final class TrashAssetRetrievalTests: XCTestCase {
         XCTAssertEqual(LocalSnapshot.load([AssetLite].self, for: key)?.map(\.id), ["ordinary", "archive"])
         XCTAssertEqual(pages, [1, 4, 1, 4])
         XCTAssertNotNil(model.phase.value)
+    }
+
+    func testRawPrivateTrashEvidenceSurvivesRestoreAllForCachedAndMappedCopies() async throws {
+        let visibilities = ["locked", "hidden", "future-private-visibility"]
+        let ids = visibilities.map { "raw-private-\($0)" }
+        for id in ids {
+            try store.restoreToTimeline([AssetLite(makeTestAsset(id: id))])
+            try store.linkDeviceAsset(localIdentifier: "device-\(id)", to: id)
+        }
+        XCTAssertTrue(store.privateAssetIDs.isEmpty, "Only this query supplies private visibility evidence")
+        MockURLProtocol.responseProvider = { request in
+            if request.url?.path == "/api/search/metadata" {
+                return Self.response(request, items: zip(ids, visibilities).map { Self.asset($0.0, visibility: $0.1) })
+            }
+            XCTAssertEqual(request.url?.path, "/api/trash/restore")
+            XCTAssertEqual(request.httpMethod, "POST")
+            return (Data(), HTTPURLResponse(url: request.url!, statusCode: 204,
+                httpVersion: nil, headerFields: nil), nil)
+        }
+        let api = APIClient(session: session, urlSession: transport)
+        let repo = try XCTUnwrap(repository)
+        let model = AssetGridViewModel(assetRepo: AssetDetailRepository(api: api, dataManager: store),
+            albumRepo: AlbumRepository(api: api), dataManager: store) {
+                try await repo.assets().map(AssetLite.init)
+            }
+        await model.load()
+        XCTAssertTrue(model.assets.isEmpty)
+        XCTAssertEqual(store.privateAssetIDs, Set(ids))
+        XCTAssertEqual(DeletedServerAssetRegistry.shared.trashedIDs, Set(ids))
+        let before = AssetVisibilityPolicy(dataManager: store)
+        for id in ids {
+            XCTAssertFalse(before.allows(id: id))
+            XCTAssertFalse(before.allows(id: "device:device-\(id)"))
+        }
+
+        let succeeded = await model.restoreAll(using: repo)
+
+        XCTAssertTrue(succeeded)
+        XCTAssertEqual(MockURLProtocol.lastRequest?.url?.path, "/api/trash/restore")
+        XCTAssertTrue(DeletedServerAssetRegistry.shared.trashedIDs.isEmpty)
+        let after = AssetVisibilityPolicy(dataManager: store)
+        for id in ids {
+            XCTAssertFalse(after.allows(id: id), "A restored private server row must stay private")
+            XCTAssertFalse(after.allows(id: "device:device-\(id)"), "A restored private device copy must stay private")
+        }
+        XCTAssertTrue(store.timelineAssets().isEmpty, "Stale cached private rows must never reenter the timeline")
+        let reopened = SwiftDataManager(storeURL: directory.appendingPathComponent("test.store"),
+            backupJournalURL: directory.appendingPathComponent("backup.json"))
+        XCTAssertEqual(reopened.privateAssetIDs, Set(ids), "Raw private Trash evidence must survive reopening")
+        XCTAssertTrue(reopened.timelineAssets().isEmpty)
+        XCTAssertTrue(DeletedServerAssetRegistry().suppressedIDs.isEmpty,
+            "Private classification must protect restored rows without leftover deletion markers")
+        let reopenedPolicy = AssetVisibilityPolicy(dataManager: reopened)
+        for id in ids {
+            XCTAssertFalse(reopenedPolicy.allows(id: id))
+            XCTAssertFalse(reopenedPolicy.allows(id: "device:device-\(id)"))
+        }
     }
 
     private nonisolated static func body(_ request: URLRequest) -> [String: Any] {
