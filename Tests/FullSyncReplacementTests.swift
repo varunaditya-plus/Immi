@@ -17,6 +17,33 @@ final class FullSyncReplacementTests: XCTestCase {
         try await super.tearDown()
     }
 
+    func testFullSnapshotRestoresDurableTrashEvidenceAndSuppressesOnlyKnownStaleTrashRows() async throws {
+        let fixture = try FullSyncFixture()
+        defer { fixture.cleanup() }
+        DeletedServerAssetRegistry.shared.record(["keep", "still-trashed"], permanently: false)
+        let snapshot = ["keep", "still-trashed", "ordinary"].map { AssetLite(makeTestAsset(id: $0)) }
+        LocalSnapshot.save(snapshot, for: LocalSnapshot.Key.trash)
+        defer { LocalSnapshot.remove(LocalSnapshot.Key.trash) }
+        XCTAssertTrue(RemovedAssets.shared.ids.isEmpty)
+        fixture.transport.responses = [.body(FullSyncTransport.asset("keep")
+            + FullSyncTransport.asset("ordinary") + FullSyncTransport.complete)]
+
+        try await fixture.repository.fullSync()
+
+        XCTAssertFalse(DeletedServerAssetRegistry().isTrashed("keep"))
+        XCTAssertNotNil(fixture.reopen().getCachedAsset(id: "keep"))
+        let library = AssetVisibilityPolicy(dataManager: fixture.dataManager)
+        let trash = AssetVisibilityPolicy(removalScope: .trash, dataManager: fixture.dataManager)
+        XCTAssertTrue(library.allows(id: "keep"))
+        XCTAssertFalse(trash.allows(id: "keep"))
+        XCTAssertTrue(trash.allows(id: "ordinary"), "Full snapshots must only suppress IDs previously known to be soft-deleted")
+        RemovedAssets.shared.clear()
+        XCTAssertEqual(LocalSnapshot.load([AssetLite].self, for: LocalSnapshot.Key.trash)?.map(\.id),
+            ["still-trashed", "ordinary"], "A second launch must retain other rows without reviving the confirmed restore")
+        XCTAssertTrue(DeletedServerAssetRegistry().isTrashed("still-trashed"))
+        XCTAssertEqual(fixture.transport.acknowledgmentCount, 1)
+    }
+
     func testMalformedStreamAfterMoreThanOneBatchPreservesWorkingCacheAndRegistries() async throws {
         let fixture = try FullSyncFixture()
         defer { fixture.cleanup() }

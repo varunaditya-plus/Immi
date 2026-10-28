@@ -140,7 +140,6 @@ class SyncRepository {
                 } else if let staging {
                     try staging.append(makeCachedAsset(asset), visibility: asset.visibility)
                 } else {
-                    DeletedServerAssetRegistry.shared.restore([asset.id])
                     upserts.append(makeCachedAsset(asset))
                     visibilityByID[asset.id] = asset.visibility
                 }
@@ -156,7 +155,6 @@ class SyncRepository {
                 } else if let staging {
                     try staging.append(makeCachedAsset(asset), visibility: asset.visibility)
                 } else {
-                    DeletedServerAssetRegistry.shared.restore([asset.id])
                     upserts.append(makeCachedAsset(asset))
                     visibilityByID[asset.id] = asset.visibility
                 }

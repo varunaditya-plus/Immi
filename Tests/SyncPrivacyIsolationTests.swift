@@ -14,6 +14,35 @@ final class SyncPrivacyIsolationTests: XCTestCase {
         DeletedServerAssetRegistry.shared.clear()
     }
 
+    func testV1AndV2DeltaRestoreDurableTrashEvidenceBeforeAcceptingStaleTrashActions() async throws {
+        for major in [2, 3] {
+            let fixture = try PrivacySyncFixture(serverMajor: major)
+            defer { fixture.cleanup() }
+            DeletedServerAssetRegistry.shared.record(["stream-250", "still-trashed"], permanently: false)
+            let snapshot = ["stream-250", "still-trashed", "ordinary"].map { AssetLite(makeTestAsset(id: $0)) }
+            LocalSnapshot.save(snapshot, for: LocalSnapshot.Key.trash)
+            defer { LocalSnapshot.remove(LocalSnapshot.Key.trash) }
+            XCTAssertTrue(RemovedAssets.shared.ids.isEmpty, "A cold launch retains only durable deletion evidence")
+            let sync = Task { try await fixture.repository.deltaSync() }
+            try await waitForInitialChunk(in: fixture)
+            fixture.transport.finishStream()
+            try await sync.value
+
+            XCTAssertFalse(DeletedServerAssetRegistry().isTrashed("stream-250"))
+            XCTAssertNotNil(fixture.reopenStore().getCachedAsset(id: "stream-250"))
+            let library = AssetVisibilityPolicy(dataManager: fixture.store)
+            let trash = AssetVisibilityPolicy(removalScope: .trash, dataManager: fixture.store)
+            XCTAssertTrue(library.allows(id: "stream-250"))
+            XCTAssertFalse(trash.allows(id: "stream-250"), "The retained Trash row must not allow deleting the now-active photo")
+            XCTAssertTrue(trash.allows(id: "stream-1"), "Ordinary sync rows must not gain speculative Trash exclusions")
+            RemovedAssets.shared.clear()
+            XCTAssertEqual(LocalSnapshot.load([AssetLite].self, for: LocalSnapshot.Key.trash)?.map(\.id),
+                ["still-trashed", "ordinary"])
+            XCTAssertTrue(DeletedServerAssetRegistry().isTrashed("still-trashed"))
+            XCTAssertEqual(fixture.transport.acknowledgmentCount, 1)
+        }
+    }
+
     func testConfirmedLocalDeleteRejectsAnOlderStreamBeforeItCanRestoreTheDeletedID() async throws {
         let fixture = try PrivacySyncFixture()
         defer { fixture.cleanup() }

@@ -323,7 +323,7 @@ final class SwiftDataManager {
         }
 
         let deleted = Set(deletedIds)
-        RemovedAssets.shared.restore(upserts.map(\.id).filter { !deleted.contains($0) })
+        publishRestorations(upserts.map(\.id).filter { !deleted.contains($0) })
         // Upsert-only deltas must also invalidate older in-flight snapshots.
         if !upserts.isEmpty, deletedIds.isEmpty {
             assetMutationRevision = UUID()
@@ -451,11 +451,10 @@ final class SwiftDataManager {
         nonTimelineAssetIDs = nonTimeline
         archivedAssetIDs = archived
         visibilityNeedsPersistence = false
-        DeletedServerAssetRegistry.shared.restore(Array(activeIDs))
         DeletedServerAssetRegistry.shared.record(Array(trashedIDs), permanently: false)
         DeletedServerAssetRegistry.shared.record(Array(permanentlyDeletedIDs), permanently: true)
         publishRemovals(Array(removedIDs))
-        RemovedAssets.shared.restore(Array(activeIDs))
+        publishRestorations(Array(activeIDs))
         assetMutationRevision = UUID()
         WidgetSnapshotExporter.clear()
     }
@@ -539,6 +538,21 @@ final class SwiftDataManager {
                     context.insert(PrivateAssetRecord(id: id))
                 }
             }
+        }
+    }
+
+    private func publishRestorations(_ ids: [String]) {
+        let deleted = DeletedServerAssetRegistry.shared
+        let restoredTrash = Set(ids.filter { deleted.isTrashed($0) && !deleted.isPermanentlyDeleted($0) })
+        deleted.restore(ids)
+        RemovedAssets.shared.restore(ids.filter { !restoredTrash.contains($0) })
+        // A cold launch has durable Trash evidence but no runtime removal IDs.
+        // Only those known soft-deleted photos need a retained-Trash exclusion.
+        RemovedAssets.shared.restoreFromTrash(Array(restoredTrash))
+        if !restoredTrash.isEmpty,
+           let snapshot = LocalSnapshot.load([AssetLite].self, for: LocalSnapshot.Key.trash) {
+            LocalSnapshot.save(snapshot.filter { !restoredTrash.contains($0.id) }, for: LocalSnapshot.Key.trash,
+                expectedGeneration: LocalSnapshot.generation)
         }
     }
 
