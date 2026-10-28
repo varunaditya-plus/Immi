@@ -39,6 +39,8 @@ enum BackupStatus: Equatable {
             self = .failed
         } else if hasError {
             self = .error
+        } else if !backup.uploadItems.isEmpty, !backup.hasPhotosAccess, backup.waitingForAuthentication == 0 {
+            self = .photosAccess
         } else if !backup.uploadItems.isEmpty || !sharedUploads.items.isEmpty || backup.hasPendingAlbumPlacements {
             self = .waiting
         } else if !backup.isEnabled {
@@ -93,6 +95,9 @@ enum BackupStatus: Equatable {
         backup: BackupService, backgroundRefreshAvailable: Bool, isOnline: Bool, isExpensive: Bool
     ) -> String {
         guard backup.isEnabled else {
+            if self == .photosAccess {
+                return String(localized: "Automatic backup is off. Allow Photos access to resume requested uploads.")
+            }
             return String(localized: "Automatic backup is off. Manual uploads and transfers already in progress can still finish.")
         }
         switch self {

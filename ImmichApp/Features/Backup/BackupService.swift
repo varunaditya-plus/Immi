@@ -133,6 +133,7 @@ final class BackupService {
     private var countedMediaTypes: [String: Bool] = [:]
     private var lastQueueError: String?
 
+    var hasPhotosAccess: Bool { localLibrary.isAuthorized }
     var hasLimitedPhotosAccess: Bool { localLibrary.authorizationStatus == .limited }
 
     private var hasCurrentCounts: Bool {

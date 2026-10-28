@@ -498,6 +498,58 @@ final class BackupStatusReportingTests: XCTestCase {
         XCTAssertEqual(fixture.status, .waiting)
     }
 
+    func testQueuedNativeUploadsExplainMissingPhotosAccessRegardlessOfAlbumSelection() throws {
+        for enabled in [false, true] {
+            for selection in [Set<String>(), ["selected"]] {
+                let fixture = try fixture(enabled: enabled, selection: selection, queueState: .queued)
+                fixture.access.authorization = .denied
+                fixture.library.refreshAuthorizationStatus()
+
+                XCTAssertFalse(fixture.service.hasPhotosAccess)
+                XCTAssertEqual(fixture.status, .photosAccess)
+                let message = fixture.status.explanation(backup: fixture.service,
+                    backgroundRefreshAvailable: true, isOnline: true, isExpensive: false).lowercased()
+                XCTAssertTrue(message.contains("photos"))
+                XCTAssertFalse(message.contains("ready"))
+                if !enabled {
+                    XCTAssertTrue(message.contains("off"))
+                    XCTAssertTrue(message.contains("requested uploads"))
+                }
+            }
+        }
+    }
+
+    func testActiveNativeAndSharedTransfersRemainVisibleAfterPhotosAccessIsRevoked() async throws {
+        let native = try fixture(queueState: .uploading)
+        native.access.authorization = .denied
+        native.library.refreshAuthorizationStatus()
+        XCTAssertFalse(native.service.hasPhotosAccess)
+        XCTAssertTrue(native.service.isUploading)
+        XCTAssertEqual(native.status, .uploading)
+
+        let shared = try fixture(selection: [], queueState: .queued)
+        shared.access.authorization = .denied
+        shared.library.refreshAuthorizationStatus()
+        try await shared.seedSharedUpload(state: .uploading)
+        await shared.sharedUploads.refreshPending(session: shared.session)
+        XCTAssertFalse(shared.service.hasPhotosAccess)
+        XCTAssertFalse(shared.service.isUploading)
+        XCTAssertEqual(shared.status, .uploading)
+    }
+
+    func testSignInRecoveryTakesPriorityOverPhotosAccessForAnAuthenticationWait() throws {
+        let fixture = try fixture(queueState: .waitingForAuthentication)
+        fixture.access.authorization = .denied
+        fixture.library.refreshAuthorizationStatus()
+
+        XCTAssertFalse(fixture.service.hasPhotosAccess)
+        XCTAssertEqual(fixture.status, .waiting)
+        let message = fixture.status.explanation(backup: fixture.service,
+            backgroundRefreshAvailable: true, isOnline: false, isExpensive: false).lowercased()
+        XCTAssertTrue(message.contains("sign in"))
+        XCTAssertFalse(message.contains("photos"))
+    }
+
     func testDisabledExplanationDoesNotPromiseAutomaticUploadsForQueuedOrIdleStates() throws {
         for state in [BackupQueueItemState?.none, .some(.queued), .some(.preparing), .some(.failed)] {
             let fixture = try fixture(enabled: false, queueState: state)
