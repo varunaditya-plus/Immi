@@ -1356,11 +1356,7 @@ struct AssetDetailView: View {
     }
 
     private func serverAssetID(for asset: AssetLite) -> String? {
-        guard LocalPhotoLibrary.isLocal(asset.id) else {
-            return asset.origin == .device ? nil : asset.id
-        }
-        let localID = LocalPhotoLibrary.localIdentifier(from: asset.id)
-        return SwiftDataManager.shared.getBackupRecord(localIdentifier: localID)?.assetId
+        AssetServerIdentity.resolve(asset)
     }
 
     private var editablePixelSize: CGSize? {

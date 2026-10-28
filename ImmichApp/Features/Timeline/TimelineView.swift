@@ -376,14 +376,12 @@ struct TimelineView: View {
     /// Dulu tiap sel memasang context menu sendiri begitu ia masuk layar. Di
     /// grid yang digulir cepat itu puluhan pemasangan interaksi per detik, untuk
     /// menu yang hampir tidak pernah dibuka.
-    private func menuActions(
+    func menuActions(
         for id: String,
         _ vm: TimelineViewModel
     ) -> [PhotoGridMenuAction] {
         guard let asset = vm.asset(for: id) else { return [] }
         var actions: [PhotoGridMenuAction] = [
-            // Tiga teratas jadi BARIS IKON di puncak menu — lihat
-            // `PhotoGridMenuGroup`.
             PhotoGridMenuAction(
                 title: String(localized: "Share"),
                 systemImage: "square.and.arrow.up",
@@ -391,43 +389,47 @@ struct TimelineView: View {
             ) {
                 Task { await shareAsset(asset, vm) }
             },
-            PhotoGridMenuAction(
-                title: asset.isFavorite
-                    ? String(localized: "Unfavorite")
-                    : String(localized: "Favorite"),
-                systemImage: asset.isFavorite ? "heart.fill" : "heart",
-                group: .quick
-            ) {
-                Task {
-                    // Getarnya HANYA setelah server menerimanya. Bergetar lebih
-                    // dulu berarti memberi tahu "sudah" untuk sesuatu yang belum
-                    // tentu terjadi.
-                    if await vm.toggleFavorite(asset) { favoriteFeedback += 1 }
-                }
-            },
-            PhotoGridMenuAction(
-                title: String(localized: "Archive"),
-                systemImage: "archivebox",
-                group: .quick
-            ) {
-                Task { await vm.archive(asset) }
-            },
-            PhotoGridMenuAction(
-                title: String(localized: "Add to Album"),
-                systemImage: "rectangle.stack.badge.plus"
-            ) {
-                albumPickerAsset = asset
-            },
-            PhotoGridMenuAction(
-                title: String(localized: "Move to Locked Folder"),
-                systemImage: "lock"
-            ) {
-                Task { await vm.lockSelected([asset.id]) }
-            },
-            PhotoGridMenuAction(title: String(localized: "Share Link"), systemImage: "link") {
-                createSharedLink(for: [asset.id])
-            },
         ]
+        if vm.serverAssetIDs(for: [asset.id]) != nil {
+            actions.append(contentsOf: [
+                PhotoGridMenuAction(
+                    title: asset.isFavorite
+                        ? String(localized: "Unfavorite")
+                        : String(localized: "Favorite"),
+                    systemImage: asset.isFavorite ? "heart.fill" : "heart",
+                    group: .quick
+                ) {
+                    Task {
+                        // Getarnya HANYA setelah server menerimanya. Bergetar lebih
+                        // dulu berarti memberi tahu "sudah" untuk sesuatu yang belum
+                        // tentu terjadi.
+                        if await vm.toggleFavorite(asset) { favoriteFeedback += 1 }
+                    }
+                },
+                PhotoGridMenuAction(
+                    title: String(localized: "Archive"),
+                    systemImage: "archivebox",
+                    group: .quick
+                ) {
+                    Task { await vm.archive(asset) }
+                },
+                PhotoGridMenuAction(
+                    title: String(localized: "Add to Album"),
+                    systemImage: "rectangle.stack.badge.plus"
+                ) {
+                    albumPickerAsset = asset
+                },
+                PhotoGridMenuAction(
+                    title: String(localized: "Move to Locked Folder"),
+                    systemImage: "lock"
+                ) {
+                    Task { await vm.lockSelected([asset.id]) }
+                },
+                PhotoGridMenuAction(title: String(localized: "Share Link"), systemImage: "link") {
+                    createSharedLink(for: [asset.id])
+                },
+            ])
+        }
 
         // Disisipkan SEBELUM "Delete", supaya yang paling berat tetap paling
         // bawah — urutan itu yang membuat menu bisa dibaca dari atas ke bawah
@@ -574,48 +576,56 @@ struct TimelineView: View {
 
     /// Aksi mode pilih untuk linimasa.
     private var selectionActions: SelectionActions {
-        let ids = Array(selectedIDs)
-        let selectedAssets = ids.compactMap { vm?.asset(for: $0) }
+        guard let vm else { return SelectionActions() }
+        return selectionActions(for: Array(selectedIDs), vm)
+    }
+
+    func selectionActions(for ids: [String], _ vm: TimelineViewModel) -> SelectionActions {
+        let selectedAssets = ids.compactMap { vm.asset(for: $0) }
         let localIDs = DeviceCopyDeletion.localIdentifiers(for: selectedAssets)
         var actions = SelectionActions()
         actions.isBusy = isPreparingSelectionShare
             || isPerformingSelectionAction
             || isRemovingDeviceSelection
-            || selectedIDs.isEmpty
+            || ids.isEmpty
 
         actions.share = { shareSelection() }
-        actions.favorite = {
-            runSelection {
-                let succeeded = await vm?.favoriteSelected(ids) ?? false
-                if succeeded { favoriteFeedback += 1 }
-                return succeeded
+        let supportsServerActions = ids.isEmpty || vm.serverAssetIDs(for: ids) != nil
+        if supportsServerActions {
+            actions.favorite = {
+                runSelection {
+                    let succeeded = await vm.favoriteSelected(ids)
+                    if succeeded { favoriteFeedback += 1 }
+                    return succeeded
+                }
             }
+            actions.archive = { runSelection { await vm.archiveSelected(ids) } }
         }
-        actions.archive = { runSelection { await vm?.archiveSelected(ids) ?? false } }
         // Konfirmasi dimiliki tombol Trash-nya sendiri. Ini menjaga anchor dan
         // animasi presentasi berasal dari posisi tombol di bottom toolbar,
         // bukan muncul sebagai dialog milik layar di tengah.
         actions.trashConfirmation = SelectionConfirmation(
             title: deleteConfirmTitle,
-            message: String(localized: "This cannot be undone."),
             options: [SelectionConfirmationOption(
                 title: String(localized: "Delete"),
                 isDestructive: true,
                 handler: deleteSelection)])
-        actions.menu = [
-            SelectionMenuAction(title: "Share Link", systemImage: "link") {
-                createSharedLink(for: ids)
-            },
-            SelectionMenuAction(
-                title: "Add to Album",
-                systemImage: "rectangle.stack.badge.plus"
-            ) {
-                albumPickerSelection = SelectedAssets(ids: ids)
-            },
-            SelectionMenuAction(title: "Move to Locked Folder", systemImage: "lock") {
-                runSelection { await vm?.lockSelected(ids) ?? false }
-            },
-        ]
+        if supportsServerActions {
+            actions.menu = [
+                SelectionMenuAction(title: "Share Link", systemImage: "link") {
+                    createSharedLink(for: ids)
+                },
+                SelectionMenuAction(
+                    title: "Add to Album",
+                    systemImage: "rectangle.stack.badge.plus"
+                ) {
+                    albumPickerSelection = SelectedAssets(ids: ids)
+                },
+                SelectionMenuAction(title: "Move to Locked Folder", systemImage: "lock") {
+                    runSelection { await vm.lockSelected(ids) }
+                },
+            ]
+        }
         if !localIDs.isEmpty {
             actions.menu.append(SelectionMenuAction(
                 title: removeFromDeviceTitle(localIDs.count),
@@ -633,23 +643,14 @@ struct TimelineView: View {
     }
 
     private func createSharedLink(for ids: [String]) {
-        guard !ids.isEmpty, !isPerformingSelectionAction else { return }
+        guard let vm, !ids.isEmpty, !isPerformingSelectionAction else { return }
         isPerformingSelectionAction = true
         let repo = SharedLinkRepository(api: APIClient(session: session))
+        let baseURL = session.baseURL
         Task {
             defer { isPerformingSelectionAction = false }
-            vm?.actionError = nil
-            do {
-                let link = try await repo.create(assetIds: ids)
-                guard let url = link.publicURL(base: session.baseURL) else {
-                    vm?.actionError = String(localized: "Failed to create shared link")
-                    return
-                }
-                selectionLink = SharedLinkPresentation(url: url)
-            } catch {
-                vm?.actionError = (error as? APIError)?.errorDescription
-                    ?? String(localized: "Failed to create shared link")
-            }
+            guard let url = await vm.createSharedLink(for: ids, using: repo, baseURL: baseURL) else { return }
+            selectionLink = SharedLinkPresentation(url: url)
         }
     }
 

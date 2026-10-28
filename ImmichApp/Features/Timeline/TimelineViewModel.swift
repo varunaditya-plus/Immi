@@ -86,6 +86,8 @@ final class TimelineViewModel {
     private let matcher: DeviceAssetMatcher?
     private let calendar: Calendar
     private let localPhotos: @MainActor () -> [LocalPhoto]
+    /// Accepted favorites for uploaded local fallbacks, until sync supplies the server row.
+    private var pendingLocalFavorites: [String: Bool] = [:]
 
     /// Maksimal tiga tanggal teramai per bulan, ditampilkan lama → baru.
     var monthNavigationItems: [TimelineNavigationItem] {
@@ -289,7 +291,9 @@ final class TimelineViewModel {
         let serverRows = markDeviceCopies((dataManager?.timelineAssets() ?? []).filter {
             !privateIDs.contains($0.asset.id)
         })
-        let deviceRows = localRows(existingServerIDs: Set(serverRows.map(\.asset.id)))
+        let existingServerIDs = Set(serverRows.map(\.asset.id))
+        pendingLocalFavorites = pendingLocalFavorites.filter { !existingServerIDs.contains($0.key) }
+        let deviceRows = localRows(existingServerIDs: existingServerIDs)
         guard !deviceRows.isEmpty else { return serverRows }
         guard !serverRows.isEmpty else { return deviceRows }
 
@@ -335,12 +339,14 @@ final class TimelineViewModel {
             .union(dataManager?.nonTimelineAssetIDs ?? [])
         return localPhotos().compactMap { photo -> TimelineRow? in
             var origin = AssetOrigin.device
+            var isFavorite = false
             if let serverID = links[photo.id] {
                 // Backup mappings survive deletion, archive, and locking. The
                 // mapping must not make a private asset visible as a local copy.
                 guard !suppressedServerIDs.contains(serverID),
                       !existingServerIDs.contains(serverID) else { return nil }
                 origin = .both
+                isFavorite = pendingLocalFavorites[serverID] ?? false
             }
 
             return TimelineRow(
@@ -350,6 +356,7 @@ final class TimelineViewModel {
                     ratio: photo.ratio,
                     thumbhash: nil,
                     createdAt: photo.createdAt,
+                    isFavorite: isFavorite,
                     duration: photo.duration,
                     origin: origin),
                 monthKey: MonthKey.of(photo.createdAt))
@@ -511,6 +518,55 @@ final class TimelineViewModel {
 
     // MARK: - Aksi context menu
 
+    private var canMutate: Bool {
+        !Task.isCancelled && accountGeneration == LocalSnapshot.generation
+    }
+
+    func serverAssetIDs(for ids: [String]) -> [String]? {
+        serverActionTargets(for: ids)?.map(\.serverID)
+    }
+
+    private func serverActionTargets(for ids: [String]) -> [ServerAssetTarget]? {
+        guard canMutate, !ids.isEmpty else { return nil }
+        let policy = AssetVisibilityPolicy(scope: .timeline, dataManager: dataManager)
+        let localMappings = ids.contains(where: LocalPhotoLibrary.isLocal)
+            ? (dataManager?.serverAssetIDsByLocalIdentifier() ?? [:]) : [:]
+        var targets: [ServerAssetTarget] = []
+        var seen = Set<String>()
+        for id in ids {
+            guard let asset = asset(for: id), policy.allows(id: id),
+                  let serverID = AssetServerIdentity.resolve(asset, using: dataManager,
+                    localMappings: localMappings) else { return nil }
+            if seen.insert(serverID).inserted {
+                targets.append(ServerAssetTarget(displayID: id, serverID: serverID))
+            }
+        }
+        return targets
+    }
+
+    private func actionTargets(for ids: [String]) -> [ServerAssetTarget]? {
+        guard let targets = serverActionTargets(for: ids) else {
+            if canMutate, !ids.isEmpty { actionError = String(localized: "Failed to find this photo on the server") }
+            return nil
+        }
+        return targets
+    }
+
+    private func targetIsCurrent(_ target: ServerAssetTarget) -> Bool {
+        guard let asset = asset(for: target.displayID),
+              AssetServerIdentity.resolve(asset, using: dataManager) == target.serverID else { return false }
+        return AssetVisibilityPolicy(scope: .timeline, dataManager: dataManager).allows(id: target.displayID)
+    }
+
+    private func removeServerAsset(_ serverID: String) {
+        let localMappings = allAssets.contains(where: { LocalPhotoLibrary.isLocal($0.id) })
+            ? (dataManager?.serverAssetIDsByLocalIdentifier() ?? [:]) : [:]
+        let ids = Set(allAssets.filter {
+            AssetServerIdentity.resolve($0, using: dataManager, localMappings: localMappings) == serverID
+        }.map(\.id))
+        removeAssets(ids)
+    }
+
     /// Daftar album untuk "Add to Album"; cukup dimuat sekali.
     func loadAlbumsIfNeeded() async {
         guard albums.isEmpty, let albumRepo else { return }
@@ -524,15 +580,17 @@ final class TimelineViewModel {
     ///   umpan balik getar hanya saat perubahannya benar-benar terjadi.
     @discardableResult
     func toggleFavorite(_ asset: AssetLite) async -> Bool {
+        guard canMutate else { return false }
         actionError = nil
-        guard let assetRepo else { return false }
+        guard let assetRepo, let target = actionTargets(for: [asset.id])?.first else { return false }
         let newValue = !asset.isFavorite
         do {
-            try await assetRepo.toggleFavorite(asset.id, to: newValue)
-            guard accountGeneration == LocalSnapshot.generation else { return false }
-            setFavorite(asset.id, to: newValue)
+            try await assetRepo.toggleFavorite(target.serverID, to: newValue)
+            guard canMutate, targetIsCurrent(target) else { return false }
+            setFavorite(target.serverID, to: newValue)
             return true
         } catch {
+            guard canMutate, !(error is CancellationError) else { return false }
             actionError = Self.describe(error)
             return false
         }
@@ -550,36 +608,50 @@ final class TimelineViewModel {
     /// "Favorite", tidak pernah "Unfavorite".
     func setFavorite(_ id: String, to value: Bool) {
         guard accountGeneration == LocalSnapshot.generation else { return }
+        let localMappings = allAssets.contains(where: { LocalPhotoLibrary.isLocal($0.id) })
+            ? (dataManager?.serverAssetIDsByLocalIdentifier() ?? [:]) : [:]
+        let serverID = asset(for: id).flatMap {
+            AssetServerIdentity.resolve($0, using: dataManager, localMappings: localMappings)
+        }
+            ?? (LocalPhotoLibrary.isLocal(id) ? nil : id)
+        guard let serverID else { return }
+        let displayIDs = Set(allAssets.filter {
+            AssetServerIdentity.resolve($0, using: dataManager, localMappings: localMappings) == serverID
+        }.map(\.id)).union([id])
+        if dataManager?.getCachedAsset(id: serverID) == nil,
+           allAssets.contains(where: { LocalPhotoLibrary.isLocal($0.id) && displayIDs.contains($0.id) }) {
+            pendingLocalFavorites[serverID] = value
+        }
         rebuildRevision &+= 1
         signature = nil
         var updated = content
         for sectionIndex in updated.sections.indices {
-            guard let assetIndex = updated.sections[sectionIndex].assets
-                .firstIndex(where: { $0.id == id }) else { continue }
-            updated.sections[sectionIndex].assets[assetIndex].isFavorite = value
-            break
+            for assetIndex in updated.sections[sectionIndex].assets.indices
+                where displayIDs.contains(updated.sections[sectionIndex].assets[assetIndex].id) {
+                updated.sections[sectionIndex].assets[assetIndex].isFavorite = value
+            }
         }
         // Favorit tidak mengubah ranking tanggal: tambal cover yang disimpan
         // tanpa mengelompokkan ulang seluruh perpustakaan.
         for index in updated.months.indices {
-            if updated.months[index].cover.id == id {
+            if displayIDs.contains(updated.months[index].cover.id) {
                 updated.months[index].cover.isFavorite = value
             }
             for highlightIndex in updated.months[index].highlights.indices {
-                if updated.months[index].highlights[highlightIndex].cover.id == id {
+                if displayIDs.contains(updated.months[index].highlights[highlightIndex].cover.id) {
                     updated.months[index].highlights[highlightIndex].cover.isFavorite = value
                 }
             }
         }
-        for index in updated.years.indices where updated.years[index].cover.id == id {
+        for index in updated.years.indices where displayIDs.contains(updated.years[index].cover.id) {
             updated.years[index].cover.isFavorite = value
         }
         content = updated
-        if let index = allAssets.firstIndex(where: { $0.id == id }) {
+        for index in allAssets.indices where displayIDs.contains(allAssets[index].id) {
             allAssets[index].isFavorite = value
         }
-        if let cached = dataManager?.getCachedAsset(id: id), cached.isFavorite != value {
-            try? dataManager?.patchCachedAsset(id, isFavorite: value)
+        if let cached = dataManager?.getCachedAsset(id: serverID), cached.isFavorite != value {
+            try? dataManager?.patchCachedAsset(serverID, isFavorite: value)
         }
     }
 
@@ -594,20 +666,23 @@ final class TimelineViewModel {
     }
 
     func archive(_ asset: AssetLite) async {
+        guard canMutate else { return }
         actionError = nil
-        guard let assetRepo else { return }
+        guard let assetRepo, let target = actionTargets(for: [asset.id])?.first else { return }
         do {
-            try await assetRepo.toggleArchive(asset.id, to: true)
-            guard accountGeneration == LocalSnapshot.generation else { return }
-            removeAsset(asset.id)
-            cacheVisibilityIfNeeded(asset.id, visibility: .archive)
+            try await assetRepo.toggleArchive(target.serverID, to: true)
+            guard canMutate else { return }
+            removeServerAsset(target.serverID)
+            cacheVisibilityIfNeeded(target.serverID, visibility: .archive)
         } catch {
+            guard canMutate, !(error is CancellationError) else { return }
             actionError = Self.describe(error)
         }
     }
 
     @discardableResult
     func delete(_ asset: AssetLite) async -> Bool {
+        guard canMutate else { return false }
         actionError = nil
         // Foto yang belum ada di server bukan kegagalan API: tempatnya memang
         // hanya di PhotoKit, jadi penghapusannya harus lewat Photos.
@@ -644,16 +719,19 @@ final class TimelineViewModel {
     /// separuh menyala separuh padam — hasil yang tidak diminta siapa pun.
     @discardableResult
     func favoriteSelected(_ ids: [String]) async -> Bool {
+        guard canMutate else { return false }
         actionError = nil
-        guard let assetRepo, !ids.isEmpty else { return false }
+        guard let assetRepo, let targets = actionTargets(for: ids) else { return false }
         do {
-            for id in ids {
-                try await assetRepo.toggleFavorite(id, to: true)
-                guard accountGeneration == LocalSnapshot.generation else { return false }
-                setFavorite(id, to: true)
+            for target in targets {
+                guard canMutate, targetIsCurrent(target) else { return false }
+                try await assetRepo.toggleFavorite(target.serverID, to: true)
+                guard canMutate, targetIsCurrent(target) else { return false }
+                setFavorite(target.serverID, to: true)
             }
             return true
         } catch {
+            guard canMutate, !(error is CancellationError) else { return false }
             actionError = Self.describe(error)
             return false
         }
@@ -662,17 +740,20 @@ final class TimelineViewModel {
     /// Memindahkan seleksi ke arsip; fotonya keluar dari linimasa.
     @discardableResult
     func archiveSelected(_ ids: [String]) async -> Bool {
+        guard canMutate else { return false }
         actionError = nil
-        guard let assetRepo, !ids.isEmpty else { return false }
+        guard let assetRepo, let targets = actionTargets(for: ids) else { return false }
         do {
-            for id in ids {
-                try await assetRepo.toggleArchive(id, to: true)
-                guard accountGeneration == LocalSnapshot.generation else { return false }
-                removeAsset(id)
-                cacheVisibilityIfNeeded(id, visibility: .archive)
+            for target in targets {
+                guard canMutate, targetIsCurrent(target) else { return false }
+                try await assetRepo.toggleArchive(target.serverID, to: true)
+                guard canMutate else { return false }
+                removeServerAsset(target.serverID)
+                cacheVisibilityIfNeeded(target.serverID, visibility: .archive)
             }
             return true
         } catch {
+            guard canMutate, !(error is CancellationError) else { return false }
             actionError = Self.describe(error)
             return false
         }
@@ -681,17 +762,20 @@ final class TimelineViewModel {
     /// Memindahkan ke folder terkunci; fotonya keluar dari linimasa.
     @discardableResult
     func lockSelected(_ ids: [String]) async -> Bool {
+        guard canMutate else { return false }
         actionError = nil
-        guard let assetRepo, !ids.isEmpty else { return false }
+        guard let assetRepo, let targets = actionTargets(for: ids) else { return false }
         do {
-            for id in ids {
-                try await assetRepo.setVisibility(id, to: .locked)
-                guard accountGeneration == LocalSnapshot.generation else { return false }
-                removeAsset(id)
-                cacheVisibilityIfNeeded(id, visibility: .locked)
+            for target in targets {
+                guard canMutate, targetIsCurrent(target) else { return false }
+                try await assetRepo.setVisibility(target.serverID, to: .locked)
+                guard canMutate else { return false }
+                removeServerAsset(target.serverID)
+                cacheVisibilityIfNeeded(target.serverID, visibility: .locked)
             }
             return true
         } catch {
+            guard canMutate, !(error is CancellationError) else { return false }
             actionError = Self.describe(error)
             return false
         }
@@ -699,6 +783,7 @@ final class TimelineViewModel {
 
     @discardableResult
     func deleteSelected(_ ids: [String]) async -> Bool {
+        guard canMutate else { return false }
         actionError = nil
         guard let assetRepo, !ids.isEmpty else { return false }
 
@@ -760,20 +845,17 @@ final class TimelineViewModel {
     /// Detail Asset sudah melakukan terjemahan ini sejak awal. Menaruh aturan
     /// yang sama di view model timeline membuat context menu dan mode Select
     /// tidak lagi mengirim `PHAsset.localIdentifier` ke endpoint server.
-    private struct ServerDeleteTarget {
+    private struct ServerAssetTarget {
         let displayID: String
         let serverID: String
     }
 
-    private func serverDeleteTargets(for assets: [AssetLite]) -> [ServerDeleteTarget] {
+    private func serverDeleteTargets(for assets: [AssetLite]) -> [ServerAssetTarget] {
         let links = dataManager?.serverAssetIDsByLocalIdentifier() ?? [:]
         return assets.compactMap { asset in
-            if LocalPhotoLibrary.isLocal(asset.id) {
-                let localID = LocalPhotoLibrary.localIdentifier(from: asset.id)
-                guard let serverID = links[localID] else { return nil }
-                return ServerDeleteTarget(displayID: asset.id, serverID: serverID)
-            }
-            return ServerDeleteTarget(displayID: asset.id, serverID: asset.id)
+            guard let serverID = AssetServerIdentity.resolve(asset, using: dataManager,
+                localMappings: links) else { return nil }
+            return ServerAssetTarget(displayID: asset.id, serverID: serverID)
         }
     }
 
@@ -781,9 +863,9 @@ final class TimelineViewModel {
     /// stale/tidak dimiliki, pecah per id agar foto lain yang valid tetap
     /// terhapus. Error jaringan/auth tidak diulang N kali.
     private func deleteServerTargets(
-        _ targets: [ServerDeleteTarget],
+        _ targets: [ServerAssetTarget],
         using repo: AssetDetailRepository
-    ) async -> (succeeded: [ServerDeleteTarget], failedCount: Int, lastError: Error?) {
+    ) async -> (succeeded: [ServerAssetTarget], failedCount: Int, lastError: Error?) {
         let uniqueServerIDs = Array(Set(targets.map(\.serverID)))
         do {
             try await repo.delete(uniqueServerIDs)
@@ -835,10 +917,12 @@ final class TimelineViewModel {
 
     @discardableResult
     func addToAlbum(_ ids: [String], album: AlbumResponseDTO) async -> Bool {
+        guard canMutate else { return false }
         actionError = nil
-        guard let albumRepo, !ids.isEmpty else { return false }
+        guard let albumRepo, let targets = actionTargets(for: ids) else { return false }
         do {
-            let duplicates = try await albumRepo.addAssets(ids, to: album.id)
+            let duplicates = try await albumRepo.addAssets(targets.map(\.serverID), to: album.id)
+            guard canMutate, targets.allSatisfy(targetIsCurrent) else { return false }
             if !duplicates.isEmpty {
                 // "Sudah ada di album" bukan kegagalan, tapi tetap harus
                 // terdengar — tanpa itu aksinya tidak menghasilkan apa pun
@@ -847,8 +931,28 @@ final class TimelineViewModel {
             }
             return true
         } catch {
+            guard canMutate, !(error is CancellationError) else { return false }
             actionError = Self.describe(error)
             return false
+        }
+    }
+
+    func createSharedLink(
+        for ids: [String], using repository: SharedLinkRepository, baseURL: URL?
+    ) async -> URL? {
+        guard canMutate else { return nil }
+        actionError = nil
+        guard let targets = actionTargets(for: ids) else { return nil }
+        do {
+            let link = try await repository.create(assetIds: targets.map(\.serverID))
+            guard canMutate, targets.allSatisfy(targetIsCurrent) else { return nil }
+            guard let url = link.publicURL(base: baseURL) else { throw APIError.invalidURL }
+            return url
+        } catch {
+            guard canMutate, !(error is CancellationError) else { return nil }
+            actionError = (error as? APIError)?.errorDescription
+                ?? String(localized: "Failed to create shared link")
+            return nil
         }
     }
 
