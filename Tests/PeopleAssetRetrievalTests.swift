@@ -65,7 +65,7 @@ final class PeopleAssetRetrievalTests: XCTestCase {
         if case .loaded = model.phase {} else { XCTFail("A complete person collection should be loaded") }
     }
 
-    func testSmallServerPagesFollowTheReportedTotalWithoutANextPageHint() async throws {
+    func testSmallServerPagesFollowTheReportedContinuation() async throws {
         let expectedIDs = (0..<5).map(Self.assetID)
         var pages: [Int] = []
         MockURLProtocol.responseProvider = { request in
@@ -77,7 +77,8 @@ final class PeopleAssetRetrievalTests: XCTestCase {
             let start = (page - 1) * 2
             return Self.response(request, data: Self.page(
                 ids: Array(expectedIDs[start..<min(start + 2, expectedIDs.count)]),
-                total: expectedIDs.count))
+                total: min(2, expectedIDs.count - start),
+                nextPage: page < 3 ? String(page + 1) : nil))
         }
 
         let assets = try await PeopleRepository(api: api).assets(personId: personID)

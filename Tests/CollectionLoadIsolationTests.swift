@@ -286,7 +286,7 @@ private final class CollectionLoadTimelineRepository: TimelineRepository {
         self.source = source
         super.init(api: api)
     }
-    override func albumAssets(_ albumId: String, expectedCount: Int? = nil) async throws -> [AssetLite] {
+    override func albumAssets(_ albumId: String) async throws -> [AssetLite] {
         try await source.read()
     }
 }

@@ -348,7 +348,7 @@ private final class PublicationTimelineRepository: TimelineRepository {
     var shouldFail = false
     private(set) var requestedIDs: [String] = []
 
-    override func albumAssets(_ albumId: String, expectedCount: Int? = nil) async throws -> [AssetLite] {
+    override func albumAssets(_ albumId: String) async throws -> [AssetLite] {
         requestedIDs.append(albumId)
         if shouldFail { throw APIError.unknown }
         return items

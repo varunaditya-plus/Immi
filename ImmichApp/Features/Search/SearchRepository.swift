@@ -34,48 +34,36 @@ class SearchRepository {
         try await api.send(.json("/search/metadata", method: .post, body: request))
     }
 
-    /// Mengambil seluruh halaman metadata search.
-    ///
-    /// Server dapat membatasi halaman lebih kecil daripada `size` yang diminta
-    /// (contohnya Trash mengembalikan 5 dari total 24). Karena itu kelanjutan
-    /// mengikuti `nextPage` DAN `total`, bukan menebak dari request size.
+    /// Metadata search returns a page-number continuation on supported servers.
+    /// A terminal response wins over counts, which can be stale or page-local.
     func allMetadata(_ initialRequest: SearchRequestDTO) async throws -> [AssetResponseDTO] {
         let visibility = recordsVisibility ? await AssetVisibilityRequest(api: api, dataManager: dataManager) : nil
         var request = initialRequest
         var page = request.page ?? 1
-        request.page = page
+        var items: [AssetResponseDTO] = []
+        var seenIDs: Set<String> = []
 
-        try Task.checkCancellation()
-        var response = try await metadataPage(request)
-        try Task.checkCancellation()
-        await visibility?.record(response.assets.items)
-        var items = response.assets.items
-        var seenIDs = Set(items.map(\.id))
-        var knownTotal = response.assets.total
-
-        while response.assets.nextPage != nil || items.count < knownTotal {
-            page += 1
-            request.page = page
+        while true {
             try Task.checkCancellation()
-            response = try await metadataPage(request)
+            request.page = page
+            let response = try await metadataPage(request)
             try Task.checkCancellation()
             await visibility?.record(response.assets.items)
-            knownTotal = max(knownTotal, response.assets.total)
 
-            let countBeforePage = items.count
+            let previousCount = seenIDs.count
             for item in response.assets.items where seenIDs.insert(item.id).inserted {
                 items.append(item)
             }
-
-            // A continuation that makes no progress must not turn a truncated
-            // collection into a successful result or overwrite its snapshot.
-            guard !response.assets.items.isEmpty, items.count > countBeforePage else {
+            try Task.checkCancellation()
+            guard let nextPage = response.assets.nextPage else { return items }
+            // Count raw IDs: a private-only page can still make progress, while
+            // endlessly repeated IDs must not publish a partial collection.
+            guard seenIDs.count > previousCount,
+                  let next = Int(nextPage), next > page else {
                 throw URLError(.badServerResponse)
             }
+            page = next
         }
-
-        try Task.checkCancellation()
-        return items
     }
 
     /// GET /search/suggestions wajib menyertakan `type` dan mengembalikan [String] polos.

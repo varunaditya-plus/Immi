@@ -421,7 +421,7 @@ private final class AlbumActionTimelineRepository: TimelineRepository {
     var fail = false
     var calls = 0
 
-    override func albumAssets(_ albumId: String, expectedCount: Int? = nil) async throws -> [AssetLite] {
+    override func albumAssets(_ albumId: String) async throws -> [AssetLite] {
         calls += 1
         if fail { throw APIError.server(status: 503, message: "Refresh failed") }
         return result

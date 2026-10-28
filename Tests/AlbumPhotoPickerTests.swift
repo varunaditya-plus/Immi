@@ -54,7 +54,8 @@ final class AlbumPhotoPickerTests: XCTestCase {
         MockURLProtocol.responseProvider = { request in
             let page = Self.body(request)["page"] as? Int ?? 0
             pages.append(page)
-            return Self.response(request, ids: pageIDs[page] ?? [], total: 5, nextPage: nil)
+            return Self.response(request, ids: pageIDs[page] ?? [], total: 5,
+                nextPage: page < 3 ? String(page + 1) : nil)
         }
         let vm = AlbumPhotoPickerViewModel(repo: repo, existingIDs: ["existing"])
 
@@ -117,7 +118,7 @@ final class AlbumPhotoPickerTests: XCTestCase {
             pages.append(page)
             if page > 2 { return (nil, nil, URLError(.badServerResponse)) }
             return Self.response(request, ids: ["repeated"], total: 3,
-                nextPage: page == 1 ? "2" : nil)
+                nextPage: String(page + 1))
         }
         let vm = AlbumPhotoPickerViewModel(repo: repo, existingIDs: [])
 

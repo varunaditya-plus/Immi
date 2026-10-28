@@ -104,9 +104,7 @@ struct AlbumDetailView: View {
                 albumRepo: AlbumRepository(api: api),
                 assetRepo: AssetDetailRepository(api: api))
         }
-        await vm?.loadAlbumDetail(
-            album.id,
-            expectedAssetCount: album.assetCount)
+        await vm?.loadAlbumDetail(album.id)
     }
 
     private var assets: [AssetLite] {
@@ -235,9 +233,6 @@ final class AlbumDetailViewModel {
     private let dataManager: SwiftDataManager
     /// Album yang sedang dibuka; dipakai untuk menamai potret lokalnya.
     private var albumId: String?
-    /// Count dari daftar album adalah fallback pagination saat server tidak
-    /// mengirim continuation metadata dengan benar.
-    private var expectedAssetCount: Int?
 
     init(
         timelineRepo: TimelineRepository,
@@ -517,18 +512,12 @@ final class AlbumDetailViewModel {
     /// Album disegarkan lewat pencarian metadata publik dengan pagination.
     /// Potret lokal tetap dipasang lebih dulu agar offline tidak berarti kosong.
     @discardableResult
-    func loadAlbumDetail(
-        _ albumId: String,
-        expectedAssetCount: Int? = nil
-    ) async -> Bool {
+    func loadAlbumDetail(_ albumId: String) async -> Bool {
         guard snapshotGeneration == LocalSnapshot.generation else { return false }
         let request = UUID()
         loadRevision = request
         let cacheRevision = dataManager.assetMutationRevision
         self.albumId = albumId
-        if let expectedAssetCount {
-            self.expectedAssetCount = expectedAssetCount
-        }
         let key = LocalSnapshot.Key.album(albumId)
         if assets.isEmpty {
             if let cached = LocalSnapshot.load([AssetLite].self, for: key) {
@@ -542,9 +531,7 @@ final class AlbumDetailViewModel {
         do {
             // GET /albums/{id} tidak lagi menyertakan daftar aset. Jangan pakai
             // `/timeline/*`: route itu Internal dan bisa berubah tanpa notice.
-            let fetched = try await timelineRepo.albumAssets(
-                albumId,
-                expectedCount: self.expectedAssetCount)
+            let fetched = try await timelineRepo.albumAssets(albumId)
             guard snapshotGeneration == LocalSnapshot.generation, loadRevision == request,
                   dataManager.assetMutationRevision == cacheRevision else { return false }
             LocalSnapshot.save(fetched, for: key, expectedGeneration: snapshotGeneration)
