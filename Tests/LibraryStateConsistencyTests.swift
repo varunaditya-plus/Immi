@@ -1,0 +1,477 @@
+import Observation
+import XCTest
+@testable import ImmichApp
+
+@MainActor
+final class LibraryStateConsistencyTests: XCTestCase {
+    override func setUp() async throws {
+        try await super.setUp()
+        LocalSnapshot.clearAll()
+    }
+
+    override func tearDown() async throws {
+        LocalSnapshot.clearAll()
+        try await super.tearDown()
+    }
+
+    func testSameIDMetadataNotifiesObserversWhenFetchedBytesAreAlreadyOnDisk() async {
+        let driver = LibraryConsistencyDriver()
+        let model = model(driver)
+        model.albums = [album("album", name: "Old", count: 1, cover: "old")]
+        model.people = [person("person", name: "Old")]
+        let fetchedAlbum = album("album", name: "New", count: 8, cover: "new", shared: true)
+        let fetchedPerson = person("person", name: "New")
+        LocalSnapshot.save([fetchedAlbum], for: LocalSnapshot.Key.libraryAlbums)
+        LocalSnapshot.save([fetchedPerson], for: LocalSnapshot.Key.libraryPeople)
+        XCTAssertFalse(LocalSnapshot.save([fetchedAlbum], for: LocalSnapshot.Key.libraryAlbums))
+        XCTAssertFalse(LocalSnapshot.save([fetchedPerson], for: LocalSnapshot.Key.libraryPeople))
+        driver.albums = { [fetchedAlbum] }
+        driver.people = { [fetchedPerson] }
+        let changed = LibraryPublicationProbe()
+        withObservationTracking { _ = model.albums } onChange: {
+            MainActor.assumeIsolated { changed.albums = true }
+        }
+        withObservationTracking { _ = model.people } onChange: {
+            MainActor.assumeIsolated { changed.people = true }
+        }
+
+        await model.load()
+
+        XCTAssertTrue(changed.albums)
+        XCTAssertTrue(changed.people)
+        XCTAssertEqual(model.albums.first?.albumName, "New")
+        XCTAssertEqual(model.albums.first?.assetCount, 8)
+        XCTAssertEqual(model.albums.first?.albumThumbnailAssetId, "new")
+        XCTAssertEqual(model.albums.first?.shared, true)
+        XCTAssertEqual(model.people.first?.name, "New")
+        XCTAssertTrue(model.hasLoaded)
+    }
+
+    func testAcceptedSectionsPublishEvenWhenSnapshotsCannotBeWritten() async throws {
+        let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("immich-snapshots")
+        try FileManager.default.createDirectory(at: directory.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("not a directory".utf8).write(to: directory)
+        let driver = LibraryConsistencyDriver()
+        driver.albums = { [self.album("fetched")] }
+        driver.people = { [self.person("fetched")] }
+        let model = model(driver)
+
+        await model.load()
+
+        XCTAssertEqual(model.albums.map(\.id), ["fetched"])
+        XCTAssertEqual(model.people.map(\.id), ["fetched"])
+        XCTAssertTrue(model.hasLoaded)
+        XCTAssertNil(LocalSnapshot.load([AlbumResponseDTO].self, for: LocalSnapshot.Key.libraryAlbums))
+        XCTAssertNil(LocalSnapshot.load([PersonDTO].self, for: LocalSnapshot.Key.libraryPeople))
+    }
+
+    func testFailurePreservesSectionsButAuthoritativeEmptyResponseClearsThem() async {
+        let driver = LibraryConsistencyDriver()
+        let savedAlbum = album("saved")
+        let savedPerson = person("saved")
+        LocalSnapshot.save([savedAlbum], for: LocalSnapshot.Key.libraryAlbums)
+        LocalSnapshot.save([savedPerson], for: LocalSnapshot.Key.libraryPeople)
+        driver.albums = { throw APIError.unknown }
+        driver.people = { throw APIError.unknown }
+        let model = model(driver)
+
+        await model.loadIfNeeded()
+
+        XCTAssertEqual(model.albums.map(\.id), ["saved"])
+        XCTAssertEqual(model.people.map(\.id), ["saved"])
+        XCTAssertFalse(model.hasLoaded, "A disk fallback does not confirm empty sections from the server")
+        XCTAssertEqual(cachedAlbums().map(\.id), ["saved"])
+        XCTAssertEqual(cachedPeople().map(\.id), ["saved"])
+
+        driver.albums = { [] }
+        driver.people = { [] }
+        await model.loadIfNeeded()
+
+        XCTAssertTrue(model.hasLoaded)
+        XCTAssertTrue(model.albums.isEmpty)
+        XCTAssertTrue(model.people.isEmpty)
+        XCTAssertEqual(driver.albumCalls, 2, "An entirely failed load must remain retryable")
+        XCTAssertEqual(LocalSnapshot.load([AlbumResponseDTO].self, for: LocalSnapshot.Key.libraryAlbums)?.count, 0)
+        XCTAssertEqual(LocalSnapshot.load([PersonDTO].self, for: LocalSnapshot.Key.libraryPeople)?.count, 0)
+        driver.albums = { throw APIError.unknown }
+        driver.people = { throw APIError.unknown }
+        await model.load()
+        XCTAssertTrue(model.hasLoaded)
+        XCTAssertTrue(model.albums.isEmpty)
+        XCTAssertTrue(model.people.isEmpty)
+    }
+
+    func testOlderFullLoadCannotOverwriteANewerLoadOrItsSnapshots() async {
+        let driver = LibraryConsistencyDriver()
+        let albums = LibraryConsistencyGate<[AlbumResponseDTO]>()
+        let people = LibraryConsistencyGate<[PersonDTO]>()
+        driver.albums = { [weak driver] in
+            driver?.albumCalls == 1 ? try await albums.value() : [self.album("current")]
+        }
+        driver.people = { [weak driver] in
+            driver?.peopleCalls == 1 ? try await people.value() : [self.person("current")]
+        }
+        let model = model(driver)
+        let old = Task { await model.load() }
+        addTeardownBlock {
+            await albums.complete(.failure(CancellationError()))
+            await people.complete(.failure(CancellationError()))
+            await old.value
+        }
+        await fulfillment(of: [albums.started, people.started], timeout: 2)
+        await model.load()
+        albums.complete(.success([album("obsolete")]))
+        people.complete(.success([person("obsolete")]))
+        await old.value
+
+        XCTAssertEqual(model.albums.map(\.id), ["current"])
+        XCTAssertEqual(model.people.map(\.id), ["current"])
+        XCTAssertEqual(cachedAlbums().map(\.id), ["current"])
+        XCTAssertEqual(cachedPeople().map(\.id), ["current"])
+        XCTAssertTrue(model.hasLoaded)
+    }
+
+    func testConfirmedMetadataContentsAndPersonCallbacksRejectOlderFullLoadSections() async {
+        let driver = LibraryConsistencyDriver()
+        let albums = LibraryConsistencyGate<[AlbumResponseDTO]>()
+        let people = LibraryConsistencyGate<[PersonDTO]>()
+        driver.albums = { try await albums.value() }
+        driver.people = { try await people.value() }
+        let model = model(driver)
+        model.albums = [album("album", count: 9, cover: "removed", shared: true)]
+        model.people = [person("person")]
+        let old = Task { await model.load() }
+        addTeardownBlock {
+            await albums.complete(.failure(CancellationError()))
+            await people.complete(.failure(CancellationError()))
+            await old.value
+        }
+        await fulfillment(of: [albums.started, people.started], timeout: 2)
+        let staleEditorValue = album("album", name: "Saved name", count: 9, cover: "removed")
+        let remaining = AssetLite(makeTestAsset(id: "kept"))
+        XCTAssertTrue(model.applyAlbumContents([remaining], to: "album"))
+        model.applyAlbumUpdate(staleEditorValue)
+        model.applyPersonRename("person", to: "Saved person name")
+        albums.complete(.success([album("album", name: "Stale name", count: 9, cover: "removed")]))
+        people.complete(.success([person("person", name: "Stale person name")]))
+        await old.value
+
+        XCTAssertEqual(model.albums.first?.albumName, "Saved name")
+        XCTAssertEqual(model.albums.first?.assetCount, 1)
+        XCTAssertEqual(model.albums.first?.albumThumbnailAssetId, "kept")
+        XCTAssertEqual(model.albums.first?.shared, true, "Metadata callbacks preserve newer sharing state")
+        XCTAssertEqual(cachedAlbums().first?.assetCount, 1)
+        XCTAssertEqual(cachedAlbums().first?.albumName, "Saved name")
+        XCTAssertEqual(model.people.first?.name, "Saved person name")
+        XCTAssertEqual(cachedPeople().first?.name, "Saved person name")
+    }
+
+    func testAcceptedDeleteInvalidatesOnlyAlbumsInAHeldFullLoad() async {
+        let driver = LibraryConsistencyDriver()
+        let albums = LibraryConsistencyGate<[AlbumResponseDTO]>()
+        driver.albums = { try await albums.value() }
+        driver.people = { [self.person("fresh-person")] }
+        let model = model(driver)
+        model.albums = [album("deleted"), album("kept")]
+        LocalSnapshot.save(["old-photo"], for: LocalSnapshot.Key.album("deleted"))
+        let old = Task { await model.load() }
+        addTeardownBlock { await albums.complete(.failure(CancellationError())); await old.value }
+        await fulfillment(of: [albums.started], timeout: 2)
+        await model.deleteAlbum("deleted")
+        albums.complete(.success([album("deleted"), album("kept")]))
+        await old.value
+
+        XCTAssertEqual(model.albums.map(\.id), ["kept"])
+        XCTAssertEqual(cachedAlbums().map(\.id), ["kept"])
+        XCTAssertNil(LocalSnapshot.load([String].self, for: LocalSnapshot.Key.album("deleted")))
+        XCTAssertEqual(model.people.map(\.id), ["fresh-person"], "An album action must not discard an independent People response")
+        XCTAssertEqual(cachedPeople().map(\.id), ["fresh-person"])
+        XCTAssertTrue(model.hasLoaded)
+    }
+
+    func testAcceptedMetadataEditStillAppliesAfterAnIndependentContentsCallback() async {
+        let driver = LibraryConsistencyDriver()
+        let update = LibraryConsistencyGate<Void>()
+        driver.update = { _, _, _ in try await update.value() }
+        let model = model(driver)
+        model.albums = [album("album", count: 2, cover: "removed", shared: true)]
+        let editing = Task { await model.updateAlbum("album", name: "Saved name", description: "Saved description") }
+        addTeardownBlock { await update.complete(.failure(CancellationError())); _ = await editing.value }
+        await fulfillment(of: [update.started], timeout: 2)
+        XCTAssertTrue(model.applyAlbumContents([AssetLite(makeTestAsset(id: "kept"))], to: "album"))
+        update.complete(.success(()))
+        let error = await editing.value
+
+        XCTAssertNil(error)
+        XCTAssertEqual(model.albums.first?.albumName, "Saved name")
+        XCTAssertEqual(model.albums.first?.description, "Saved description")
+        XCTAssertEqual(model.albums.first?.assetCount, 1)
+        XCTAssertEqual(model.albums.first?.albumThumbnailAssetId, "kept")
+        XCTAssertEqual(model.albums.first?.shared, true)
+        XCTAssertEqual(cachedAlbums().first?.albumName, "Saved name")
+        XCTAssertEqual(cachedAlbums().first?.assetCount, 1)
+    }
+
+    func testAcceptedDeleteDominatesALaterMetadataEdit() async {
+        let driver = LibraryConsistencyDriver()
+        let deletion = LibraryConsistencyGate<Void>()
+        driver.delete = { _ in try await deletion.value() }
+        let model = model(driver)
+        model.albums = [album("deleted"), album("kept")]
+        let deleting = Task { await model.deleteAlbum("deleted") }
+        addTeardownBlock { await deletion.complete(.failure(CancellationError())); await deleting.value }
+        await fulfillment(of: [deletion.started], timeout: 2)
+        let error = await model.updateAlbum("deleted", name: "Accepted edit", description: "")
+        XCTAssertNil(error)
+        XCTAssertEqual(model.albums.first?.albumName, "Accepted edit")
+        deletion.complete(.success(()))
+        await deleting.value
+
+        XCTAssertEqual(model.albums.map(\.id), ["kept"])
+        XCTAssertEqual(cachedAlbums().map(\.id), ["kept"])
+        XCTAssertNil(model.actionError)
+    }
+
+    func testLateOlderMetadataEditsCannotOverwriteANewerEditOrRestoreADeletedRow() async {
+        for delete in [false, true] {
+            LocalSnapshot.clearAll()
+            let driver = LibraryConsistencyDriver()
+            let update = LibraryConsistencyGate<Void>()
+            driver.update = { _, name, _ in if name == "Old edit" { try await update.value() } }
+            let model = model(driver)
+            model.albums = [album("album")]
+            let old = Task { await model.updateAlbum("album", name: "Old edit", description: "") }
+            addTeardownBlock { await update.complete(.failure(CancellationError())); _ = await old.value }
+            await fulfillment(of: [update.started], timeout: 2)
+            if delete { await model.deleteAlbum("album") }
+            else { _ = await model.updateAlbum("album", name: "Current edit", description: "") }
+            update.complete(.success(()))
+            _ = await old.value
+
+            XCTAssertEqual(model.albums.map(\.albumName), delete ? [] : ["Current edit"])
+            XCTAssertEqual(cachedAlbums().map(\.albumName), delete ? [] : ["Current edit"])
+        }
+    }
+
+    func testAlbumOnlyRefreshSupersedesTheAlbumSectionOfAnOlderFullLoad() async {
+        let driver = LibraryConsistencyDriver()
+        let albums = LibraryConsistencyGate<[AlbumResponseDTO]>()
+        driver.albums = { [weak driver] in
+            driver?.albumCalls == 1 ? try await albums.value() : [self.album("refreshed")]
+        }
+        driver.people = { [self.person("full-load-person")] }
+        let model = model(driver)
+        let full = Task { await model.load() }
+        addTeardownBlock { await albums.complete(.failure(CancellationError())); await full.value }
+        await fulfillment(of: [albums.started], timeout: 2)
+        await model.refreshAlbums()
+        albums.complete(.success([album("obsolete")]))
+        await full.value
+
+        XCTAssertEqual(model.albums.map(\.id), ["refreshed"])
+        XCTAssertEqual(cachedAlbums().map(\.id), ["refreshed"])
+        XCTAssertEqual(model.people.map(\.id), ["full-load-person"])
+        XCTAssertEqual(cachedPeople().map(\.id), ["full-load-person"])
+        XCTAssertTrue(model.hasLoaded)
+    }
+
+    func testFullLoadSupersedesAnOlderAlbumOnlyRefresh() async {
+        let driver = LibraryConsistencyDriver()
+        let albums = LibraryConsistencyGate<[AlbumResponseDTO]>()
+        driver.albums = { [weak driver] in
+            driver?.albumCalls == 1 ? try await albums.value() : [self.album("current")]
+        }
+        let model = model(driver)
+        let refresh = Task { await model.refreshAlbums() }
+        addTeardownBlock { await albums.complete(.failure(CancellationError())); await refresh.value }
+        await fulfillment(of: [albums.started], timeout: 2)
+        await model.load()
+        albums.complete(.success([album("obsolete")]))
+        await refresh.value
+
+        XCTAssertEqual(model.albums.map(\.id), ["current"])
+        XCTAssertEqual(cachedAlbums().map(\.id), ["current"])
+        XCTAssertTrue(model.hasLoaded)
+    }
+
+    func testRejectedMutationDoesNotDiscardAnOtherwiseValidPendingList() async {
+        let driver = LibraryConsistencyDriver()
+        let albums = LibraryConsistencyGate<[AlbumResponseDTO]>()
+        driver.albums = { try await albums.value() }
+        driver.delete = { _ in throw APIError.unknown }
+        let model = model(driver)
+        model.albums = [album("kept")]
+        let load = Task { await model.load() }
+        addTeardownBlock { await albums.complete(.failure(CancellationError())); await load.value }
+        await fulfillment(of: [albums.started], timeout: 2)
+        await model.deleteAlbum("kept")
+        XCTAssertNotNil(model.actionError)
+        albums.complete(.success([album("kept", name: "Fresh metadata"), album("new")]))
+        await load.value
+
+        XCTAssertEqual(Set(model.albums.map(\.id)), ["kept", "new"])
+        XCTAssertEqual(model.albums.first(where: { $0.id == "kept" })?.albumName, "Fresh metadata")
+        XCTAssertEqual(Set(cachedAlbums().map(\.id)), ["kept", "new"])
+    }
+
+    func testCanceledFullLoadCannotPublishRepositoriesThatIgnoreCancellation() async {
+        let driver = LibraryConsistencyDriver()
+        let albums = LibraryConsistencyGate<[AlbumResponseDTO]>()
+        driver.albums = { try await albums.value() }
+        driver.people = { [self.person("canceled")] }
+        let model = model(driver)
+        let load = Task { await model.load() }
+        addTeardownBlock { await albums.complete(.failure(CancellationError())); await load.value }
+        await fulfillment(of: [albums.started], timeout: 2)
+        load.cancel()
+        albums.complete(.success([album("canceled")]))
+        await load.value
+
+        XCTAssertTrue(model.albums.isEmpty)
+        XCTAssertTrue(model.people.isEmpty)
+        XCTAssertFalse(model.hasLoaded)
+        XCTAssertNil(LocalSnapshot.load([AlbumResponseDTO].self, for: LocalSnapshot.Key.libraryAlbums))
+        XCTAssertNil(LocalSnapshot.load([PersonDTO].self, for: LocalSnapshot.Key.libraryPeople))
+        driver.albums = { [self.album("retry")] }
+        driver.people = { [self.person("retry")] }
+        await model.loadIfNeeded()
+        XCTAssertEqual(model.albums.map(\.id), ["retry"])
+        XCTAssertEqual(model.people.map(\.id), ["retry"])
+        XCTAssertTrue(model.hasLoaded)
+    }
+
+    func testAccountChangeRejectsHeldLoadsActionsAndCallbacksWithoutTouchingTheNextSnapshot() async {
+        let driver = LibraryConsistencyDriver()
+        let albums = LibraryConsistencyGate<[AlbumResponseDTO]>()
+        let update = LibraryConsistencyGate<Void>()
+        driver.albums = { try await albums.value() }
+        driver.people = { [self.person("old-server-person")] }
+        driver.update = { _, _, _ in try await update.value() }
+        let model = model(driver)
+        model.albums = [album("old")]
+        model.people = [person("old")]
+        let load = Task { await model.load() }
+        let edit = Task { await model.updateAlbum("old", name: "Old account edit", description: "") }
+        addTeardownBlock {
+            await albums.complete(.failure(CancellationError()))
+            await update.complete(.failure(CancellationError()))
+            await load.value
+            _ = await edit.value
+        }
+        await fulfillment(of: [albums.started, update.started], timeout: 2)
+        LocalSnapshot.clearAll()
+        LocalSnapshot.save([album("next")], for: LocalSnapshot.Key.libraryAlbums)
+        LocalSnapshot.save([person("next")], for: LocalSnapshot.Key.libraryPeople)
+        albums.complete(.success([album("old-server-album")]))
+        update.complete(.success(()))
+        await load.value
+        _ = await edit.value
+        model.applyAlbumUpdate(album("old", name: "Stale callback"))
+        model.applyPersonRename("old", to: "Stale callback")
+        _ = model.applyAlbumContents([], to: "old")
+        await model.load()
+        await model.refreshAlbums()
+
+        XCTAssertEqual(model.albums.map(\.albumName), ["Album"])
+        XCTAssertEqual(model.people.map(\.name), ["Person"])
+        XCTAssertFalse(model.hasLoaded)
+        XCTAssertEqual(driver.albumCalls, 1, "An old model cannot begin another account's load")
+        XCTAssertEqual(cachedAlbums().map(\.id), ["next"])
+        XCTAssertEqual(cachedPeople().map(\.id), ["next"])
+    }
+
+    private func model(_ driver: LibraryConsistencyDriver) -> LibraryViewModel {
+        let api = APIClient(session: MockSessionManager())
+        return LibraryViewModel(memoriesRepo: FailingConsistencyMemories(api: api),
+            albumRepo: LibraryConsistencyAlbums(api: api, driver: driver),
+            peopleRepo: LibraryConsistencyPeople(api: api, driver: driver),
+            searchRepo: FailingConsistencySearch(api: api), assetRepo: AssetDetailRepository(api: api))
+    }
+
+    private func album(_ id: String, name: String = "Album", count: Int = 0, cover: String? = nil,
+                       shared: Bool = false) -> AlbumResponseDTO {
+        .init(id: id, albumName: name, description: nil, assetCount: count, albumThumbnailAssetId: cover,
+            shared: shared, createdAt: Date(timeIntervalSince1970: 100), assets: nil)
+    }
+
+    private func person(_ id: String, name: String = "Person") -> PersonDTO {
+        .init(id: id, name: name, birthDate: nil, thumbnailPath: nil, isHidden: false)
+    }
+
+    private func cachedAlbums() -> [AlbumResponseDTO] {
+        LocalSnapshot.load([AlbumResponseDTO].self, for: LocalSnapshot.Key.libraryAlbums) ?? []
+    }
+
+    private func cachedPeople() -> [PersonDTO] {
+        LocalSnapshot.load([PersonDTO].self, for: LocalSnapshot.Key.libraryPeople) ?? []
+    }
+}
+
+@MainActor
+private final class LibraryConsistencyDriver {
+    var albums: @MainActor () async throws -> [AlbumResponseDTO] = { [] }
+    var people: @MainActor () async throws -> [PersonDTO] = { [] }
+    var update: @MainActor (String, String?, String??) async throws -> Void = { _, _, _ in }
+    var delete: @MainActor (String) async throws -> Void = { _ in }
+    private(set) var albumCalls = 0
+    private(set) var peopleCalls = 0
+
+    func getAlbums() async throws -> [AlbumResponseDTO] { albumCalls += 1; return try await albums() }
+    func getPeople() async throws -> [PersonDTO] { peopleCalls += 1; return try await people() }
+}
+
+@MainActor
+private final class LibraryPublicationProbe {
+    var albums = false
+    var people = false
+}
+
+private final class LibraryConsistencyAlbums: AlbumRepository {
+    private let driver: LibraryConsistencyDriver
+    init(api: APIClient, driver: LibraryConsistencyDriver) { self.driver = driver; super.init(api: api) }
+    override func all() async throws -> [AlbumResponseDTO] { try await driver.getAlbums() }
+    override func update(_ id: String, name: String?, description: String??) async throws {
+        try await driver.update(id, name, description)
+    }
+    override func delete(_ id: String) async throws { try await driver.delete(id) }
+}
+
+private final class LibraryConsistencyPeople: PeopleRepository {
+    private let driver: LibraryConsistencyDriver
+    init(api: APIClient, driver: LibraryConsistencyDriver) { self.driver = driver; super.init(api: api) }
+    override func all(size: Int? = nil) async throws -> [PersonDTO] {
+        XCTAssertEqual(size, 15)
+        return try await driver.getPeople()
+    }
+}
+
+private final class FailingConsistencyMemories: MemoriesRepository {
+    override func getMemories() async throws -> [MemoryDTO] { throw APIError.unknown }
+}
+
+private final class FailingConsistencySearch: SearchRepository {
+    override func metadataSearch(_ request: SearchRequestDTO) async throws -> SearchResponseDTO { throw APIError.unknown }
+}
+
+@MainActor
+private final class LibraryConsistencyGate<Value> {
+    let started = XCTestExpectation(description: "A Library request reached its held response")
+    private var hasStarted = false
+    private var result: Result<Value, Error>?
+    private var continuations: [CheckedContinuation<Value, Error>] = []
+
+    func value() async throws -> Value {
+        if !hasStarted { hasStarted = true; started.fulfill() }
+        if let result { return try result.get() }
+        return try await withCheckedThrowingContinuation { continuations.append($0) }
+    }
+
+    func complete(_ value: Result<Value, Error>) {
+        guard result == nil else { return }
+        result = value
+        let pending = continuations
+        continuations = []
+        pending.forEach { $0.resume(with: value) }
+    }
+}

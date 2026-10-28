@@ -5,6 +5,12 @@ import Observation
 @Observable
 final class LibraryViewModel {
     private let snapshotGeneration = LocalSnapshot.generation
+    private var loadRequest = UUID()
+    private var albumRequest = UUID()
+    private var peopleRequest = UUID()
+    private var albumUpdates: [String: UUID] = [:]
+    private var actionErrorID = UUID()
+    private var restoredSnapshots = false
 
     private var loadedMemories: [MemoryStory] = []
     var memories: [MemoryStory] {
@@ -15,7 +21,12 @@ final class LibraryViewModel {
         }
         set { loadedMemories = newValue }
     }
-    var albums: [AlbumResponseDTO] = []
+    private struct AlbumStorage { var albums: [AlbumResponseDTO] = [] }
+    private var albumStorage = AlbumStorage()
+    var albums: [AlbumResponseDTO] {
+        get { albumStorage.albums }
+        set { albumStorage = AlbumStorage(albums: newValue) }
+    }
     var recentAlbums: [AlbumResponseDTO] { Array(albums.prefix(Self.rowLimit)) }
     // AssetLite equality compares IDs; this storage also publishes metadata changes.
     private struct FavoriteStorage { var assets: [AssetLite] = [] }
@@ -82,7 +93,15 @@ final class LibraryViewModel {
     /// satu per satu hanya menambah jeda tanpa alasan. Kegagalan salah satu
     /// juga tidak menjatuhkan yang lain — barisnya sekadar tampil kosong.
     func load() async {
-        guard snapshotGeneration == LocalSnapshot.generation else { return }
+        guard canPublish else { return }
+        let request = UUID()
+        loadRequest = request
+        let albumsID = UUID()
+        albumRequest = albumsID
+        let peopleID = UUID()
+        peopleRequest = peopleID
+        let favoritesID = UUID()
+        favoriteRequest = favoritesID
         // POTRET LOKAL DULU — sebelum satu permintaan pun dikirim.
         //
         // Ini yang membuat Library terasa mulus dan tidak lagi kosong saat
@@ -93,7 +112,7 @@ final class LibraryViewModel {
 
         async let memories = fetchMemories()
         async let albums = fetchAlbums()
-        async let favorites = fetchFavorites()
+        async let favorites = fetchFavorites(revision: favoritesID)
         async let people = fetchPeople()
 
         // Ditunggu SEKALIGUS lalu dipasang bersama, bukan `self.x = await x`
@@ -104,27 +123,32 @@ final class LibraryViewModel {
         // atas ke bawah, terlihat seperti animasi yang tidak pernah diminta.
         let (loadedMemories, loadedAlbums, loadedFavorites, loadedPeople) =
             await (memories, albums, favorites, people)
-        guard snapshotGeneration == LocalSnapshot.generation else { return }
+        guard canPublish, loadRequest == request else { return }
 
         // Kenangan TIDAK dipotret: isinya "hari ini, tahun-tahun sebelumnya",
         // jadi potret kemarin bukan sekadar basi — ia salah tanggal.
         if let loadedMemories { self.memories = loadedMemories }
 
-        apply(loadedAlbums, to: \.albums, key: LocalSnapshot.Key.libraryAlbums)
-        applyFavorites(loadedFavorites)
-        apply(loadedPeople, to: \.people, key: LocalSnapshot.Key.libraryPeople)
+        let acceptedAlbums = albumRequest == albumsID ? loadedAlbums : nil
+        let acceptedPeople = peopleRequest == peopleID ? loadedPeople : nil
+        let acceptedFavorites = loadedFavorites?.revision == favoriteRequest ? loadedFavorites : nil
+        apply(acceptedAlbums, to: \.albums, key: LocalSnapshot.Key.libraryAlbums)
+        applyFavorites(acceptedFavorites)
+        apply(acceptedPeople, to: \.people, key: LocalSnapshot.Key.libraryPeople)
 
         // Hanya kalau ADA yang benar-benar dijawab server. Menyalakannya setelah
         // keempatnya gagal berarti dua hal buruk sekaligus: barisnya menulis
         // "Nothing here yet" atas nama server yang tidak pernah bicara, dan
         // `loadIfNeeded` tidak akan pernah mencoba lagi.
-        if loadedMemories != nil || loadedAlbums != nil
-            || loadedFavorites != nil || loadedPeople != nil {
+        if loadedMemories != nil || acceptedAlbums != nil
+            || acceptedFavorites != nil || acceptedPeople != nil {
             hasLoaded = true
         }
     }
 
     private func restoreSnapshots() {
+        guard !restoredSnapshots else { return }
+        restoredSnapshots = true
         if albums.isEmpty,
            let cached = LocalSnapshot.load([AlbumResponseDTO].self, for: LocalSnapshot.Key.libraryAlbums) {
             albums = cached
@@ -147,31 +171,40 @@ final class LibraryViewModel {
         // bendera ini: isinya sendiri yang membuatnya tidak kosong.
     }
 
-    /// Hasil `nil` (gagal) dibiarkan; hasil yang sama persis tidak dipasang ulang.
+    private var canPublish: Bool {
+        !Task.isCancelled && snapshotGeneration == LocalSnapshot.generation
+    }
+
+    /// A disk snapshot is a best-effort copy of an admitted response.
     private func apply<T: Codable>(
         _ fetched: [T]?,
         to keyPath: ReferenceWritableKeyPath<LibraryViewModel, [T]>,
         key: String
     ) {
-        guard let fetched, snapshotGeneration == LocalSnapshot.generation else { return }
-        if LocalSnapshot.save(fetched, for: key, expectedGeneration: snapshotGeneration) || self[keyPath: keyPath].isEmpty {
-            self[keyPath: keyPath] = fetched
-        }
+        guard let fetched, canPublish else { return }
+        LocalSnapshot.save(fetched, for: key, expectedGeneration: snapshotGeneration)
+        self[keyPath: keyPath] = fetched
     }
 
     // MARK: - Aksi album
 
     /// - Returns: pesan kesalahan; nil berarti perubahan sudah dikonfirmasi.
     func updateAlbum(_ id: String, name: String, description: String) async -> String? {
+        guard canPublish else { return nil }
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         let trimmedDescription = description.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return nil }
+        let action = UUID()
+        albumUpdates[id] = action
+        defer { finishAlbumUpdate(id, action: action) }
 
         do {
             try await albumRepo.update(
                 id,
                 name: trimmed,
                 description: .some(trimmedDescription.isEmpty ? nil : trimmedDescription))
+            guard isCurrentAlbumUpdate(id, action: action) else { return nil }
+            albumRequest = UUID()
             // Kartu diperbarui di tempat, bukan lewat muat ulang: sampul album
             // tidak berubah karena namanya berubah, dan memuat ulang seluruh
             // baris hanya membuatnya berkedip.
@@ -184,6 +217,7 @@ final class LibraryViewModel {
             }
             return nil
         } catch {
+            guard isCurrentAlbumUpdate(id, action: action), !(error is CancellationError) else { return nil }
             return (error as? APIError)?.errorDescription
                 ?? String(localized: "Failed to update album")
         }
@@ -193,31 +227,49 @@ final class LibraryViewModel {
     /// dikirim kembali lewat metode ini supaya kartu Library tidak menunggu
     /// refresh jaringan berikutnya.
     func applyAlbumUpdate(_ updated: AlbumResponseDTO) {
-        guard snapshotGeneration == LocalSnapshot.generation else { return }
+        guard canPublish else { return }
+        albumRequest = UUID()
+        albumUpdates[updated.id] = nil
         guard let index = albums.firstIndex(where: { $0.id == updated.id }) else { return }
-        albums[index] = updated
+        var merged = albums[index]
+        merged.albumName = updated.albumName
+        merged.description = updated.description
+        merged.updatedAt = updated.updatedAt ?? merged.updatedAt
+        albums[index] = merged
         LocalSnapshot.save(albums, for: LocalSnapshot.Key.libraryAlbums, expectedGeneration: snapshotGeneration)
     }
 
     func addUsers(_ userIDs: [String], to albumId: String) async {
-        guard !userIDs.isEmpty else { return }
+        guard canPublish, !userIDs.isEmpty else { return }
+        let errorID = UUID()
+        actionErrorID = errorID
         actionError = nil
         do {
             try await albumRepo.addUsers(userIDs, to: albumId)
-            apply(await fetchAlbums(), to: \.albums, key: LocalSnapshot.Key.libraryAlbums)
+            guard canPublish else { return }
+            await refreshAlbums()
         } catch {
+            guard canPublish, actionErrorID == errorID, !(error is CancellationError) else { return }
             actionError = (error as? APIError)?.errorDescription
                 ?? String(localized: "Failed to add user")
         }
     }
 
     func deleteAlbum(_ id: String) async {
+        guard canPublish else { return }
+        let errorID = UUID()
+        actionErrorID = errorID
         actionError = nil
         do {
             try await albumRepo.delete(id)
+            guard canPublish else { return }
+            albumRequest = UUID()
+            albumUpdates[id] = nil
             albums.removeAll { $0.id == id }
             LocalSnapshot.save(albums, for: LocalSnapshot.Key.libraryAlbums, expectedGeneration: snapshotGeneration)
+            LocalSnapshot.remove(LocalSnapshot.Key.album(id), expectedGeneration: snapshotGeneration)
         } catch {
+            guard canPublish, actionErrorID == errorID, !(error is CancellationError) else { return }
             actionError = (error as? APIError)?.errorDescription
                 ?? String(localized: "Failed to delete album")
         }
@@ -228,7 +280,8 @@ final class LibraryViewModel {
     /// lagi dengan `/albums` di belakang layar.
     @discardableResult
     func applyAlbumContents(_ assets: [AssetLite], to id: String) -> Bool {
-        guard snapshotGeneration == LocalSnapshot.generation else { return false }
+        guard canPublish else { return false }
+        albumRequest = UUID()
         guard let index = albums.firstIndex(where: { $0.id == id }) else { return false }
 
         var updated = albums[index]
@@ -257,13 +310,38 @@ final class LibraryViewModel {
     /// Hanya menyegarkan baris album; perubahan dari Album Detail tidak perlu
     /// menembak ulang Memories, Favorites, dan People.
     func refreshAlbums(invalidatingCoverFor id: String? = nil) async {
+        guard canPublish else { return }
         if let id { AlbumCoverStore.shared.invalidate(id) }
-        apply(await fetchAlbums(), to: \.albums, key: LocalSnapshot.Key.libraryAlbums)
+        let request = UUID()
+        albumRequest = request
+        let fetched = await fetchAlbums()
+        guard canPublish, albumRequest == request else { return }
+        apply(fetched, to: \.albums, key: LocalSnapshot.Key.libraryAlbums)
+    }
+
+    private func isCurrentAlbumUpdate(_ id: String, action: UUID) -> Bool {
+        canPublish && albumUpdates[id] == action
+    }
+
+    private func finishAlbumUpdate(_ id: String, action: UUID) {
+        if albumUpdates[id] == action { albumUpdates[id] = nil }
+    }
+
+    func applyPersonRename(_ id: String, to name: String) {
+        guard canPublish else { return }
+        peopleRequest = UUID()
+        guard let index = people.firstIndex(where: { $0.id == id }) else { return }
+        var updated = people[index]
+        updated.name = name
+        people[index] = updated
+        LocalSnapshot.save(people, for: LocalSnapshot.Key.libraryPeople, expectedGeneration: snapshotGeneration)
     }
 
     func refreshFavorites() async {
-        guard snapshotGeneration == LocalSnapshot.generation else { return }
-        applyFavorites(await fetchFavorites())
+        guard canPublish else { return }
+        let request = UUID()
+        favoriteRequest = request
+        applyFavorites(await fetchFavorites(revision: request))
     }
 
     private func applyFavorites(_ fetched: FavoriteResponse?) {
@@ -397,9 +475,7 @@ final class LibraryViewModel {
         return all.filter { !$0.isHidden }
     }
 
-    private func fetchFavorites() async -> FavoriteResponse? {
-        let revision = UUID()
-        favoriteRequest = revision
+    private func fetchFavorites(revision: UUID) async -> FavoriteResponse? {
         let request = SearchRequestDTO(page: 1, isFavorite: true, size: Self.rowLimit)
         guard let response = try? await searchRepo.metadataSearch(request) else { return nil }
         return FavoriteResponse(revision: revision,
