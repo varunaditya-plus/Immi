@@ -408,6 +408,7 @@ struct AlbumsListView: View {
     ) async -> String? {
         await model.createAlbum(name: name, description: description, assetIds: assetIds) { album in
             scope = .all
+            searchText = ""
             onAlbumCreated?(album)
         }
     }
