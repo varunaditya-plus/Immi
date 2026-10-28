@@ -41,6 +41,38 @@ final class SharedUploadServiceTests: XCTestCase {
         XCTAssertNil(fixture.service.lastError)
     }
 
+    func testSignedOutRecoveryReclaimsOnlyAnAbandonedDraftWithoutUploadingOrPublishingRows() async throws {
+        let fixture = try fixture()
+        let active = try await fixture.store.makeDraftDirectory(id: UUID())
+        let activeSource = active.directory.appendingPathComponent("active.jpg")
+        let bytes = Data("original media".utf8)
+        try bytes.write(to: activeSource)
+        let committed = try await seed(fixture.store, states: [.failed],
+            owner: .init(server: owner.server, userID: "another-account"))
+        let committedBytes = try await manifestBytes(fixture.store, batch: committed)
+        let abandoned = try await fixture.store.makeBatchDirectory(id: UUID())
+        try bytes.write(to: abandoned.appendingPathComponent("abandoned.jpg"))
+        let old = Date(timeIntervalSinceNow: -2 * 24 * 60 * 60)
+        for directory in [active.directory, abandoned, fixture.root.appendingPathComponent(committed.id.uuidString)] {
+            try FileManager.default.setAttributes([.modificationDate: old], ofItemAtPath: directory.path)
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: abandoned.path))
+        fixture.session.isLoggedIn = false
+
+        let work = try XCTUnwrap(fixture.service.processPending(session: fixture.session))
+        await work.value
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: abandoned.path))
+        XCTAssertEqual(try Data(contentsOf: activeSource), bytes)
+        let saved = try await manifestBytes(fixture.store, batch: committed)
+        XCTAssertEqual(saved, committedBytes)
+        let committedSource = try await fixture.store.fileURL(for: committed.items[0], batchID: committed.id)
+        XCTAssertEqual(try Data(contentsOf: committedSource), bytes)
+        XCTAssertTrue(fixture.service.items.isEmpty)
+        XCTAssertNil(fixture.service.lastError)
+        withExtendedLifetime(active.claim) {}
+    }
+
     func testCanceledCallersCannotClearRowsOrStartARecoveryWorker() async throws {
         let fixture = try fixture()
         let batch = try await seed(fixture.store, states: [.failed])

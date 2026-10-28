@@ -46,7 +46,7 @@ final class SharedUploadService {
     func processPending(session: SessionManager) -> Task<Void, Never>? {
         guard !Task.isCancelled else { return nil }
         if let task { return task }
-        guard let credential = credential(for: session) else { return nil }
+        let credential = credential(for: session)
         let context = session.snapshot
         lastError = nil
         let id = UUID()
@@ -66,6 +66,7 @@ final class SharedUploadService {
             }
             do {
                 _ = try? await self.store.cleanupAbandonedDrafts()
+                guard let credential else { return }
                 let batches = try await self.store.batches(for: credential.owner)
                 try session.checkCurrent(context)
                 await self.refreshPending(session: session)
