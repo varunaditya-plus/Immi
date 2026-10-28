@@ -140,6 +140,18 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
     private(set) var revision = 0
     private var accountGeneration = UUID()
     private var scanID = UUID()
+    private var completedSelectionScan: (id: UUID, revision: Int)?
+
+    /// Zero photos are meaningful only after the current selection was read.
+    /// A metadata-only album lookup does not establish that selection count.
+    var currentSelectionScanID: UUID? {
+        guard let completedSelectionScan,
+              completedSelectionScan.id == scanID,
+              completedSelectionScan.revision == revision,
+              isAuthorized,
+              reader.authorizationStatus() == authorizationStatus else { return nil }
+        return completedSelectionScan.id
+    }
 
     /// `localIdentifier` foto → nama album perangkat asalnya.
     ///
@@ -550,6 +562,7 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
             photos = []
             albumTitles = [:]
             albumTitlesRevision = revision
+            completedSelectionScan = (requestID, context.revision)
             return
         }
         let result = await reader.photosInAlbums(albumIDs)
@@ -558,6 +571,7 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
         photos = result.photos
         albumTitles = result.albumTitles
         albumTitlesRevision = revision
+        completedSelectionScan = (requestID, context.revision)
     }
 
     @discardableResult
