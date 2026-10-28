@@ -507,10 +507,6 @@ struct LibraryView: View {
                             .zoom(sourceID: album.id, in: albumNamespace))
                 } label: {
                     AlbumCard(album: album)
-                        // AlbumResponseDTO memakai id sebagai identitas. Revision
-                        // visual ini memaksa count dan AuthImage cover dibangun
-                        // ulang ketika isi berubah tanpa mengganti id navigasi.
-                        .id("\(album.id)|\(album.assetCount)|\(album.albumThumbnailAssetId ?? "")")
                         .matchedTransitionSource(id: album.id, in: albumNamespace)
                 }
                 .buttonStyle(.plain)

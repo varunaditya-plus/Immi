@@ -33,12 +33,35 @@ struct AlbumResponseDTO: Decodable, Identifiable, Hashable {
     /// v2 supplies ownerId; v3 identifies the owner in albumUsers.
     var ownerId: String? = nil
 
+    // Navigation and collection identity use `id`. Value comparison includes
+    // card metadata so SwiftUI can redraw a row without replacing its identity.
+    // Legacy embedded assets are loaded independently by the detail screen.
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
+        hasher.combine(albumName)
+        hasher.combine(description)
+        hasher.combine(assetCount)
+        hasher.combine(albumThumbnailAssetId)
+        hasher.combine(shared)
+        hasher.combine(createdAt)
+        hasher.combine(updatedAt)
+        hasher.combine(startDate)
+        hasher.combine(endDate)
+        hasher.combine(ownerId)
     }
 
     static func == (lhs: AlbumResponseDTO, rhs: AlbumResponseDTO) -> Bool {
         lhs.id == rhs.id
+            && lhs.albumName == rhs.albumName
+            && lhs.description == rhs.description
+            && lhs.assetCount == rhs.assetCount
+            && lhs.albumThumbnailAssetId == rhs.albumThumbnailAssetId
+            && lhs.shared == rhs.shared
+            && lhs.createdAt == rhs.createdAt
+            && lhs.updatedAt == rhs.updatedAt
+            && lhs.startDate == rhs.startDate
+            && lhs.endDate == rhs.endDate
+            && lhs.ownerId == rhs.ownerId
     }
 }
 

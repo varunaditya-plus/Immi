@@ -21,12 +21,7 @@ final class LibraryViewModel {
         }
         set { loadedMemories = newValue }
     }
-    private struct AlbumStorage { var albums: [AlbumResponseDTO] = [] }
-    private var albumStorage = AlbumStorage()
-    var albums: [AlbumResponseDTO] {
-        get { albumStorage.albums }
-        set { albumStorage = AlbumStorage(albums: newValue) }
-    }
+    var albums: [AlbumResponseDTO] = []
     var recentAlbums: [AlbumResponseDTO] { Array(albums.prefix(Self.rowLimit)) }
     // AssetLite equality compares IDs; this storage also publishes metadata changes.
     private struct FavoriteStorage { var assets: [AssetLite] = [] }

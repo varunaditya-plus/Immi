@@ -6,14 +6,7 @@ import Observation
 final class AlbumListViewModel {
     private let snapshotGeneration = LocalSnapshot.generation
 
-    private struct AlbumStorage {
-        var albums: [AlbumResponseDTO] = []
-    }
-    private var albumStorage = AlbumStorage()
-    var albums: [AlbumResponseDTO] {
-        get { albumStorage.albums }
-        set { albumStorage = AlbumStorage(albums: newValue) }
-    }
+    var albums: [AlbumResponseDTO] = []
     /// Kegagalan aksi sheet — sunting, tambah pengguna. Sengaja TERPISAH dari
     /// `phase`: itu milik daftar album, dan mengubahnya berarti seluruh daftar
     /// berganti jadi layar error hanya karena satu sheet gagal.
