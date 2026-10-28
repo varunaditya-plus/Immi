@@ -152,6 +152,10 @@ final class SettingsViewModel {
         return current < latest
     }
 
+    func displayedServerVersion(fallback: ServerVersionDTO?) -> String? {
+        serverInfo?.version ?? fallback?.displayName
+    }
+
     func refreshCacheSize() async {
         cacheSize = await ImageCache.shared.diskCacheSize()
     }

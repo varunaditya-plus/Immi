@@ -487,10 +487,8 @@ struct SettingsView: View {
         Section("About") {
             LabeledContent("App Version", value: vm.appVersion)
 
-            if let compatibility = session.serverCompatibility {
-                LabeledContent("Server Version", value: compatibility.version.displayName)
-            } else if let server = vm.serverInfo {
-                LabeledContent("Server Version", value: server.version)
+            if let version = vm.displayedServerVersion(fallback: session.serverCompatibility?.version) {
+                LabeledContent("Server Version", value: version)
             } else if vm.serverPhase.isLoading {
                 LabeledContent("Server Version") {
                     ProgressView().controlSize(.small)
