@@ -11,8 +11,9 @@ enum SharedUploadItemState: String, Codable, Sendable {
     case uploading
     case uploaded
     case failed
+    case discarded
 
-    var isFinished: Bool { self == .uploaded }
+    var isFinished: Bool { self == .uploaded || self == .discarded }
     var isReadyForUpload: Bool { self == .queued || self == .uploading }
 }
 
@@ -252,6 +253,31 @@ actor SharedUploadStore {
         if fileManager.fileExists(atPath: directory.path) {
             try fileManager.removeItem(at: directory)
         }
+    }
+
+    func retryFailedItem(id: UUID, batchID: UUID, owner: SharedUploadOwner) throws -> Bool {
+        guard let claim = try claimBatch(id: batchID) else { return false }
+        defer { withExtendedLifetime(claim) {} }
+        guard var batch = try batch(id: batchID, owner: owner),
+              let index = batch.items.firstIndex(where: { $0.id == id && $0.state == .failed }) else { return false }
+        batch.items[index].state = .queued
+        batch.items[index].lastError = nil
+        try save(batch)
+        return true
+    }
+
+    func discardFailedItem(id: UUID, batchID: UUID, owner: SharedUploadOwner) throws -> Bool {
+        guard let claim = try claimBatch(id: batchID) else { return false }
+        defer { withExtendedLifetime(claim) {} }
+        guard var batch = try batch(id: batchID, owner: owner),
+              let index = batch.items.firstIndex(where: { $0.id == id && $0.state == .failed }) else { return false }
+        batch.items[index].state = .discarded
+        batch.items[index].lastError = nil
+        // A durable removal receipt makes failed file cleanup safe to resume.
+        try save(batch)
+        try removeFile(for: batch.items[index], batchID: batchID)
+        if batch.items.allSatisfy({ $0.state.isFinished }) { try removeBatch(id: batchID) }
+        return true
     }
 
     private func batchDirectory(id: UUID) throws -> URL {
