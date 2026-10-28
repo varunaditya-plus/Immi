@@ -8,15 +8,55 @@ import XCTest
 final class CollectionEmptyPresentationTests: XCTestCase {
     private var window: UIWindow?
     private weak var previousKeyWindow: UIWindow?
+    private var repositories: [ControlledSearchRepository] = []
 
     override func tearDown() async throws {
         closeHost()
+        for repository in repositories { await repository.probe.cancelAll() }
+        repositories.removeAll()
         try await super.tearDown()
     }
 
+    func testRemovingEveryLoadedResultKeepsLoadMoreVisibleAndNextPageReachable() async throws {
+        let (model, repository) = try await searchedModel()
+        model.removeLocally(["first"])
+        XCTAssertTrue(model.results.isEmpty)
+        XCTAssertEqual(model.nextPage, "2")
+        try show(SearchPresentationFixture(model: model))
+        var text = try await visibleText()
+        XCTAssertTrue(text.contains("Load More"), text)
+        XCTAssertFalse(text.contains("No Results"), text)
 
+        let page = Task { await model.loadMore() }
+        _ = try await repository.probe.waitForRequest(1, testCase: self)
+        text = try await visibleText()
+        XCTAssertTrue(text.contains("Loading More"), text)
+        try await repository.probe.fail(1, error: APIError.server(status: 503, message: "Page unavailable"))
+        await page.value
+        text = try await visibleText()
+        XCTAssertTrue(text.contains("Page unavailable"), text)
+        XCTAssertTrue(text.contains("Retry"), text)
+        XCTAssertFalse(text.contains("No Results"), text)
 
+        closeHost()
+        let retry = Task { await model.retryLoadMore() }
+        let request = try await repository.probe.waitForRequest(2, testCase: self)
+        XCTAssertEqual(request.request.page, 2)
+        try await repository.probe.succeed(2, ids: ["remaining"], total: 2)
+        await retry.value
+        XCTAssertEqual(model.results.map(\.id), ["remaining"])
+        XCTAssertNil(model.nextPage)
+    }
 
+    func testOnlyATerminalEmptySearchShowsNoResults() async throws {
+        let (model, _) = try await searchedModel(nextPage: nil)
+        model.removeLocally(["first"])
+        try show(SearchPresentationFixture(model: model))
+        let text = try await visibleText()
+        XCTAssertTrue(text.contains("No Results"), text)
+        XCTAssertFalse(text.contains("Load More"), text)
+        XCTAssertFalse(text.contains("Retry"), text)
+    }
 
 
 
@@ -38,7 +78,19 @@ final class CollectionEmptyPresentationTests: XCTestCase {
         XCTAssertFalse(after.contains("Old title"), after)
     }
 
-
+    private func searchedModel(nextPage: String? = "2") async throws -> (SearchViewModel, ControlledSearchRepository) {
+        let api = makeStubAPIClient()
+        let repository = ControlledSearchRepository(api: api)
+        repositories.append(repository)
+        let model = SearchViewModel(repo: repository, assetRepo: AssetDetailRepository(api: api),
+            albumRepo: AlbumRepository(api: api))
+        model.searchText = "mountains"
+        let search = Task { await model.search() }
+        _ = try await repository.probe.waitForRequest(0, testCase: self)
+        try await repository.probe.succeed(0, ids: ["first"], total: nextPage == nil ? 1 : 2, nextPage: nextPage)
+        await search.value
+        return (model, repository)
+    }
 
     private func show<Content: View>(_ content: Content) throws {
         closeHost()
@@ -83,6 +135,15 @@ final class CollectionEmptyPresentationTests: XCTestCase {
         request.recognitionLanguages = ["en-US"]
         try VNImageRequestHandler(cgImage: try XCTUnwrap(image.cgImage)).perform([request])
         return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ")
+    }
+}
+
+private struct SearchPresentationFixture: View {
+    let model: SearchViewModel
+    @State private var isSelecting = false
+    @State private var selectedIDs: Set<String> = []
+    var body: some View {
+        SearchView(isActive: false).results(model, isSelecting: $isSelecting, selectedIDs: $selectedIDs)
     }
 }
 

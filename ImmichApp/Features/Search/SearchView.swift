@@ -169,7 +169,7 @@ struct SearchView: View {
 
                 Divider()
 
-                results(vm)
+                results(vm, isSelecting: $isSelecting, selectedIDs: $selectedIDs)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         } else {
@@ -179,7 +179,9 @@ struct SearchView: View {
     }
 
     @ViewBuilder
-    private func results(_ vm: SearchViewModel) -> some View {
+    func results(
+        _ vm: SearchViewModel, isSelecting: Binding<Bool>, selectedIDs: Binding<Set<String>>
+    ) -> some View {
         if !vm.hasCriteria {
             suggestionsView(vm)
         } else {
@@ -188,18 +190,20 @@ struct SearchView: View {
                 ProgressView()
 
             case .loaded:
-                if vm.results.isEmpty {
-                    noResultsState
-                } else {
-                    SearchResultsGrid(
-                        assets: vm.results,
-                        isSelecting: $isSelecting,
-                        selectedIDs: $selectedIDs,
-                        actions: assetActions,
-                        onReachEnd: { Task { await vm.loadMore() } })
-                        .safeAreaInset(edge: .bottom, spacing: 0) {
-                            paginationFooter(vm)
-                        }
+                Group {
+                    if vm.results.isEmpty, vm.nextPage == nil {
+                        noResultsState
+                    } else {
+                        SearchResultsGrid(
+                            assets: vm.results,
+                            isSelecting: isSelecting,
+                            selectedIDs: selectedIDs,
+                            actions: assetActions,
+                            onReachEnd: { Task { await vm.loadMore() } })
+                    }
+                }
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    paginationFooter(vm)
                 }
 
             case .failed(let error):
