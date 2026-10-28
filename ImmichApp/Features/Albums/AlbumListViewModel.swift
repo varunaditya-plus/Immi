@@ -6,7 +6,14 @@ import Observation
 final class AlbumListViewModel {
     private let snapshotGeneration = LocalSnapshot.generation
 
-    var albums: [AlbumResponseDTO] = []
+    private struct AlbumStorage {
+        var albums: [AlbumResponseDTO] = []
+    }
+    private var albumStorage = AlbumStorage()
+    var albums: [AlbumResponseDTO] {
+        get { albumStorage.albums }
+        set { albumStorage = AlbumStorage(albums: newValue) }
+    }
     /// Kegagalan aksi sheet — sunting, tambah pengguna. Sengaja TERPISAH dari
     /// `phase`: itu milik daftar album, dan mengubahnya berarti seluruh daftar
     /// berganti jadi layar error hanya karena satu sheet gagal.
@@ -15,6 +22,11 @@ final class AlbumListViewModel {
     var showCreateSheet = false
 
     private let repo: AlbumRepository
+    private var loadID = UUID()
+    private var restoredSnapshot = false
+    private var phaseBeforeLoad: LoadingPhase<Void> = .idle
+    private var updateIDs: [String: UUID] = [:]
+    private var actionErrorID = UUID()
 
     init(repo: AlbumRepository) {
         self.repo = repo
@@ -26,28 +38,39 @@ final class AlbumListViewModel {
     /// kunjungan saat offline berakhir di "Failed to Load" — padahal daftar
     /// albumnya sudah pernah ada di layar ini beberapa detik sebelumnya.
     func loadAlbums() async {
-        guard snapshotGeneration == LocalSnapshot.generation else { return }
+        guard canPublish else { return }
+        let requestID = UUID()
+        loadID = requestID
+        if !phase.isLoading { phaseBeforeLoad = phase }
+        let canRestoreSnapshot = !restoredSnapshot
+        restoredSnapshot = true
         if albums.isEmpty {
             // ADA potret dan potret yang BERISI adalah dua hal berbeda —
             // pengguna baru yang belum punya album menyimpan potret `[]`, dan
             // itu jawaban yang sah.
-            if let cached = LocalSnapshot.load(
+            if canRestoreSnapshot, let cached = LocalSnapshot.load(
                 [AlbumResponseDTO].self, for: LocalSnapshot.Key.albumsList) {
                 albums = cached
                 phase = .loaded(())
-            } else {
+            } else if phase.isIdle || phase.errorMessage != nil {
                 phase = .loading
             }
         }
 
         do {
             let fetched = try await repo.all()
-            guard snapshotGeneration == LocalSnapshot.generation else { return }
-            if LocalSnapshot.save(fetched, for: LocalSnapshot.Key.albumsList, expectedGeneration: snapshotGeneration) || albums.isEmpty {
-                albums = fetched
-            }
+            guard isCurrentLoad(requestID) else { return }
+            try Task.checkCancellation()
+            LocalSnapshot.save(fetched, for: LocalSnapshot.Key.albumsList, expectedGeneration: snapshotGeneration)
+            albums = fetched
             phase = .loaded(())
+            phaseBeforeLoad = phase
         } catch {
+            guard isCurrentLoad(requestID) else { return }
+            guard !Task.isCancelled, !(error is CancellationError) else {
+                if phase.isLoading { phase = phaseBeforeLoad }
+                return
+            }
             // Sudah ada jawaban yang SAH di layar — entah dari potret, entah
             // dari muatan sebelumnya — jadi kegagalannya diam.
             //
@@ -57,7 +80,26 @@ final class AlbumListViewModel {
             // kebohongan yang persis hendak dihindari cache ini.
             if case .loaded = phase { return }
             phase = .failed((error as? APIError)?.errorDescription ?? String(localized: "Failed to load albums"))
+            phaseBeforeLoad = phase
         }
+    }
+
+    private var canPublish: Bool {
+        !Task.isCancelled && snapshotGeneration == LocalSnapshot.generation
+    }
+
+    private func isCurrentLoad(_ id: UUID) -> Bool {
+        snapshotGeneration == LocalSnapshot.generation && loadID == id
+    }
+
+    private func invalidateLoads() {
+        loadID = UUID()
+        phase = .loaded(())
+        phaseBeforeLoad = phase
+    }
+
+    private func finishUpdate(_ id: String, requestID: UUID) {
+        if updateIDs[id] == requestID { updateIDs[id] = nil }
     }
 
     /// Potretnya ikut ditulis ulang setiap daftarnya berubah di sini.
@@ -78,16 +120,19 @@ final class AlbumListViewModel {
         description: String,
         assetIds: [String]
     ) async -> String? {
-        guard !name.isEmpty else { return nil }
+        guard canPublish, !name.isEmpty else { return nil }
         do {
             let newAlbum = try await repo.create(
                 name: name,
                 description: description.isEmpty ? nil : description,
                 assetIds: assetIds)
-            albums.append(newAlbum)
+            guard canPublish else { return nil }
+            invalidateLoads()
+            if !albums.contains(where: { $0.id == newAlbum.id }) { albums.append(newAlbum) }
             persist()
             return nil
         } catch {
+            guard canPublish else { return nil }
             return (error as? APIError)?.errorDescription
                 ?? String(localized: "Failed to create album")
         }
@@ -97,13 +142,18 @@ final class AlbumListViewModel {
     func update(_ id: String, name: String, description: String) async -> String? {
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
         let trimmedDescription = description.trimmingCharacters(in: .whitespaces)
-        guard !trimmedName.isEmpty else { return nil }
+        guard canPublish, !trimmedName.isEmpty else { return nil }
+        let requestID = UUID()
+        updateIDs[id] = requestID
+        defer { finishUpdate(id, requestID: requestID) }
 
         do {
             try await repo.update(
                 id,
                 name: trimmedName,
                 description: .some(trimmedDescription.isEmpty ? nil : trimmedDescription))
+            guard canPublish, updateIDs[id] == requestID else { return nil }
+            invalidateLoads()
             if let index = albums.firstIndex(where: { $0.id == id }) {
                 // Ganti NILAI elemennya secara utuh. Mutasi field bersarang
                 // tidak selalu memicu registrar Observation milik array,
@@ -116,6 +166,7 @@ final class AlbumListViewModel {
             }
             return nil
         } catch {
+            guard canPublish, updateIDs[id] == requestID else { return nil }
             return (error as? APIError)?.errorDescription
                 ?? String(localized: "Failed to update album")
         }
@@ -124,29 +175,47 @@ final class AlbumListViewModel {
     /// Dipakai detail album untuk mengirim metadata yang baru disimpan kembali
     /// ke list/grid/sidebar yang membukanya.
     func applyAlbumUpdate(_ updated: AlbumResponseDTO) {
+        guard canPublish else { return }
+        invalidateLoads()
+        updateIDs[updated.id] = nil
         guard let index = albums.firstIndex(where: { $0.id == updated.id }) else { return }
-        albums[index] = updated
+        var merged = albums[index]
+        merged.albumName = updated.albumName
+        merged.description = updated.description
+        merged.updatedAt = updated.updatedAt
+        albums[index] = merged
         persist()
     }
 
     func addUsers(_ userIDs: [String], to albumId: String) async {
-        guard !userIDs.isEmpty else { return }
+        guard canPublish, !userIDs.isEmpty else { return }
+        let errorID = UUID()
+        actionErrorID = errorID
         actionError = nil
         do {
             try await repo.addUsers(userIDs, to: albumId)
+            guard canPublish else { return }
+            invalidateLoads()
             // Status `shared` ikut berubah di server, jadi daftarnya dimuat
             // ulang supaya filter Shared/Personal tetap benar.
             await loadAlbums()
         } catch {
+            guard canPublish, actionErrorID == errorID else { return }
             actionError = (error as? APIError)?.errorDescription
                 ?? String(localized: "Failed to add user")
         }
     }
 
     func deleteAlbum(_ id: String) async {
+        guard canPublish else { return }
+        let errorID = UUID()
+        actionErrorID = errorID
         actionError = nil
         do {
             try await repo.delete(id)
+            guard canPublish else { return }
+            invalidateLoads()
+            updateIDs[id] = nil
             albums.removeAll { $0.id == id }
             persist()
             // Potret ISI album itu juga dibuang, bukan cuma barisnya dari
@@ -154,6 +223,7 @@ final class AlbumListViewModel {
             // dibaca, tidak pernah dibersihkan.
             LocalSnapshot.remove(LocalSnapshot.Key.album(id), expectedGeneration: snapshotGeneration)
         } catch {
+            guard canPublish, actionErrorID == errorID else { return }
             actionError = (error as? APIError)?.errorDescription
                 ?? String(localized: "Failed to delete album")
         }
@@ -163,6 +233,8 @@ final class AlbumListViewModel {
     /// Detail sudah memegang daftar aset yang benar, jadi hasilnya dapat muncul
     /// seketika di baris sidebar dan kartu All Albums.
     func applyContents(_ assets: [AssetLite], to id: String) {
+        guard canPublish else { return }
+        invalidateLoads()
         guard let index = albums.firstIndex(where: { $0.id == id }) else { return }
 
         var updated = albums[index]
@@ -188,6 +260,9 @@ final class AlbumListViewModel {
     /// Detail album sudah menghapusnya di server. Yang tersisa di sini hanya
     /// membuang representasi bersama yang dipakai sidebar dan All Albums.
     func removeDeletedAlbum(_ id: String) {
+        guard canPublish else { return }
+        invalidateLoads()
+        updateIDs[id] = nil
         albums.removeAll { $0.id == id }
         persist()
     }
