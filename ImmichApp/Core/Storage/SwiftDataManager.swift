@@ -693,11 +693,16 @@ final class SwiftDataManager {
         try recordVisibility(assets.filter { !$0.isTrashed })
     }
 
-    /// A Trash read may add private restrictions, but cannot release one.
+    /// Trash evidence may restrict timeline visibility, but cannot release privacy.
     func recordTrashRestrictions(_ assets: [AssetResponseDTO]) throws {
-        try recordVisibility(assets.filter {
-            guard $0.isTrashed, let visibility = $0.visibility else { return false }
+        let privateIDs = privateAssetIDs.union(assets.filter {
+            guard let visibility = $0.visibility else { return false }
             return visibility != "timeline" && visibility != "archive"
+        }.map(\.id))
+        try recordVisibility(assets.filter {
+            let visibility = $0.visibility ?? ($0.isArchived ? "archive" : "timeline")
+            if visibility == "archive" { return $0.isTrashed && !privateIDs.contains($0.id) }
+            return visibility != "timeline"
         })
     }
 
