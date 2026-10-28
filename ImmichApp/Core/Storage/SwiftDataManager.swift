@@ -816,22 +816,39 @@ final class SwiftDataManager {
     /// masih berada di WAL. SQLite backup API membaca keduanya sebagai satu
     /// snapshot tanpa menutup database yang sedang dipakai aplikasi.
     func exportDatabase() async throws -> URL {
+        try Task.checkCancellation()
         guard startupState.isPersistentStoreAvailable else {
             throw LocalDatabaseMaintenanceError.persistentStoreUnavailable
         }
 
         try modelContext.save()
+        let generation = LocalSnapshot.generation
         let sourceURL = storeURL
         let destinationURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(
-                "Immich-Sync-\(Int(Date.now.timeIntervalSince1970)).sqlite")
+                "Immich-Sync-\(UUID().uuidString).sqlite")
+        var accepted = false
+        defer {
+            if !accepted { try? FileManager.default.removeItem(at: destinationURL) }
+        }
 
-        return try await Task.detached(priority: .utility) {
+        let worker = Task.detached(priority: .utility) {
+            try Task.checkCancellation()
             try Self.createDatabaseSnapshot(
                 from: sourceURL,
                 to: destinationURL)
+            try Task.checkCancellation()
             return destinationURL
-        }.value
+        }
+        return try await withTaskCancellationHandler {
+            let url = try await worker.value
+            try Task.checkCancellation()
+            guard generation == LocalSnapshot.generation else { throw CancellationError() }
+            accepted = true
+            return url
+        } onCancel: {
+            worker.cancel()
+        }
     }
 
     /// Menghapus database/index sinkronisasi yang dapat dibangun ulang.
@@ -987,13 +1004,22 @@ final class SwiftDataManager {
         backupMappingRevision = UUID()
     }
 
-    private nonisolated static func createDatabaseSnapshot(
+    nonisolated static func createDatabaseSnapshot(
         from sourceURL: URL,
         to destinationURL: URL
     ) throws {
         let fileManager = FileManager.default
         if fileManager.fileExists(atPath: destinationURL.path) {
             try fileManager.removeItem(at: destinationURL)
+        }
+        var completed = false
+        defer {
+            if !completed { try? fileManager.removeItem(at: destinationURL) }
+            // All SQLite handles and statements close before this defer. The
+            // successful DELETE-mode snapshot needs no leftover WAL metadata.
+            for suffix in ["-wal", "-shm", "-journal"] {
+                try? fileManager.removeItem(atPath: destinationURL.path + suffix)
+            }
         }
 
         var source: OpaquePointer?
@@ -1024,11 +1050,31 @@ final class SwiftDataManager {
         guard let backup = sqlite3_backup_init(destination, "main", source, "main") else {
             throw LocalDatabaseMaintenanceError.exportFailed
         }
-        let stepResult = sqlite3_backup_step(backup, -1)
+        var finished = false
+        defer { if !finished { sqlite3_backup_finish(backup) } }
+        var stepResult: Int32
+        repeat {
+            try Task.checkCancellation()
+            stepResult = sqlite3_backup_step(backup, 256)
+        } while stepResult == SQLITE_OK
         let finishResult = sqlite3_backup_finish(backup)
+        finished = true
         guard stepResult == SQLITE_DONE, finishResult == SQLITE_OK else {
             throw LocalDatabaseMaintenanceError.exportFailed
         }
+        // Core Data's WAL header is copied too. Normalize only the snapshot so
+        // recipients can read the single shared file without -wal/-shm files.
+        var journal: OpaquePointer?
+        guard sqlite3_prepare_v2(destination, "PRAGMA journal_mode=DELETE", -1, &journal, nil) == SQLITE_OK else {
+            throw LocalDatabaseMaintenanceError.exportFailed
+        }
+        defer { sqlite3_finalize(journal) }
+        guard sqlite3_step(journal) == SQLITE_ROW,
+              let mode = sqlite3_column_text(journal, 0), String(cString: mode) == "delete",
+              sqlite3_step(journal) == SQLITE_DONE else {
+            throw LocalDatabaseMaintenanceError.exportFailed
+        }
+        completed = true
     }
 
     /// Menghapus seluruh data yang terikat akun dari penyimpanan lokal.
