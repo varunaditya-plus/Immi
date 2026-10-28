@@ -10,12 +10,20 @@ final class TrashViewerPresentationTests: XCTestCase {
     private weak var previousKeyWindow: UIWindow?
 
     override func tearDown() async throws {
+        if let root = window?.rootViewController,
+           let alert = presentedAlert(from: root) {
+            await dismiss(alert)
+        }
+        closeWindow()
+        try await super.tearDown()
+    }
+
+    private func closeWindow() {
         window?.isHidden = true
         window?.rootViewController = nil
         window = nil
         previousKeyWindow?.makeKey()
         previousKeyWindow = nil
-        try await super.tearDown()
     }
 
     func testCompactTrashViewerShowsRestoreAndPermanentDelete() async throws {
@@ -50,16 +58,14 @@ final class TrashViewerPresentationTests: XCTestCase {
         })
         let action = try XCTUnwrap(item.action, "The visible toolbar item must expose its UIKit action")
         XCTAssertTrue(UIApplication.shared.sendAction(action, to: item.target, from: item, for: nil))
-        try await Task.sleep(for: .milliseconds(250))
-
-        let confirmation = try XCTUnwrap(presentedAlert(from: root))
+        let confirmation = try await waitForPresentedAlert(from: root)
         XCTAssertEqual(confirmation.title, "Permanently Delete Photo?")
         XCTAssertEqual(confirmation.message, "This cannot be undone.")
         XCTAssertEqual(confirmation.actions.first(where: { $0.style == .destructive })?.title,
             "Delete Permanently")
         XCTAssertNotNil(confirmation.actions.first(where: { $0.style == .cancel }))
         XCTAssertTrue(deletions.isEmpty, "Opening the warning must not send a permanent deletion")
-        confirmation.dismiss(animated: false)
+        await dismiss(confirmation)
     }
 
     private func assertTrashChrome(width: CGFloat, sizeClass: UserInterfaceSizeClass) async throws {
@@ -95,6 +101,35 @@ final class TrashViewerPresentationTests: XCTestCase {
         if let presented = controller.presentedViewController,
            let alert = presentedAlert(from: presented) { return alert }
         return controller.children.compactMap { presentedAlert(from: $0) }.first
+    }
+
+    private func dismiss(_ controller: UIViewController) async {
+        await waitForTransition(of: controller)
+        guard controller.presentingViewController != nil else { return }
+        await withCheckedContinuation { continuation in
+            controller.dismiss(animated: false) { continuation.resume() }
+        }
+    }
+
+    private func waitForPresentedAlert(from root: UIViewController) async throws -> UIAlertController {
+        let appeared = XCTNSPredicateExpectation(predicate: NSPredicate { [weak self, weak root] _, _ in
+            guard let self, let root else { return false }
+            if Thread.isMainThread {
+                return MainActor.assumeIsolated { self.presentedAlert(from: root) != nil }
+            }
+            return DispatchQueue.main.sync { self.presentedAlert(from: root) != nil }
+        }, object: nil)
+        await fulfillment(of: [appeared], timeout: 2)
+        let alert = try XCTUnwrap(presentedAlert(from: root))
+        await waitForTransition(of: alert)
+        return alert
+    }
+
+    private func waitForTransition(of controller: UIViewController) async {
+        guard let coordinator = controller.transitionCoordinator else { return }
+        let finished = expectation(description: "The UIKit presentation transition completed")
+        coordinator.animate(alongsideTransition: nil) { _ in finished.fulfill() }
+        await fulfillment(of: [finished], timeout: 2)
     }
 
     private func show(_ detail: AssetDetailView, width: CGFloat, sizeClass: UserInterfaceSizeClass) throws {
