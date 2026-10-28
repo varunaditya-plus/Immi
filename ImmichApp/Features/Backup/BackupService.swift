@@ -125,6 +125,25 @@ final class BackupService {
     private(set) var backedUp = 0
     /// Sisanya. Inilah angka yang sebenarnya berarti.
     var remainder: Int { max(0, total - backedUp) }
+    private var countedSelectionScanID: UUID?
+    private var countedMappingRevision: UUID?
+
+    var selectionStatus: BackupSelectionStatus {
+        guard !localLibrary.selectedAlbumIDs.isEmpty else { return .noSelection }
+        guard localLibrary.isAuthorized else { return .accessRequired }
+        guard dataManager.isPersistentStoreAvailable,
+              let scan = localLibrary.currentSelectionScanID,
+              countedSelectionScanID == scan,
+              countedMappingRevision == dataManager.backupMappingRevision else { return .unchecked }
+        guard total > 0 else { return .empty }
+        return remainder > 0 ? .remaining : .backedUp
+    }
+
+    var hasStatusError: Bool {
+        guard let lastError else { return false }
+        let state = queue.snapshot
+        return state.waiting == 0 || state.lastError != lastError
+    }
 
     private(set) var isUploading = false
     /// Nomor urut yang sedang dikerjakan, untuk bilah kemajuan.
@@ -472,12 +491,14 @@ final class BackupService {
     /// Murah: satu enumerasi daftar yang sudah ada di memori, plus satu kueri
     /// id yang sudah berpasangan. Tidak ada byte foto yang dibaca di sini.
     func refreshCounts() {
-        let photos = LocalPhotoLibrary.shared.photos
+        let photos = localLibrary.photos
         let uploaded = dataManager.uploadedLocalIdentifiers()
         total = photos.count
         backedUp = photos.reduce(into: 0) { count, photo in
             if uploaded.contains(photo.id) { count += 1 }
         }
+        countedSelectionScanID = localLibrary.currentSelectionScanID
+        countedMappingRevision = dataManager.backupMappingRevision
     }
 
     /// Memastikan daftar foto perangkat sudah terbaca, lalu menghitung ulang.
@@ -491,8 +512,8 @@ final class BackupService {
         // Izin belum pernah diberikan DAN belum ada album dipilih berarti tidak
         // ada apa pun yang bisa dibaca — dan `load()` akan memunculkan permintaan
         // izin sistem untuk sesuatu yang tidak pernah diminta pengguna.
-        guard LocalPhotoLibrary.shared.isAuthorized
-                || !LocalPhotoLibrary.shared.selectedAlbumIDs.isEmpty
+        guard localLibrary.isAuthorized
+                || !localLibrary.selectedAlbumIDs.isEmpty
         else {
             refreshCounts()
             return
@@ -501,7 +522,7 @@ final class BackupService {
         // pencadangan memang menyala. Itu yang menutup lubang lama: sakelar yang
         // sudah menyala sejak versi sebelumnya tidak pernah memicu dialognya.
         await BackupNotifier.shared.ensureAuthorization(prompt: isEnabled)
-        await LocalPhotoLibrary.shared.load()
+        await localLibrary.load()
         await pruneUnavailableFailures()
         refreshCounts()
     }
@@ -755,6 +776,8 @@ final class BackupService {
         resetAlbumResolution(for: nil)
         total = 0
         backedUp = 0
+        countedSelectionScanID = nil
+        countedMappingRevision = nil
         uploadedThisRun = 0
         pendingThisRun = 0
         failures = []
@@ -920,8 +943,11 @@ final class BackupService {
     /// Ada sesuatu yang bisa naik dengan jaringan yang ada sekarang.
     var canUploadNow: Bool {
         guard NetworkMonitor.shared.isOnline else { return false }
-        guard NetworkMonitor.shared.isExpensive else { return true }
-        return cellularPhotos || cellularVideos || queue.items.contains {
+        return !NetworkMonitor.shared.isExpensive || allowsCellularUploads
+    }
+
+    var allowsCellularUploads: Bool {
+        cellularPhotos || cellularVideos || queue.items.contains {
             $0.allowsCellularOverride && $0.state != .failed && $0.state != .cancelling
         }
     }

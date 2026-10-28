@@ -48,45 +48,11 @@ extension View {
 /// penantian hanya digambar di baris yang datanya memang harus ditanyakan ke
 /// server.
 struct SettingsView: View {
-    private enum BackupBadgeState: Equatable {
-        case uploading
-        case synced
-        case failed
-        case error
-        case waiting
-
-        var title: LocalizedStringKey {
-            switch self {
-            case .uploading: "Backing Up"
-            case .synced: "Synced to Server"
-            case .failed: "Backup Failed"
-            case .error: "Backup Error"
-            case .waiting: "Waiting to Back Up"
-            }
-        }
-
-        var symbol: String {
-            switch self {
-            case .uploading: "arrow.trianglehead.2.clockwise.rotate.90.icloud"
-            case .synced: "checkmark.icloud.fill"
-            case .failed: "xmark.icloud.fill"
-            case .error: "exclamationmark.icloud.fill"
-            case .waiting: "icloud"
-            }
-        }
-
-        var tint: Color {
-            switch self {
-            case .uploading, .failed: .red
-            case .synced: .green
-            case .error, .waiting: .orange
-            }
-        }
-    }
-
     @Environment(SessionManager.self) private var session
     @State private var vm: SettingsViewModel
     @State private var backup = BackupService.shared
+    @State private var library = LocalPhotoLibrary.shared
+    @State private var sharedUploads = SharedUploadService.shared
     @State private var backupSetupJourney = BackupSetupJourney.shared
     @State private var showLogoutAlert = false
     @State private var showBackup = false
@@ -117,16 +83,19 @@ struct SettingsView: View {
             .navigationDestination(isPresented: $showBackup) {
                 BackupView()
             }
-            .onAppear { isSettingsRootVisible = true }
+            .onAppear {
+                isSettingsRootVisible = true
+                backup.refreshCounts()
+            }
+            .onChange(of: library.currentSelectionScanID) { backup.refreshCounts() }
+            .onChange(of: SwiftDataManager.shared.backupMappingRevision) { backup.refreshCounts() }
             .onDisappear { isSettingsRootVisible = false }
             // Bar dibuat transparan supaya kepalanya terlihat sampai ke belakang
             // tombol tutup, seperti di referensi.
             .toolbarBackground(.hidden, for: .navigationBar)
-            // Tiga pekerjaan yang benar-benar tidak saling bergantung, jadi
-            // masing-masing berjalan sendiri: yang satu gagal atau lambat tidak
-            // menahan dua lainnya.
             .task { await vm.loadServerInfo() }
             .task { await session.refreshUser() }
+            .task { await sharedUploads.refreshPending(session: session) }
             .alert("Sign Out", isPresented: $showLogoutAlert) {
                 Button("Sign Out", role: .destructive) {
                     Task { await session.logout() }
@@ -195,24 +164,24 @@ struct SettingsView: View {
             Text(state.title)
         }
         .font(.footnote.weight(.medium))
-        .foregroundStyle(state.tint)
+        .foregroundStyle(backupBadgeTint)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(.fill.tertiary, in: .capsule)
         .animation(.smooth(duration: 0.25), value: state)
     }
 
-    /// Error yang muncul ketika antrean masih berjalan perlu terlihat segera.
-    /// Setelah putaran selesai, jumlah `failures` menjadi ringkasan akhirnya dan
-    /// memakai cloud-xmark. `remainder` mencegah status synced muncul terlalu
-    /// dini ketika masih ada file yang menunggu kesempatan upload berikutnya.
-    private var backupBadgeState: BackupBadgeState {
-        if backup.isUploading {
-            return backup.lastError == nil ? .uploading : .error
+    private var backupBadgeTint: Color {
+        switch backupBadgeState {
+        case .uploading, .failed: .red
+        case .synced: .green
+        case .error, .photosAccess, .waiting: .orange
+        case .off, .needsSelection, .unchecked, .empty: .secondary
         }
-        if !backup.failures.isEmpty { return .failed }
-        if backup.lastError != nil { return .error }
-        return backup.remainder == 0 ? .synced : .waiting
+    }
+
+    private var backupBadgeState: BackupStatus {
+        BackupStatus(backup: backup, sharedUploads: sharedUploads)
     }
 
     // MARK: - Daftar
