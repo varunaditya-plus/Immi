@@ -67,6 +67,9 @@ final class SwiftDataManager {
     /// not make a locked or archived device copy appear in Photos.
     private(set) var nonTimelineAssetIDs: Set<String> = []
     private(set) var archivedAssetIDs: Set<String> = []
+    /// Accepted timeline commands override retained metadata even without a cache row.
+    /// Keep only this session's explicit actions, rather than every synced asset.
+    private(set) var explicitTimelineAssetIDs: Set<String> = []
     @ObservationIgnored private var visibilityNeedsPersistence = false
     var privateAssetIDs: Set<String> {
         nonTimelineAssetIDs.subtracting(archivedAssetIDs)
@@ -685,6 +688,8 @@ final class SwiftDataManager {
             in: modelContext) {
             try modelContext.save()
         }
+        if visibility == "timeline" { explicitTimelineAssetIDs.formUnion(ids) }
+        else { explicitTimelineAssetIDs.subtract(ids) }
     }
 
     /// Only current network responses may refine legacy unknown visibility.
@@ -1096,6 +1101,7 @@ final class SwiftDataManager {
             try modelContext.save()
             nonTimelineAssetIDs.removeAll()
             archivedAssetIDs.removeAll()
+            explicitTimelineAssetIDs.removeAll()
             visibilityNeedsPersistence = false
         } catch {
             modelContext.rollback()

@@ -93,7 +93,7 @@ final class ArchiveActionConsistencyTests: XCTestCase {
     }
 
     func testViewerArchiveDestinationUsesMatchingMetadataAndCurrentClassification() throws {
-        let fixture = try fixture(archived: false)
+        let fixture = try fixture(archived: true)
         var detail = makeTestAsset(id: fixture.photo.id, isArchived: true)
         detail.visibility = "archive"
         XCTAssertEqual(AssetDetailView.archiveDestination(for: fixture.photo.id, detail: detail,
@@ -103,12 +103,87 @@ final class ArchiveActionConsistencyTests: XCTestCase {
             dataManager: fixture.manager), .timeline, "Legacy archived metadata must also offer Unarchive")
         XCTAssertEqual(AssetDetailView.archiveDestination(for: "other", detail: detail,
             dataManager: fixture.manager), .archive, "Another page's metadata cannot choose the current action")
+        let uncachedID = UUID().uuidString
+        var uncachedDetail = makeTestAsset(id: uncachedID, isArchived: true)
+        uncachedDetail.visibility = "archive"
+        XCTAssertEqual(AssetDetailView.archiveDestination(for: uncachedID, detail: uncachedDetail,
+            dataManager: fixture.manager), .timeline, "Matching detail supplies archive state when no cache row exists")
+        uncachedDetail.visibility = nil
+        XCTAssertEqual(AssetDetailView.archiveDestination(for: uncachedID, detail: uncachedDetail,
+            dataManager: fixture.manager), .timeline, "Uncached legacy metadata still supplies archive state")
         try fixture.manager.setAssetVisibility([fixture.photo.id], to: "archive")
         XCTAssertEqual(AssetDetailView.archiveDestination(for: fixture.photo.id, detail: nil,
             dataManager: fixture.manager), .timeline, "The offline viewer retains known archive state")
         try fixture.manager.setAssetVisibility([fixture.photo.id], to: "locked")
         XCTAssertEqual(AssetDetailView.archiveDestination(for: fixture.photo.id, detail: detail,
             dataManager: fixture.manager), .archive, "Old archived metadata cannot offer Unarchive for a now-private photo")
+    }
+
+    func testViewerOffersArchiveAfterAnotherWindowUnarchivesItsRetainedDetail() throws {
+        for cached in [false, true] {
+            for legacy in [false, true] {
+                let fixture = try fixture(archived: true)
+                let id = cached ? fixture.photo.id : UUID().uuidString
+                if !cached { try fixture.manager.setAssetVisibility([id], to: "archive") }
+                var retainedDetail = makeTestAsset(id: id, isArchived: true)
+                retainedDetail.visibility = legacy ? nil : "archive"
+                XCTAssertEqual(AssetDetailView.archiveDestination(for: id, detail: retainedDetail,
+                    dataManager: fixture.manager), .timeline)
+
+                try fixture.manager.setAssetVisibility([id], to: "timeline")
+
+                if cached { XCTAssertEqual(fixture.manager.getCachedAsset(id: id)?.isArchived, false) }
+                else { XCTAssertNil(fixture.manager.getCachedAsset(id: id)) }
+                XCTAssertFalse(fixture.manager.archivedAssetIDs.contains(id))
+                XCTAssertTrue(fixture.manager.explicitTimelineAssetIDs.contains(id))
+                XCTAssertEqual(AssetDetailView.archiveDestination(for: id, detail: retainedDetail,
+                    dataManager: fixture.manager), .archive,
+                    "The current timeline command must replace retained archive metadata even without a cached row")
+            }
+        }
+    }
+
+    func testExplicitTimelineEvidenceSurvivesCacheResetButNotNewCommandsOrAccountClear() throws {
+        let fixture = try fixture(archived: false)
+        let manager = fixture.manager
+        let id = UUID().uuidString
+        let networkID = UUID().uuidString
+        let syncedID = UUID().uuidString
+        var networkDetail = makeTestAsset(id: networkID)
+        networkDetail.visibility = "timeline"
+        try manager.recordServerVisibility([networkDetail])
+        try manager.applySyncBatch(upserts: [CachedAsset(id: syncedID, assetId: syncedID, type: "IMAGE")],
+            deletedIds: [], visibilityByID: [syncedID: "timeline"])
+        XCTAssertTrue(manager.explicitTimelineAssetIDs.isEmpty,
+            "Network metadata and sync must not grow the explicit-action evidence")
+
+        try manager.setAssetVisibility([id], to: "timeline")
+        XCTAssertEqual(manager.explicitTimelineAssetIDs, [id])
+        try manager.resetSyncDatabase()
+        XCTAssertEqual(manager.cachedAssetCount(), 0)
+        XCTAssertEqual(manager.explicitTimelineAssetIDs, [id], "Clearing rebuildable data must retain the accepted command")
+        XCTAssertTrue(fixture.reopen().explicitTimelineAssetIDs.isEmpty, "The evidence is transient rather than a new persisted index")
+
+        try manager.setAssetVisibility([id], to: "archive")
+        XCTAssertTrue(manager.explicitTimelineAssetIDs.isEmpty)
+        try manager.setAssetVisibility([id], to: "timeline")
+        try manager.setAssetVisibility([id], to: "locked")
+        XCTAssertTrue(manager.explicitTimelineAssetIDs.isEmpty)
+        try manager.setAssetVisibility([id], to: "timeline")
+
+        var laterDetail = makeTestAsset(id: id, isArchived: true)
+        laterDetail.visibility = "archive"
+        try manager.recordServerVisibility([laterDetail])
+        XCTAssertEqual(manager.explicitTimelineAssetIDs, [id])
+        XCTAssertEqual(AssetDetailView.archiveDestination(for: id, detail: nil, dataManager: manager), .timeline,
+            "Current canonical archive classification must precede older explicit timeline evidence")
+        laterDetail.visibility = "locked"
+        try manager.recordServerVisibility([laterDetail])
+        XCTAssertEqual(AssetDetailView.archiveDestination(for: id, detail: laterDetail, dataManager: manager), .archive,
+            "Current private classification must precede older explicit timeline evidence")
+
+        try manager.clearAllAccountData()
+        XCTAssertTrue(manager.explicitTimelineAssetIDs.isEmpty)
     }
 
     func testRenderedSelectionToolbarUsesTheUnarchiveAccessibilityLabel() async throws {

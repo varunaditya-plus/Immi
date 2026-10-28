@@ -1258,9 +1258,12 @@ struct AssetDetailView: View {
     ) -> AssetDetailRepository.Visibility {
         let manager = dataManager ?? .shared
         guard !manager.privateAssetIDs.contains(id) else { return .archive }
+        if manager.archivedAssetIDs.contains(id) { return .timeline }
+        if manager.explicitTimelineAssetIDs.contains(id)
+            || manager.getCachedAsset(id: id)?.isArchived == false { return .archive }
         let detailIsArchived = detail?.id == id && (detail?.visibility == "archive"
             || (detail?.visibility == nil && detail?.isArchived == true))
-        return manager.archivedAssetIDs.contains(id) || detailIsArchived ? .timeline : .archive
+        return detailIsArchived ? .timeline : .archive
     }
 
     private var albums: [AlbumResponseDTO] {
