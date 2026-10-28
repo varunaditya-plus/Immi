@@ -581,6 +581,29 @@ final class BackupStatusReportingTests: XCTestCase {
         XCTAssertEqual(fixture.status, .synced)
     }
 
+    func testCompletionWaitsForARealSharedUploadSnapshot() async throws {
+        for (photos, completed) in [(["mapped"], BackupStatus.synced), ([], .empty)] {
+            let fixture = try fixture(photos: photos)
+            if !photos.isEmpty { try fixture.map("mapped") }
+            await fixture.library.load()
+            fixture.service.refreshCounts()
+
+            XCTAssertFalse(fixture.sharedUploads.hasCurrentSnapshot)
+            XCTAssertEqual(fixture.service.remainder, 0)
+            XCTAssertEqual(fixture.status, .checkingUploads)
+            let checking = fixture.status.explanation(backup: fixture.service,
+                backgroundRefreshAvailable: true, isOnline: true, isExpensive: false).lowercased()
+            XCTAssertTrue(checking.contains("checking"))
+            XCTAssertTrue(checking.contains("shared uploads"))
+
+            await fixture.sharedUploads.refreshPending(session: fixture.session)
+
+            XCTAssertTrue(fixture.sharedUploads.hasCurrentSnapshot)
+            XCTAssertTrue(fixture.sharedUploads.items.isEmpty)
+            XCTAssertEqual(fixture.status, completed)
+        }
+    }
+
     private func fixture(
         enabled: Bool = true, selection: Set<String> = ["selected"], photos: [String] = [],
         videoIDs: Set<String> = [], cellularPhotos: Bool = false, cellularVideos: Bool = false,

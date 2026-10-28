@@ -25,6 +25,14 @@ final class SharedUploadService {
     private var listingError: String?
     private var processingError: String?
     var lastError: String? { processingError ?? listingError }
+    private weak var snapshotSession: SessionManager?
+    private var currentSnapshot: (context: SessionRequestContext, owner: SharedUploadOwner)?
+
+    var hasCurrentSnapshot: Bool {
+        guard let currentSnapshot, let session = snapshotSession else { return false }
+        return session.snapshot == currentSnapshot.context
+            && credential(for: session)?.owner == currentSnapshot.owner
+    }
     private let store: SharedUploadStore
     private let upload: @MainActor (SharedUploadCredential, SharedUploadItem, URL, URL) async throws -> Void
     @ObservationIgnored private var task: Task<Void, Never>?
@@ -50,9 +58,10 @@ final class SharedUploadService {
         if let task { return task }
         let credential = credential(for: session)
         let context = session.snapshot
+        invalidateSnapshot()
+        let initialListingID = listingID
         listingError = nil
         processingError = nil
-        let initialListingID = listingID
         let id = UUID()
         workID = id
         let work = Task { [weak self] in
@@ -112,28 +121,39 @@ final class SharedUploadService {
 
     func refreshPending(session: SessionManager) async {
         guard !Task.isCancelled else { return }
-        let id = UUID()
-        listingID = id
+        invalidateSnapshot()
+        let id = listingID
         guard let credential = credential(for: session) else {
             items = []
             listingError = nil
             processingError = nil
             return
         }
+        if items.contains(where: { $0.owner != credential.owner }) {
+            items = []
+            listingError = nil
+            processingError = nil
+        }
         let context = session.snapshot
         do {
             let batches = try await store.batches(for: credential.owner)
             try session.checkCurrent(context)
-            guard !Task.isCancelled, listingID == id else { return }
+            guard !Task.isCancelled, listingID == id,
+                  session.snapshot == context,
+                  self.credential(for: session)?.owner == credential.owner else { return }
             items = batches.flatMap { batch in
                 batch.items.filter { !$0.state.isFinished }.map {
                     SharedUploadQueueItem(batchID: batch.id, owner: batch.owner, item: $0)
                 }
             }
             listingError = nil
+            snapshotSession = session
+            currentSnapshot = (context, credential.owner)
         } catch {
             guard !Task.isCancelled, listingID == id,
-                  (try? session.checkCurrent(context)) != nil else { return }
+                  (try? session.checkCurrent(context)) != nil,
+                  session.snapshot == context,
+                  self.credential(for: session)?.owner == credential.owner else { return }
             listingError = error.localizedDescription
         }
     }
@@ -169,11 +189,17 @@ final class SharedUploadService {
         task?.cancel()
         task = nil
         workID = nil
-        listingID = UUID()
+        invalidateSnapshot()
         retryRequested = false
         items = []
         listingError = nil
         processingError = nil
+    }
+
+    private func invalidateSnapshot() {
+        listingID = UUID()
+        currentSnapshot = nil
+        snapshotSession = nil
     }
 
     private func credential(for session: SessionManager) -> SharedUploadCredential? {

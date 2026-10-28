@@ -14,6 +14,72 @@ final class SharedUploadStatusFreshnessTests: XCTestCase {
         try await super.tearDown()
     }
 
+    func testAColdEmptyArrayDoesNotVerifyThatTheSharedInboxIsEmpty() async throws {
+        let fixture = try fixture()
+        let batch = try await fixture.seed()
+
+        XCTAssertTrue(fixture.service.items.isEmpty)
+        XCTAssertFalse(fixture.service.hasCurrentSnapshot)
+
+        await fixture.service.refreshPending(session: fixture.session)
+
+        XCTAssertTrue(fixture.service.hasCurrentSnapshot)
+        XCTAssertEqual(fixture.service.items.map(\.item), batch.items)
+        XCTAssertNil(fixture.service.lastError)
+    }
+
+    func testACompletedEmptyReadEstablishesAnEmptySnapshot() async throws {
+        let fixture = try fixture()
+        XCTAssertFalse(fixture.service.hasCurrentSnapshot)
+
+        await fixture.service.refreshPending(session: fixture.session)
+
+        XCTAssertTrue(fixture.service.hasCurrentSnapshot)
+        XCTAssertTrue(fixture.service.items.isEmpty)
+        XCTAssertNil(fixture.service.lastError)
+    }
+
+    func testRefreshingInvalidatesProofBeforeListingWithoutDroppingKnownRows() async throws {
+        let files = FreshnessFiles()
+        let fixture = try fixture(files: files)
+        let batch = try await fixture.seed()
+        await fixture.service.refreshPending(session: fixture.session)
+        XCTAssertTrue(fixture.service.hasCurrentSnapshot)
+        let gate = listGate()
+        files.holdNextList(gate)
+        let read = Task { await fixture.service.refreshPending(session: fixture.session) }
+        addTeardownBlock { gate.release(); await read.value }
+        await fulfillment(of: [gate.started], timeout: 2)
+
+        XCTAssertFalse(fixture.service.hasCurrentSnapshot)
+        XCTAssertEqual(fixture.service.items.map(\.item), batch.items)
+        gate.release()
+        await read.value
+
+        XCTAssertTrue(fixture.service.hasCurrentSnapshot)
+        XCTAssertEqual(fixture.service.items.map(\.item), batch.items)
+    }
+
+    func testRecoveryAdmissionInvalidatesThePreviousSnapshotSynchronously() async throws {
+        let gate = FreshnessUploadGate()
+        let fixture = try fixture(upload: { _, _, _, _ in await gate.wait() })
+        await fixture.service.refreshPending(session: fixture.session)
+        XCTAssertTrue(fixture.service.hasCurrentSnapshot)
+        _ = try await fixture.seed()
+
+        let work = try XCTUnwrap(fixture.service.processPending(session: fixture.session))
+        addTeardownBlock { await gate.release(); await work.value }
+        XCTAssertFalse(fixture.service.hasCurrentSnapshot, "Recovery must revoke old proof before its task first runs")
+        await fulfillment(of: [gate.started], timeout: 2)
+
+        XCTAssertTrue(fixture.service.hasCurrentSnapshot)
+        XCTAssertEqual(fixture.service.items.map(\.item.state), [.uploading])
+        gate.release()
+        await work.value
+        XCTAssertTrue(fixture.service.hasCurrentSnapshot)
+        XCTAssertTrue(fixture.service.items.isEmpty)
+    }
+
     func testListingFailureKeepsKnownRowsButSuccessfulRefreshClearsOnlyThatError() async throws {
         let files = FreshnessFiles()
         let fixture = try fixture(files: files)
@@ -23,10 +89,12 @@ final class SharedUploadStatusFreshnessTests: XCTestCase {
 
         await fixture.service.refreshPending(session: fixture.session)
 
+        XCTAssertFalse(fixture.service.hasCurrentSnapshot)
         XCTAssertNotNil(fixture.service.lastError)
         XCTAssertEqual(fixture.service.items.map(\.item), batch.items)
         await fixture.service.refreshPending(session: fixture.session)
 
+        XCTAssertTrue(fixture.service.hasCurrentSnapshot)
         XCTAssertNil(fixture.service.lastError)
         XCTAssertEqual(fixture.service.items.map(\.item), batch.items)
         XCTAssertEqual(fixture.service.items.first?.item.lastError, "HTTP 413: Too large")
@@ -41,8 +109,10 @@ final class SharedUploadStatusFreshnessTests: XCTestCase {
         let work = try XCTUnwrap(fixture.service.processPending(session: fixture.session))
         await work.value
 
+        XCTAssertFalse(fixture.service.hasCurrentSnapshot)
         XCTAssertNotNil(fixture.service.lastError)
         await fixture.service.refreshPending(session: fixture.session)
+        XCTAssertTrue(fixture.service.hasCurrentSnapshot)
         XCTAssertNil(fixture.service.lastError)
     }
 
@@ -58,20 +128,120 @@ final class SharedUploadStatusFreshnessTests: XCTestCase {
 
         let processingError = try XCTUnwrap(fixture.service.lastError)
         XCTAssertEqual(processingError, CocoaError(.fileWriteNoPermission).localizedDescription)
+        XCTAssertTrue(fixture.service.hasCurrentSnapshot)
         XCTAssertTrue(fixture.service.items.isEmpty, "The uploaded source needs cleanup, not another transfer")
         let saved = try await fixture.store.batch(id: batch.id, owner: batch.owner)
         XCTAssertEqual(saved?.items.first?.state, .uploaded)
         XCTAssertEqual(uploads, 1)
         await fixture.service.refreshPending(session: fixture.session)
 
+        XCTAssertTrue(fixture.service.hasCurrentSnapshot)
         XCTAssertEqual(fixture.service.lastError, processingError)
         files.failSourceRemoval = false
         let retry = try XCTUnwrap(fixture.service.processPending(session: fixture.session))
         await retry.value
+        XCTAssertTrue(fixture.service.hasCurrentSnapshot)
         XCTAssertNil(fixture.service.lastError)
         XCTAssertEqual(uploads, 1, "The accepted item must only clean its original during recovery")
         let remaining = try await fixture.store.batches(for: batch.owner)
         XCTAssertTrue(remaining.isEmpty)
+    }
+
+    func testCancelAndLiveSessionChangesInvalidateSnapshotProof() async throws {
+        let fixture = try fixture()
+        await fixture.service.refreshPending(session: fixture.session)
+        XCTAssertTrue(fixture.service.hasCurrentSnapshot)
+
+        fixture.session.owner = .init(server: fixture.session.owner.server, userID: "replacement")
+        XCTAssertFalse(fixture.service.hasCurrentSnapshot)
+        await fixture.service.refreshPending(session: fixture.session)
+        XCTAssertTrue(fixture.service.hasCurrentSnapshot)
+        fixture.session.testAuthHeaders = ["x-api-key": "replacement-token"]
+        XCTAssertFalse(fixture.service.hasCurrentSnapshot)
+        await fixture.service.refreshPending(session: fixture.session)
+        XCTAssertTrue(fixture.service.hasCurrentSnapshot)
+        fixture.session.isLoggedIn = false
+        XCTAssertFalse(fixture.service.hasCurrentSnapshot)
+        fixture.session.cancelAuthentication()
+        fixture.session.isLoggedIn = true
+        XCTAssertFalse(fixture.service.hasCurrentSnapshot)
+        await fixture.service.refreshPending(session: fixture.session)
+        XCTAssertTrue(fixture.service.hasCurrentSnapshot)
+        fixture.service.cancel()
+        XCTAssertFalse(fixture.service.hasCurrentSnapshot)
+    }
+
+    func testCanceledListingCannotRestoreSnapshotProof() async throws {
+        let files = FreshnessFiles()
+        let fixture = try fixture(files: files)
+        let batch = try await fixture.seed()
+        await fixture.service.refreshPending(session: fixture.session)
+        let gate = listGate()
+        files.holdNextList(gate)
+        let read = Task { await fixture.service.refreshPending(session: fixture.session) }
+        addTeardownBlock { gate.release(); await read.value }
+        await fulfillment(of: [gate.started], timeout: 2)
+        read.cancel()
+        gate.release()
+        await read.value
+
+        XCTAssertFalse(fixture.service.hasCurrentSnapshot)
+        XCTAssertEqual(fixture.service.items.map(\.item), batch.items)
+        XCTAssertNil(fixture.service.lastError)
+        await fixture.service.refreshPending(session: fixture.session)
+        XCTAssertTrue(fixture.service.hasCurrentSnapshot)
+    }
+
+    func testAnOldAccountListingCannotCertifyTheReplacementOwnersInbox() async throws {
+        let files = FreshnessFiles()
+        let fixture = try fixture(files: files)
+        let oldBatch = try await fixture.seed()
+        await fixture.service.refreshPending(session: fixture.session)
+        let gate = listGate()
+        files.holdNextList(gate)
+        let oldRead = Task { await fixture.service.refreshPending(session: fixture.session) }
+        addTeardownBlock { gate.release(); await oldRead.value }
+        await fulfillment(of: [gate.started], timeout: 2)
+        fixture.session.owner = .init(server: fixture.session.owner.server, userID: "replacement")
+        gate.release()
+        await oldRead.value
+
+        XCTAssertFalse(fixture.service.hasCurrentSnapshot)
+        let replacement = try await fixture.seed(state: .failed)
+        await fixture.service.refreshPending(session: fixture.session)
+
+        XCTAssertTrue(fixture.service.hasCurrentSnapshot)
+        XCTAssertEqual(fixture.service.items.map(\.item), replacement.items)
+        XCTAssertEqual(fixture.service.items.first?.owner, replacement.owner)
+        let preserved = try await fixture.store.batch(id: oldBatch.id, owner: oldBatch.owner)
+        XCTAssertEqual(preserved, oldBatch)
+    }
+
+    func testOlderListingCannotCertifyAnInboxWhileItsReplacementReadIsHeld() async throws {
+        let files = FreshnessFiles()
+        let fixture = try fixture(files: files)
+        let firstGate = listGate()
+        let secondGate = listGate()
+        files.holdNextList(firstGate)
+        files.holdNextList(secondGate)
+        let first = Task { await fixture.service.refreshPending(session: fixture.session) }
+        addTeardownBlock { firstGate.release(); secondGate.release(); await first.value }
+        await fulfillment(of: [firstGate.started], timeout: 2)
+        let launched = expectation(description: "A replacement refresh was admitted")
+        let second = Task {
+            launched.fulfill()
+            await fixture.service.refreshPending(session: fixture.session)
+        }
+        addTeardownBlock { firstGate.release(); secondGate.release(); await second.value }
+        await fulfillment(of: [launched], timeout: 2)
+        firstGate.release()
+        await fulfillment(of: [secondGate.started], timeout: 2)
+        await first.value
+
+        XCTAssertFalse(fixture.service.hasCurrentSnapshot, "The older empty result cannot certify the replacement read")
+        secondGate.release()
+        await second.value
+        XCTAssertTrue(fixture.service.hasCurrentSnapshot)
     }
 
     private func fixture(

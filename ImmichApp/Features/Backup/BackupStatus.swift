@@ -17,6 +17,7 @@ enum BackupStatus: Equatable {
     case empty
     case limitedEmpty
     case limitedSynced
+    case checkingUploads
     case uploading
     case synced
     case failed
@@ -42,10 +43,12 @@ enum BackupStatus: Equatable {
             case .accessRequired: self = .photosAccess
             case .unchecked: self = .unchecked
             case .empty:
-                self = backup.hasLimitedPhotosAccess ? .limitedEmpty : .empty
+                self = !sharedUploads.hasCurrentSnapshot ? .checkingUploads
+                    : backup.hasLimitedPhotosAccess ? .limitedEmpty : .empty
             case .remaining: self = .waiting
             case .backedUp:
-                self = backup.hasLimitedPhotosAccess ? .limitedSynced : .synced
+                self = !sharedUploads.hasCurrentSnapshot ? .checkingUploads
+                    : backup.hasLimitedPhotosAccess ? .limitedSynced : .synced
             }
         }
     }
@@ -59,6 +62,7 @@ enum BackupStatus: Equatable {
         case .empty: String(localized: "No Photos to Back Up")
         case .limitedEmpty: String(localized: "No Accessible Photos")
         case .limitedSynced: String(localized: "Accessible Photos Backed Up")
+        case .checkingUploads: String(localized: "Checking Uploads")
         case .uploading: String(localized: "Backing Up")
         case .synced: String(localized: "Synced to Server")
         case .failed: String(localized: "Backup Failed")
@@ -74,7 +78,7 @@ enum BackupStatus: Equatable {
         case .failed: "xmark.icloud.fill"
         case .error, .photosAccess: "exclamationmark.icloud.fill"
         case .off: "icloud.slash"
-        case .needsSelection, .unchecked, .empty, .limitedEmpty, .limitedSynced, .waiting: "icloud"
+        case .needsSelection, .unchecked, .empty, .limitedEmpty, .limitedSynced, .checkingUploads, .waiting: "icloud"
         }
     }
 
@@ -98,6 +102,8 @@ enum BackupStatus: Equatable {
             return String(localized: "No accessible photos or videos were found in the selected albums. Allow full Photos access to check the rest.")
         case .limitedSynced:
             return String(localized: "All accessible photos and videos in the selected albums are backed up. Allow full Photos access to check the rest.")
+        case .checkingUploads:
+            return String(localized: "Checking for shared uploads.")
         case .synced:
             return String(localized: "Everything in the selected albums is backed up.")
         case .uploading:

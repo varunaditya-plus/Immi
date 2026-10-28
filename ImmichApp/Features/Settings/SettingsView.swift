@@ -176,7 +176,7 @@ struct SettingsView: View {
         case .uploading, .failed: .red
         case .synced: .green
         case .error, .photosAccess, .waiting: .orange
-        case .off, .needsSelection, .unchecked, .empty, .limitedEmpty, .limitedSynced: .secondary
+        case .off, .needsSelection, .unchecked, .empty, .limitedEmpty, .limitedSynced, .checkingUploads: .secondary
         }
     }
 

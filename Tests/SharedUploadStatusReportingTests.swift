@@ -67,6 +67,7 @@ final class SharedUploadStatusReportingTests: XCTestCase {
         let gate = gate()
         let fixture = try fixture(enabled: true, upload: { _, _, _, _ in await gate.wait() })
         try fixture.manager.upsertBackupRecord(assetID: "server-local", checksum: "sha", localIdentifier: "local")
+        await fixture.shared.refreshPending(session: fixture.session)
         await fixture.library.load()
         fixture.backup.refreshCounts()
         XCTAssertEqual(fixture.status, .synced)
