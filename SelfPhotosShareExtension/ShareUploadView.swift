@@ -35,7 +35,7 @@ struct ShareUploadView: View {
                     Button(action: model.primaryAction) {
                         if model.isBusy {
                             ProgressView()
-                        } else if case .queued = model.phase {
+                        } else if case .completed = model.phase {
                             Image(systemName: "checkmark")
                         } else {
                             Image(systemName: "arrow.up")
@@ -64,13 +64,22 @@ struct ShareUploadView: View {
                         itemRow(item)
                     }
 
-                    if case .queued(let count) = model.phase, count > 0 {
-                        Label(
-                            "\(count) item(s) will retry when SelfPhotos opens.",
-                            systemImage: "clock.arrow.circlepath")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 8)
+                    if case .completed(let queued, let failed) = model.phase {
+                        if queued > 0 {
+                            Label(
+                                "\(queued) item(s) will retry when SelfPhotos opens.",
+                                systemImage: "clock.arrow.circlepath")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .padding(.top, 8)
+                        }
+                        if failed > 0 {
+                            Label("Open SelfPhotos to retry or remove failed uploads in Backup > View Details.",
+                                  systemImage: "exclamationmark.triangle")
+                                .font(.footnote)
+                                .foregroundStyle(.orange)
+                                .padding(.top, 8)
+                        }
                     }
                 }
             }
@@ -85,7 +94,7 @@ struct ShareUploadView: View {
         if case .uploading(let current, let total) = model.phase {
             return String(localized: "Uploading \(current) of \(total)")
         }
-        if case .queued = model.phase {
+        if case .completed = model.phase {
             return String(localized: "Done")
         }
         return String(localized: "Upload")
@@ -120,6 +129,12 @@ struct ShareUploadView: View {
                         countStyle: .file))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                    if let error = item.uploadItem.lastError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .multilineTextAlignment(.leading)
+                    }
                 }
                 Spacer(minLength: 8)
                 Image(systemName: item.isSelected ? "checkmark.circle.fill" : "circle")

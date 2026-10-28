@@ -18,7 +18,7 @@ final class ShareExtensionModel: ObservableObject {
         case loading
         case ready
         case uploading(current: Int, total: Int)
-        case queued(Int)
+        case completed(queued: Int, failed: Int)
         case failed(String)
     }
 
@@ -78,7 +78,7 @@ final class ShareExtensionModel: ObservableObject {
 
     func primaryAction() {
         switch phase {
-        case .queued:
+        case .completed:
             cancel()
         case .ready, .failed:
             let selected = items.filter(\.isSelected).map(\.uploadItem)
@@ -129,9 +129,9 @@ final class ShareExtensionModel: ObservableObject {
                 })
             switch outcome {
             case .busy:
-                phase = .queued(selected.count)
+                await refreshCommittedItems(owner: credential.owner, fallback: selected.count)
             case .finished(let remaining):
-                phase = .queued(remaining)
+                await refreshCommittedItems(owner: credential.owner, fallback: remaining)
                 if remaining == 0 {
                     try? await Task.sleep(for: .milliseconds(450))
                     complete()
@@ -140,13 +140,22 @@ final class ShareExtensionModel: ObservableObject {
         } catch {
             // Admission already succeeded. Closing must leave these files for
             // the app even when a later checkpoint or cleanup could not save.
-            do {
-                let batch = try await SharedUploadStore.shared.batch(
-                    id: submission.batchID, owner: credential.owner)
-                phase = .queued(batch?.items.count { $0.state != .uploaded } ?? 0)
-            } catch {
-                phase = .queued(selected.count)
+            await refreshCommittedItems(owner: credential.owner, fallback: selected.count)
+        }
+    }
+
+    private func refreshCommittedItems(owner: SharedUploadOwner, fallback: Int) async {
+        do {
+            let batch = try await SharedUploadStore.shared.batch(id: submission.batchID, owner: owner)
+            let saved = Dictionary((batch?.items ?? []).map { ($0.id, $0) }, uniquingKeysWith: { _, newer in newer })
+            for index in items.indices {
+                if let item = saved[items[index].id] { items[index].uploadItem = item }
             }
+            phase = .completed(
+                queued: batch?.items.count { $0.state.isReadyForUpload } ?? 0,
+                failed: batch?.items.count { $0.state == .failed } ?? 0)
+        } catch {
+            phase = .completed(queued: fallback, failed: 0)
         }
     }
 
