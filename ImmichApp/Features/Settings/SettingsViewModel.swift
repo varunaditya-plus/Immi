@@ -112,6 +112,7 @@ final class SettingsViewModel {
     /// permintaan `/users/me` untuk satu layar yang sama.
     func loadServerInfo() async {
         serverPhase = .loading
+        latestVersion = nil
         do {
             async let storageTask = repo.getStorageInfo()
             async let serverTask = repo.getServerInfo()

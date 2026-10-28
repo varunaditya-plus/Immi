@@ -24,6 +24,102 @@ final class SettingsVersionFreshnessTests: XCTestCase {
         XCTAssertEqual(model.displayedServerVersion(fallback: .init(major: 3, minor: 1, patch: 0, prerelease: 2)), "v3.1.0-2")
     }
 
+    func testRefreshWithdrawsAnOldRecommendationBeforeTheNewAboutRequestCompletes() async throws {
+        let repository = repository()
+        let model = SettingsViewModel(repo: repository)
+        await model.loadServerInfo()
+        XCTAssertTrue(model.isUpdateAvailable)
+        XCTAssertEqual(model.latestVersion, "v3.2.0")
+        let held = FreshVersionGate()
+        repository.aboutGate = held
+        repository.currentVersion = "v3.3.0"
+        let refresh = Task { await model.loadServerInfo() }
+        addTeardownBlock { await held.release(); await refresh.value }
+        await fulfillment(of: [held.started], timeout: 2)
+
+        XCTAssertTrue(model.serverPhase.isLoading)
+        XCTAssertNil(model.latestVersion, "A recommendation from the previous read cannot remain authoritative")
+        XCTAssertFalse(model.isUpdateAvailable)
+        XCTAssertEqual(model.displayedServerVersion(fallback: nil), "v3.1.0", "The last known version can still be displayed")
+        held.release()
+        await refresh.value
+
+        XCTAssertEqual(model.serverInfo?.version, "v3.3.0")
+        XCTAssertEqual(model.latestVersion, "v3.2.0")
+        XCTAssertFalse(model.isUpdateAvailable, "The newly installed server must not be offered a downgrade")
+        XCTAssertEqual(model.displayedServerVersion(fallback: .init(major: 3, minor: 1, patch: 0)), "v3.3.0")
+    }
+
+    func testFailedStorageRefreshCannotKeepRecommendingAnOlderRelease() async {
+        let repository = repository()
+        let model = SettingsViewModel(repo: repository)
+        await model.loadServerInfo()
+        XCTAssertTrue(model.isUpdateAvailable)
+        repository.currentVersion = "v3.3.0"
+        repository.storageError = APIError.notConnected
+
+        await model.loadServerInfo()
+
+        XCTAssertNotNil(model.serverPhase.errorMessage)
+        XCTAssertNil(model.latestVersion)
+        XCTAssertFalse(model.isUpdateAvailable)
+        XCTAssertEqual(model.displayedServerVersion(fallback: nil), "v3.1.0", "A failed refresh preserves the last known display")
+
+        repository.storageError = nil
+        await model.loadServerInfo()
+        XCTAssertEqual(model.displayedServerVersion(fallback: nil), "v3.3.0")
+        XCTAssertFalse(model.isUpdateAvailable)
+    }
+
+    func testFailedAboutRefreshCannotReuseThePreviousUpdateRecommendation() async {
+        let repository = repository()
+        let model = SettingsViewModel(repo: repository)
+        await model.loadServerInfo()
+        XCTAssertTrue(model.isUpdateAvailable)
+        repository.aboutError = APIError.notConnected
+
+        await model.loadServerInfo()
+
+        XCTAssertNotNil(model.serverPhase.errorMessage)
+        XCTAssertNil(model.latestVersion)
+        XCTAssertFalse(model.isUpdateAvailable)
+        XCTAssertEqual(model.displayedServerVersion(fallback: nil), "v3.1.0")
+
+        repository.aboutError = nil
+        repository.currentVersion = "v3.2.0"
+        repository.availableVersion = "v3.3.0"
+        await model.loadServerInfo()
+        XCTAssertNil(model.serverPhase.errorMessage)
+        XCTAssertEqual(model.displayedServerVersion(fallback: nil), "v3.2.0")
+        XCTAssertTrue(model.isUpdateAvailable, "A successful later refresh can publish a new recommendation")
+    }
+
+    func testDisabledAndFailedOptionalVersionChecksPreserveFreshServerInformation() async {
+        let repository = repository()
+        let model = SettingsViewModel(repo: repository)
+        await model.loadServerInfo()
+        XCTAssertTrue(model.isUpdateAvailable)
+        repository.currentVersion = "v3.3.0"
+        repository.availableVersion = nil
+
+        await model.loadServerInfo()
+
+        XCTAssertNil(model.serverPhase.errorMessage)
+        XCTAssertEqual(model.serverInfo?.version, "v3.3.0")
+        XCTAssertEqual(model.displayedServerVersion(fallback: .init(major: 3, minor: 1, patch: 0)), "v3.3.0")
+        XCTAssertNil(model.latestVersion)
+        XCTAssertFalse(model.isUpdateAvailable)
+
+        repository.currentVersion = "v3.4.0"
+        repository.availableVersion = "v3.5.0"
+        repository.versionCheckError = APIError.notConnected
+        await model.loadServerInfo()
+        XCTAssertNil(model.serverPhase.errorMessage)
+        XCTAssertEqual(model.serverInfo?.version, "v3.4.0")
+        XCTAssertNil(model.latestVersion)
+        XCTAssertFalse(model.isUpdateAvailable)
+    }
+
     private func repository() -> FreshVersionRepository {
         FreshVersionRepository(api: APIClient(session: MockSessionManager()))
     }
