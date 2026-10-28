@@ -38,31 +38,36 @@ struct AssetCollectionView: View {
     }
 
     private var screen: some View {
+        collectionScreen(using: vm)
+    }
+
+    func collectionScreen(using model: AssetGridViewModel?) -> PhotoCollectionScreen<EmptyView> {
         PhotoCollectionScreen(
             title: title,
             layout: layout,
-            assets: vm?.assets ?? [],
-            phase: vm?.phase ?? .loading,
+            assets: model?.assets ?? [],
+            phase: model?.phase ?? .loading,
             actionError: Binding(
-                get: { vm?.actionError },
-                set: { vm?.actionError = $0 }),
+                get: { model?.actionError },
+                set: { model?.actionError = $0 }),
             emptyState: emptyState,
-            onRetry: { Task { await vm?.load() } },
+            onRetry: { Task { await model?.load() } },
             onToggleFavorite: { asset in
                 if isFavoritesCollection && asset.isFavorite {
-                    await vm?.unfavorite([asset.id])
+                    await model?.unfavorite([asset.id])
                 } else {
-                    await vm?.toggleFavorite(asset)
+                    await model?.toggleFavorite(asset)
                 }
             },
-            onDelete: { await vm?.delete($0) },
-            shareURLs: { await vm?.shareURLs(for: $0) ?? [] },
-            removal: removal,
+            onDelete: { await model?.delete($0) },
+            shareURLs: { await model?.shareURLs(for: $0) ?? [] },
+            removal: removal(using: model),
             onAddToAlbum: { albumPickerAsset = $0 },
-            onFavoriteSelection: { await vm?.setFavorite($0, to: true) },
-            onArchiveSelection: archiveSelection,
-            onUnlockSelection: unlockSelection,
-            onMoveToLocked: moveToLocked,
+            onFavoriteSelection: { await model?.setFavorite($0, to: true) },
+            onArchiveSelection: archiveSelection(using: model),
+            archiveActionTitle: request.visibility == "archive" ? String(localized: "Unarchive") : String(localized: "Archive"),
+            onUnlockSelection: unlockSelection(using: model),
+            onMoveToLocked: moveToLocked(using: model),
             onShareLink: { createSharedLink(for: $0) },
             visibilityScope: request.visibility == "locked" ? .locked : .collection,
             selectionMenu: selectionMenu)
@@ -117,32 +122,32 @@ struct AssetCollectionView: View {
     /// berbahaya: memindahkannya ke `archive` berarti MENGELUARKANNYA dari
     /// folder terkunci, kebalikan dari yang diharapkan siapa pun yang menekan
     /// tombol berlambang kotak arsip.
-    private var archiveSelection: (([String]) async -> Void)? {
+    private func archiveSelection(using model: AssetGridViewModel?) -> (([String]) async -> Void)? {
         guard request.withDeleted != true, request.visibility != "locked" else { return nil }
         let toArchive = request.visibility != "archive"
-        return { ids in await vm?.setArchived(ids, to: toArchive) }
+        return { ids in await model?.setArchived(ids, to: toArchive) }
     }
 
     /// Mengeluarkan dari folder terkunci — hanya berarti DI folder itu.
-    private var unlockSelection: (([String]) async -> Void)? {
+    private func unlockSelection(using model: AssetGridViewModel?) -> (([String]) async -> Void)? {
         guard request.visibility == "locked" else { return nil }
-        return { ids in await vm?.setArchived(ids, to: false) }
+        return { ids in await model?.setArchived(ids, to: false) }
     }
 
     /// Memindahkan KE folder terkunci.
     ///
     /// Tidak ditawarkan di tong sampah (foto di sana tidak berada di
     /// perpustakaan) maupun di folder terkunci itu sendiri (sudah di sana).
-    private var moveToLocked: (([String]) async -> Void)? {
+    private func moveToLocked(using model: AssetGridViewModel?) -> (([String]) async -> Void)? {
         guard request.withDeleted != true, request.visibility != "locked" else { return nil }
-        return { ids in await vm?.setLocked(ids) }
+        return { ids in await model?.setLocked(ids) }
     }
 
     /// Hanya Favorites yang punya arti untuk "dikeluarkan tanpa dihapus".
-    private var removal: PhotoCollectionRemoval? {
+    private func removal(using model: AssetGridViewModel?) -> PhotoCollectionRemoval? {
         guard isFavoritesCollection else { return nil }
         return PhotoCollectionRemoval(title: "Remove from Favorites") { ids in
-            await vm?.unfavorite(ids)
+            await model?.unfavorite(ids)
         }
     }
 

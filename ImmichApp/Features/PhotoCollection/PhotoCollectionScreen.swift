@@ -78,6 +78,7 @@ struct PhotoCollectionScreen<Options: View>: View {
     // "Move to Archive".
     var onFavoriteSelection: (([String]) async -> Void)? = nil
     var onArchiveSelection: (([String]) async -> Void)? = nil
+    var archiveActionTitle = String(localized: "Archive")
     /// Mengembalikan dari tong sampah; nil di layar selain Trash.
     var onRestoreSelection: (([String]) async -> Void)? = nil
     /// Mengeluarkan dari folder terkunci; nil di layar selain Locked Folder.
@@ -681,7 +682,7 @@ struct PhotoCollectionScreen<Options: View>: View {
 
         if let onArchiveSelection {
             actions.append(PhotoGridMenuAction(
-                title: String(localized: "Archive"),
+                title: archiveActionTitle,
                 systemImage: "archivebox",
                 group: .quick
             ) {
@@ -871,12 +872,15 @@ struct PhotoCollectionScreen<Options: View>: View {
     /// toolbar: susunannya sama di semua layar, dan yang berbeda cuma aksi mana
     /// yang tersedia.
     private var selectionActions: SelectionActions {
-        let ids = Array(selectedIDs)
+        selectionActions(for: Array(selectedIDs))
+    }
+
+    func selectionActions(for ids: [String]) -> SelectionActions {
         var actions = SelectionActions()
         // Tombolnya tetap terlihat saat belum ada yang dipilih, hanya dimatikan.
         // Bar yang berubah-ubah isinya sesuai jumlah pilihan lebih membingungkan
         // daripada tombol kelabu.
-        actions.isBusy = isPreparingShare || isPerformingAction || selectedIDs.isEmpty
+        actions.isBusy = isPreparingShare || isPerformingAction || ids.isEmpty
 
         if allowsSelectionShare { actions.share = { share(ids) } }
         actions.trashConfirmation = SelectionConfirmation(
@@ -899,9 +903,10 @@ struct PhotoCollectionScreen<Options: View>: View {
             }
         }
         if let onArchiveSelection {
+            actions.archiveTitle = archiveActionTitle
             actions.archive = { runSelection(ids) { await onArchiveSelection(ids) } }
         }
-        var menu = (selectionMenu?(selectedIDs) ?? []).map { action in
+        var menu = (selectionMenu?(Set(ids)) ?? []).map { action in
             SelectionMenuAction(title: action.title, systemImage: action.systemImage,
                                 isDestructive: action.isDestructive) {
                 guard ids.allSatisfy({ visibilityPolicy.allows(id: $0) }) else {
@@ -1127,6 +1132,7 @@ extension PhotoCollectionScreen where Options == EmptyView {
         onAddToAlbum: ((AssetLite) -> Void)? = nil,
         onFavoriteSelection: (([String]) async -> Void)? = nil,
         onArchiveSelection: (([String]) async -> Void)? = nil,
+        archiveActionTitle: String = String(localized: "Archive"),
         onRestoreSelection: (([String]) async -> Void)? = nil,
         onUnlockSelection: (([String]) async -> Void)? = nil,
         onMoveToLocked: (([String]) async -> Void)? = nil,
@@ -1154,6 +1160,7 @@ extension PhotoCollectionScreen where Options == EmptyView {
             onAddToAlbum: onAddToAlbum,
             onFavoriteSelection: onFavoriteSelection,
             onArchiveSelection: onArchiveSelection,
+            archiveActionTitle: archiveActionTitle,
             onRestoreSelection: onRestoreSelection,
             onUnlockSelection: onUnlockSelection,
             onMoveToLocked: onMoveToLocked,

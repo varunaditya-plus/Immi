@@ -1040,7 +1040,7 @@ struct AssetDetailView: View {
                 .disabled(isDownloadingToDevice)
             }
 
-            if currentServerAssetID != nil {
+            if let serverID = currentServerAssetID {
                 Section("Move to") {
                     Button {
                         moveAsset(to: .locked)
@@ -1049,9 +1049,11 @@ struct AssetDetailView: View {
                     }
 
                     Button {
-                        moveAsset(to: .archive)
+                        guard serverID == currentServerAssetID else { return }
+                        moveAsset(to: Self.archiveDestination(for: serverID, detail: matchingDetail))
                     } label: {
-                        Label("Archive", systemImage: "archivebox")
+                        Label(Self.archiveDestination(for: serverID, detail: matchingDetail) == .timeline
+                            ? "Unarchive" : "Archive", systemImage: "archivebox")
                     }
                 }
 
@@ -1249,6 +1251,16 @@ struct AssetDetailView: View {
                 if viewer.isEmpty { dismiss() }
             }
         }
+    }
+
+    static func archiveDestination(
+        for id: String, detail: AssetResponseDTO?, dataManager: SwiftDataManager? = nil
+    ) -> AssetDetailRepository.Visibility {
+        let manager = dataManager ?? .shared
+        guard !manager.privateAssetIDs.contains(id) else { return .archive }
+        let detailIsArchived = detail?.id == id && (detail?.visibility == "archive"
+            || (detail?.visibility == nil && detail?.isArchived == true))
+        return manager.archivedAssetIDs.contains(id) || detailIsArchived ? .timeline : .archive
     }
 
     private var albums: [AlbumResponseDTO] {

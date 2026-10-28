@@ -37,6 +37,7 @@ struct SelectionConfirmation {
 private struct SelectionConfirmButton: View {
     let confirmation: SelectionConfirmation
     let systemImage: String
+    let title: String
     let isDisabled: Bool
 
     @State private var isPresented = false
@@ -45,8 +46,9 @@ private struct SelectionConfirmButton: View {
         Button {
             isPresented = true
         } label: {
-            Image(systemName: systemImage)
+            Label(title, systemImage: systemImage)
         }
+        .labelStyle(.iconOnly)
         .disabled(isDisabled)
         .confirmationDialog(
             confirmation.title,
@@ -87,6 +89,7 @@ struct SelectionActions {
     var share: (() -> Void)?
     var favorite: (() -> Void)?
     var archive: (() -> Void)?
+    var archiveTitle = String(localized: "Archive")
     /// Hanya tong sampah yang punya arti untuk ini.
     var restore: (() -> Void)?
     var trash: (() -> Void)?
@@ -121,11 +124,11 @@ struct SelectionToolbar: ToolbarContent {
         // favorite maupun archive — akan tersisa dua kotak kaca kosong di antara
         // share dan sampah.
         ToolbarItemGroup(placement: .bottomBar) {
-            button(actions.share, "square.and.arrow.up")
-            button(actions.favorite, "heart")
-            button(actions.archive, "archivebox")
-            confirmingButton(actions.restoreConfirmation, actions.restore, "arrow.uturn.backward")
-            confirmingButton(actions.trashConfirmation, actions.trash, "trash")
+            button(actions.share, "square.and.arrow.up", String(localized: "Share"))
+            button(actions.favorite, "heart", String(localized: "Favorite"))
+            button(actions.archive, "archivebox", actions.archiveTitle)
+            confirmingButton(actions.restoreConfirmation, actions.restore, "arrow.uturn.backward", String(localized: "Restore"))
+            confirmingButton(actions.trashConfirmation, actions.trash, "trash", String(localized: "Delete"))
         }
 
         // Elipsisnya ikut hilang saat menunya kosong, berikut spacer-nya —
@@ -138,11 +141,12 @@ struct SelectionToolbar: ToolbarContent {
     }
 
     @ViewBuilder
-    private func button(_ action: (() -> Void)?, _ systemImage: String) -> some View {
+    private func button(_ action: (() -> Void)?, _ systemImage: String, _ title: String) -> some View {
         if let action {
             Button(action: action) {
-                Image(systemName: systemImage)
+                Label(title, systemImage: systemImage)
             }
+            .labelStyle(.iconOnly)
             .disabled(actions.isBusy)
         }
     }
@@ -151,15 +155,17 @@ struct SelectionToolbar: ToolbarContent {
     private func confirmingButton(
         _ confirmation: SelectionConfirmation?,
         _ fallback: (() -> Void)?,
-        _ systemImage: String
+        _ systemImage: String,
+        _ title: String
     ) -> some View {
         if let confirmation {
             SelectionConfirmButton(
                 confirmation: confirmation,
                 systemImage: systemImage,
+                title: title,
                 isDisabled: actions.isBusy)
         } else {
-            button(fallback, systemImage)
+            button(fallback, systemImage, title)
         }
     }
 
