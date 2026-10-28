@@ -78,6 +78,9 @@ final class SharedUploadService {
                         _ = try await processor.process(batchID: batch.id, owner: credential.owner, upload: {
                             item, fileURL, directory in
                             try session.checkCurrent(context)
+                            await self.refreshPending(session: session)
+                            try Task.checkCancellation()
+                            try session.checkCurrent(context)
                             try await self.upload(credential, item, fileURL, directory)
                         })
                     } catch {
