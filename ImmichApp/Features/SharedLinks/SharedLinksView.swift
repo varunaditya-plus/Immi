@@ -193,10 +193,13 @@ struct SharedLinkRow: View {
     /// lebih besar dari petaknya — sama seperti kartu di Library.
     @ViewBuilder
     private var thumbnail: some View {
+        let policy = AssetVisibilityPolicy()
         Color.clear.overlay {
             if let album = link.album {
                 AlbumCoverImage(album: album)
-            } else if let asset = link.assets?.first {
+            } else if let asset = link.assets?.first(where: {
+                $0.isVisibleInAlbum && policy.allows(id: $0.id)
+            }) {
                 AuthImage(assetId: asset.id, thumbhash: asset.thumbhash)
             } else {
                 Rectangle()
