@@ -1,5 +1,3 @@
-import Foundation
-
 struct SearchRequestDTO: Encodable {
     var query: String? = nil
     var page: Int? = 1

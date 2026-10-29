@@ -1,5 +1,3 @@
-import Foundation
-
 struct KeychainStore: SessionCredentialStore {
     func save(_ value: String, for key: String) {
         SharedKeychainStore.save(value, for: key)

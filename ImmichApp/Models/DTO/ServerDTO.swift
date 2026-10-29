@@ -1,5 +1,3 @@
-import Foundation
-
 struct ServerPingDTO: Decodable {
     let res: String
 }

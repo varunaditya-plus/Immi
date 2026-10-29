@@ -171,17 +171,6 @@ struct ProfileAvatar: View {
 
     private static let toolbarSide: CGFloat = 42
 
-    /// Ruang berlebih di kanan avatar yang harus ditarik balik.
-    ///
-    /// Item toolbar di iOS 26 tetap menyisakan inset untuk kapsul kacanya
-    /// meskipun kapsulnya sendiri dimatikan lewat `sharedBackgroundVisibility`.
-    /// Untuk tombol seukuran ikon inset itu tidak terasa; untuk lingkaran
-    /// selebar ini, ia mendorong avatarnya menjorok jauh dari tepi kanan.
-    ///
-    /// Dipasang di sini, bukan di tiap pemakainya, supaya avatar di layar mana
-    /// pun duduk di tempat yang sama.
-    static let toolbarTrailingCompensation: CGFloat = -10
-
     private static let gradient = LinearGradient(
         colors: [.cyan, .blue, .indigo],
         startPoint: .topLeading,
