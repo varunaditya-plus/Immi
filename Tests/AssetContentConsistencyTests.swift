@@ -23,6 +23,7 @@ final class AssetContentConsistencyTests: XCTestCase {
     func testTimelinePublishesInteriorReplacementWithUnchangedEndpointsAndCount() async throws {
         let store = try makeStore()
         let ids = (0..<4).map { _ in UUID().uuidString }
+        defer { RemovedAssets.shared.restore([ids[1]]) }
         try store.insertOrUpdateCachedAsset(cached(ids[0], day: 1))
         try store.insertOrUpdateCachedAsset(cached(ids[1], day: 2))
         try store.insertOrUpdateCachedAsset(cached(ids[2], day: 3))
@@ -30,7 +31,7 @@ final class AssetContentConsistencyTests: XCTestCase {
         await model.loadTimeline()
         XCTAssertEqual(model.allAssets.map(\.id), Array(ids.prefix(3)))
 
-        try store.deleteCachedAsset(id: ids[1])
+        try store.applySyncBatch(upserts: [], deletedIds: [ids[1]])
         try store.insertOrUpdateCachedAsset(cached(ids[3], day: 2))
         await model.loadTimeline()
 

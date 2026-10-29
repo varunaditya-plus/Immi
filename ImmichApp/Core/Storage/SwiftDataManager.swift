@@ -808,13 +808,6 @@ final class SwiftDataManager {
             FetchDescriptor<CachedAsset>(predicate: #Predicate { !$0.isArchived }))) ?? 0
     }
 
-    func deleteCachedAsset(id: String) throws {
-        if let asset = getCachedAsset(id: id) {
-            modelContext.delete(asset)
-            try modelContext.save()
-        }
-    }
-
     /// Snapshot SQLite yang konsisten untuk dibagikan lewat Sync Status.
     ///
     /// Menyalin file `.store` biasa tidak cukup karena perubahan terbaru bisa
@@ -1140,22 +1133,10 @@ final class SwiftDataManager {
         return Set(records.map(\.localIdentifier))
     }
 
-    /// Id ASET SERVER yang salinan perangkatnya diketahui.
-    ///
-    /// Pasangan dari `uploadedLocalIdentifiers`, dibaca dari arah sebaliknya:
-    /// yang satu menjawab "petak lokal ini perlu ditampilkan?", yang ini
-    /// menjawab "petak server ini juga ada di perangkat?".
-    func uploadedServerAssetIDs() -> Set<String> {
-        let descriptor = FetchDescriptor<BackupRecord>(
-            predicate: #Predicate { $0.localIdentifier != "" })
-        let records = (try? modelContext.fetch(descriptor)) ?? []
-        return Set(records.map(\.assetId))
-    }
-
     /// Pasangan lengkapnya: `localIdentifier` → id aset server.
     ///
-    /// Dua kerabatnya di atas masing-masing hanya mengembalikan satu sisi, dan
-    /// itu cukup untuk menjawab "sudah ada?". Yang ini diperlukan saat sisi
+    /// `uploadedLocalIdentifiers` cukup untuk menjawab "sudah ada?".
+    /// Pasangan ini diperlukan saat sisi
     /// SEBERANGNYA yang dibutuhkan — menyusun aset server ke dalam album
     /// berdasarkan album perangkat asalnya.
     func serverAssetIDsByLocalIdentifier() -> [String: String] {
