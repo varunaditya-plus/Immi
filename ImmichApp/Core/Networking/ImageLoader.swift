@@ -85,7 +85,7 @@ actor ImageCache {
     private static let diskLimitDefaultsKey = "imageCache.diskLimitBytes"
     private static let defaultDiskLimit = 512 * 1024 * 1024
 
-    private var maxDiskCacheSize: Int
+    private let maxDiskCacheSize: Int
 
     /// Total byte L2 yang dipelihara secara berjalan, supaya insert tidak perlu
     /// memindai seluruh direktori (pemicu tersendat saat scroll).
@@ -553,14 +553,6 @@ actor ImageCache {
         runningDiskUsage = 0
     }
 
-    func diskCacheSize() async -> Int {
-        await Self.scan(diskCacheURL).total
-    }
-
-    func diskCacheLimit() -> Int {
-        maxDiskCacheSize
-    }
-
     /// Memulihkan cache yang sudah telanjur melewati batas pada versi lama,
     /// tanpa menunggu pengguna menggulir dan menulis thumbnail baru.
     func enforceDiskLimit() {
@@ -569,12 +561,6 @@ actor ImageCache {
             return
         }
         if usage > maxDiskCacheSize { startEviction() }
-    }
-
-    func setDiskCacheLimit(_ bytes: Int) {
-        maxDiskCacheSize = max(16 * 1024 * 1024, bytes)
-        UserDefaults.standard.set(maxDiskCacheSize, forKey: Self.diskLimitDefaultsKey)
-        startEviction()
     }
 
     /// Menandai file sebagai baru dipakai, supaya eviction yang mengurutkan

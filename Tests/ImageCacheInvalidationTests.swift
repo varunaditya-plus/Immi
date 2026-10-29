@@ -43,8 +43,7 @@ final class ImageCacheInvalidationTests: XCTestCase {
         await fulfillment(of: [cleared], timeout: 1)
 
         XCTAssertNil(ImageMemoryCache.shared.image(for: ImageCache.memoryKey(cachedKey, nil)))
-        let clearedDiskSize = await cache.diskCacheSize()
-        XCTAssertEqual(clearedDiskSize, 0)
+        XCTAssertEqual(try diskBytes(in: directory), 0)
         let current = Task { try await cache.image(key: key, maxPixelSize: nil) { currentData } }
         addTeardownBlock {
             current.cancel()
@@ -92,8 +91,7 @@ final class ImageCacheInvalidationTests: XCTestCase {
         await currentFetch.resolve(png(width: 20))
         await assertCancelled(current)
         XCTAssertNil(ImageMemoryCache.shared.image(for: ImageCache.memoryKey(key, nil)))
-        let diskSize = await cache.diskCacheSize()
-        XCTAssertEqual(diskSize, 0)
+        XCTAssertEqual(try diskBytes(in: directory), 0)
 
         let replacement = try await cache.image(key: key, maxPixelSize: nil) { self.png(width: 30) }
         XCTAssertEqual(replacement.size.width, 30)
@@ -184,6 +182,13 @@ final class ImageCacheInvalidationTests: XCTestCase {
         XCTAssertEqual(diskImage.size.width, 20)
         await cache.remove(key: key, maxPixelSize: nil)
         await cache.remove(key: key, maxPixelSize: 5)
+    }
+
+    private func diskBytes(in directory: URL) throws -> Int {
+        try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.fileSizeKey])
+            .reduce(0) { total, url in
+                try total + XCTUnwrap(url.resourceValues(forKeys: [.fileSizeKey]).fileSize)
+            }
     }
 
     private func makeDirectory() throws -> URL {
