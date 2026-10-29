@@ -29,7 +29,6 @@ class MockSessionManager: SessionManager {
     private(set) var featuresCallCount = 0
     private(set) var serverConfigCallCount = 0
     private(set) var loginPasswordCallCount = 0
-    private(set) var loginApiKeyCallCount = 0
     private(set) var loginOIDCCallCount = 0
 
     /// Mulai dari keadaan keluar akun, apa pun isi keychain simulator.
@@ -79,7 +78,6 @@ class MockSessionManager: SessionManager {
     }
 
     override func loginApiKey(_ key: String) async throws {
-        loginApiKeyCallCount += 1
         guard shouldSucceedApiKey else { throw APIError.unauthorized }
         isLoggedIn = true
     }

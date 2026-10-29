@@ -3,35 +3,35 @@ import XCTest
 
 final class ServerCompatibilityTests: XCTestCase {
     func testCurrentMajorIsCompatible() {
-        let status = ServerCompatibilityPolicy.evaluate(
+        let report = report(for:
             ServerVersionDTO(major: 3, minor: 1, patch: 0))
 
-        XCTAssertEqual(status, .compatible)
-        XCTAssertTrue(status.allowsAuthentication)
+        XCTAssertEqual(report.status, .compatible)
+        XCTAssertNil(ServerCompatibilityError.incompatibleReport(report))
     }
 
     func testPreviousMajorIsCompatibleLegacy() {
-        let status = ServerCompatibilityPolicy.evaluate(
+        let report = report(for:
             ServerVersionDTO(major: 2, minor: 7, patch: 4))
 
-        XCTAssertEqual(status, .compatibleLegacy)
-        XCTAssertTrue(status.allowsAuthentication)
+        XCTAssertEqual(report.status, .compatibleLegacy)
+        XCTAssertNil(ServerCompatibilityError.incompatibleReport(report))
     }
 
     func testOlderMajorRequiresServerUpgrade() {
-        let status = ServerCompatibilityPolicy.evaluate(
+        let report = report(for:
             ServerVersionDTO(major: 1, minor: 143, patch: 0))
 
-        XCTAssertEqual(status, .serverUpgradeRequired)
-        XCTAssertFalse(status.allowsAuthentication)
+        XCTAssertEqual(report.status, .serverUpgradeRequired)
+        XCTAssertEqual(ServerCompatibilityError.incompatibleReport(report), .serverTooOld(found: report.version))
     }
 
     func testFutureMajorRequiresAppUpgrade() {
-        let status = ServerCompatibilityPolicy.evaluate(
+        let report = report(for:
             ServerVersionDTO(major: 4, minor: 0, patch: 0))
 
-        XCTAssertEqual(status, .appUpgradeRequired)
-        XCTAssertFalse(status.allowsAuthentication)
+        XCTAssertEqual(report.status, .appUpgradeRequired)
+        XCTAssertEqual(ServerCompatibilityError.incompatibleReport(report), .appTooOld(found: report.version))
     }
 
     func testPrereleaseVersionFormatting() {
@@ -51,5 +51,12 @@ final class ServerCompatibilityTests: XCTestCase {
         let version = try JSONDecoder().decode(ServerVersionDTO.self, from: json)
 
         XCTAssertEqual(version, ServerVersionDTO(major: 2, minor: 7, patch: 4))
+    }
+
+    private func report(for version: ServerVersionDTO) -> ServerCompatibilityReport {
+        ServerCompatibilityReport(version: version,
+            features: ServerFeaturesDTO(smartSearch: true, facialRecognition: true,
+                oauth: false, passwordLogin: true, search: true),
+            status: ServerCompatibilityPolicy.evaluate(version))
     }
 }

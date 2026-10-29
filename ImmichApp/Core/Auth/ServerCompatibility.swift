@@ -28,13 +28,6 @@ enum ServerCompatibilityStatus: Equatable, Sendable {
     case serverUpgradeRequired
     case appUpgradeRequired
 
-    var allowsAuthentication: Bool {
-        switch self {
-        case .compatible, .compatibleLegacy: true
-        case .serverUpgradeRequired, .appUpgradeRequired: false
-        }
-    }
-
     var title: String {
         switch self {
         case .compatible: String(localized: "Compatible")
