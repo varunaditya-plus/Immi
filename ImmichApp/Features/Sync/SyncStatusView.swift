@@ -10,7 +10,7 @@ enum SyncStatusJob: String, CaseIterable, Identifiable, Hashable {
 
     var id: Self { self }
 
-    var title: String {
+    var title: LocalizedStringKey {
         switch self {
         case .syncLocal: "Sync Local"
         case .syncRemote: "Sync Remote"
@@ -34,6 +34,22 @@ enum SyncStatusJobState: Equatable {
     case running
     case succeeded(Date?, String)
     case failed(String)
+
+    var subtitle: Text {
+        switch self {
+        case .idle:
+            return Text("Tap to run job")
+        case .running:
+            return Text("Running…")
+        case let .succeeded(date, message):
+            if let date {
+                return Text("\(message) • \(date, format: .relative(presentation: .named))")
+            }
+            return Text(message)
+        case let .failed(message):
+            return Text(message)
+        }
+    }
 }
 
 private struct SyncStatusJobError: LocalizedError {
@@ -145,13 +161,11 @@ final class SyncStatusViewModel {
                 let hasAccess = await library.requestAccess()
                 try Task.checkCancellation()
                 guard hasAccess else {
-                    throw SyncStatusJobError(message: "Allow Photos access before syncing local assets.")
+                    throw SyncStatusJobError(message: String(localized: "Allow Photos access before syncing local assets."))
                 }
                 await prepareLocal()
                 let counts = try await library.statusCounts()
-                result = counts.assets == 1
-                    ? "Scanned 1 local asset"
-                    : "Scanned \(counts.assets.formatted()) local assets"
+                result = String(localized: "Scanned \(counts.assets) local assets")
 
             case .syncRemote:
                 let needsFullSync = dataManager.getSyncState().lastFullSyncAt == nil
@@ -172,29 +186,29 @@ final class SyncStatusViewModel {
                         try await syncRepo.deltaSync()
                     }
                 }
-                result = "Remote library is up to date"
+                result = String(localized: "Remote library is up to date")
 
             case .syncCloudIDs:
                 let photos = await library.allPhotosForSync()
                 guard library.isAuthorized else {
                     throw SyncStatusJobError(
-                        message: "Allow Photos access before syncing cloud IDs.")
+                        message: String(localized: "Allow Photos access before syncing cloud IDs."))
                 }
                 let linked = try await matcher.matchNow(photos)
                 result = linked == 0
-                    ? "Cloud IDs are up to date"
-                    : "Matched \(linked.formatted()) cloud IDs"
+                    ? String(localized: "Cloud IDs are up to date")
+                    : String(localized: "Matched \(linked) cloud IDs")
 
             case .hashAssets:
                 let photos = await library.allPhotosForSync()
                 guard library.isAuthorized else {
                     throw SyncStatusJobError(
-                        message: "Allow Photos access before hashing assets.")
+                        message: String(localized: "Allow Photos access before hashing assets."))
                 }
                 let hashed = try await matcher.hashNow(photos)
                 result = hashed == 0
-                    ? "All available assets are hashed"
-                    : "Hashed \(hashed.formatted()) assets"
+                    ? String(localized: "All available assets are hashed")
+                    : String(localized: "Hashed \(hashed) assets")
             }
 
             jobStates[job] = .succeeded(.now, result)
@@ -250,20 +264,20 @@ final class SyncStatusViewModel {
 
     private func inferExistingJobStates() {
         if library.isAuthorized {
-            jobStates[.syncLocal] = .succeeded(nil, "Local library is available")
+            jobStates[.syncLocal] = .succeeded(nil, String(localized: "Local library is available"))
         }
 
         let syncState = dataManager.getSyncState()
         if let date = syncState.lastDeltaSyncAt ?? syncState.lastFullSyncAt {
-            jobStates[.syncRemote] = .succeeded(date, "Remote library synced")
+            jobStates[.syncRemote] = .succeeded(date, String(localized: "Remote library synced"))
         }
 
         if !dataManager.uploadedLocalIdentifiers().isEmpty {
-            jobStates[.syncCloudIDs] = .succeeded(nil, "Cloud IDs are available")
+            jobStates[.syncCloudIDs] = .succeeded(nil, String(localized: "Cloud IDs are available"))
         }
 
         if dataManager.storedChecksums().count > 0 {
-            jobStates[.hashAssets] = .succeeded(nil, "Hashed assets are available")
+            jobStates[.hashAssets] = .succeeded(nil, String(localized: "Hashed assets are available"))
         }
     }
 }
@@ -352,7 +366,7 @@ struct SyncStatusView: View {
                 Label {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Local cache was rebuilt")
-                        Text("Restored \(restoredCount.formatted()) protected backup mappings. Remote sync can rebuild the remaining cache.")
+                        Text("Restored \(restoredCount) protected backup mappings. Remote sync can rebuild the remaining cache.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -391,9 +405,9 @@ struct SyncStatusView: View {
     }
 
     private func statusSection(
-        _ title: String,
-        leading: (title: String, symbol: String, value: Int?),
-        trailing: (title: String, symbol: String, value: Int?)
+        _ title: LocalizedStringKey,
+        leading: (title: LocalizedStringKey, symbol: String, value: Int?),
+        trailing: (title: LocalizedStringKey, symbol: String, value: Int?)
     ) -> some View {
         Section(title) {
             HStack(spacing: 12) {
@@ -407,7 +421,7 @@ struct SyncStatusView: View {
     }
 
     private func statusCard(
-        _ item: (title: String, symbol: String, value: Int?)
+        _ item: (title: LocalizedStringKey, symbol: String, value: Int?)
     ) -> some View {
         VStack(spacing: 9) {
             Label(item.title, systemImage: item.symbol)
@@ -457,7 +471,7 @@ struct SyncStatusView: View {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(job.title)
                                 .foregroundStyle(.primary)
-                            Text(jobSubtitle(job))
+                            vm.state(for: job).subtitle
                                 .font(.caption)
                                 .foregroundStyle(jobSubtitleColor(job))
                                 .lineLimit(2)
@@ -552,22 +566,6 @@ struct SyncStatusView: View {
             Text("Actions")
         } footer: {
             Text("Cache and database actions only affect local app data. Photos on your device and server remain safe.")
-        }
-    }
-
-    private func jobSubtitle(_ job: SyncStatusJob) -> String {
-        switch vm.state(for: job) {
-        case .idle:
-            return "Tap to run job"
-        case .running:
-            return "Running…"
-        case let .succeeded(date, message):
-            if let date {
-                return "\(message) • \(date.formatted(.relative(presentation: .named)))"
-            }
-            return message
-        case let .failed(message):
-            return message
         }
     }
 

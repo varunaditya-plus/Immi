@@ -34,24 +34,24 @@ final class SyncViewModel {
     @discardableResult
     func performFullSync() async -> Bool {
         guard !isSyncing else {
-            syncProgress = "A sync job is already running"
+            syncProgress = String(localized: "A sync job is already running")
             return false
         }
         guard isOnline else {
-            syncProgress = "No network connection"
+            syncProgress = String(localized: "No network connection")
             return false
         }
         isSyncing = true
-        syncProgress = "Syncing..."
+        syncProgress = String(localized: "Syncing...")
         defer { isSyncing = false }
 
         do {
             try await repo.fullSync()
             lastSyncTime = Date()
-            syncProgress = "Sync complete"
+            syncProgress = String(localized: "Sync complete")
             return true
         } catch {
-            syncProgress = "Sync failed: \(error.localizedDescription)"
+            syncProgress = String(localized: "Sync failed: \(error.localizedDescription)")
             return false
         }
     }
@@ -59,24 +59,24 @@ final class SyncViewModel {
     @discardableResult
     func performDeltaSync() async -> Bool {
         guard !isSyncing else {
-            syncProgress = "A sync job is already running"
+            syncProgress = String(localized: "A sync job is already running")
             return false
         }
         guard isOnline else {
-            syncProgress = "No network connection"
+            syncProgress = String(localized: "No network connection")
             return false
         }
         isSyncing = true
-        syncProgress = "Syncing changes..."
+        syncProgress = String(localized: "Syncing changes...")
         defer { isSyncing = false }
 
         do {
             try await repo.deltaSync()
             lastSyncTime = Date()
-            syncProgress = "Sync complete"
+            syncProgress = String(localized: "Sync complete")
             return true
         } catch {
-            syncProgress = "Sync failed: \(error.localizedDescription)"
+            syncProgress = String(localized: "Sync failed: \(error.localizedDescription)")
             return false
         }
     }
@@ -105,12 +105,12 @@ final class SyncViewModel {
                 try await repo.deltaSync()
             }
             lastSyncTime = Date()
-            syncProgress = "Sync complete"
+            syncProgress = String(localized: "Sync complete")
         } catch {
             // Jangan hilangkan diagnosis lagi. Layar status sync dan log state
             // kini dapat menunjukkan penyebab sebenarnya bila kontrak server,
             // autentikasi, atau jaringan berubah.
-            syncProgress = "Sync failed: \(error.localizedDescription)"
+            syncProgress = String(localized: "Sync failed: \(error.localizedDescription)")
         }
     }
 

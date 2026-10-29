@@ -55,6 +55,15 @@ final class LocalizationCoverageTests: XCTestCase {
         }
     }
 
+    func testSyncTermsDescribeMediaAndServers() throws {
+        let french = try localizedBundle(Bundle.main, language: "fr")
+        XCTAssertEqual(french.localizedString(forKey: "Assets", value: nil, table: nil), "Éléments")
+        XCTAssertEqual(french.localizedString(forKey: "Hash Assets", value: nil, table: nil), "Calculer les empreintes")
+        let german = try localizedBundle(Bundle.main, language: "de")
+        XCTAssertEqual(german.localizedString(forKey: "Remote", value: nil, table: nil), "Server")
+        XCTAssertEqual(german.localizedString(forKey: "Sync Remote", value: nil, table: nil), "Mit dem Server synchronisieren")
+    }
+
     func testRemovalCountsUseSingularEnglishForms() throws {
         let english = try localizedBundle(Bundle.main, language: "en")
         XCTAssertEqual(String(localized: "Move \(1) Items to Recently Deleted", bundle: english,
