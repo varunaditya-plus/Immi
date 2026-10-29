@@ -73,6 +73,38 @@ final class WidgetPrivacyInvalidationTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("Widgets").path))
     }
 
+    func testPersistentStoreAwaitingVisibilityRecoveryCannotRetainOrRepublishWidgets() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let storeURL = directory.appendingPathComponent("test.store")
+        let journalURL = directory.appendingPathComponent("backup.json")
+        do {
+            let store = SwiftDataManager(storeURL: storeURL, backupJournalURL: journalURL)
+            XCTAssertTrue(store.isVisibilityStateAvailable)
+        }
+        let marker = storeURL.appendingPathExtension("visibility-recovery")
+        try Data().write(to: marker)
+        let store = SwiftDataManager(storeURL: storeURL, backupJournalURL: journalURL)
+        XCTAssertTrue(store.isPersistentStoreAvailable)
+        XCTAssertTrue(store.requiresVisibilityRefresh)
+        XCTAssertFalse(store.isVisibilityStateAvailable)
+        let images = directory.appendingPathComponent("Widgets/old-generation")
+        try FileManager.default.createDirectory(at: images, withIntermediateDirectories: true)
+        try Data([1]).write(to: images.appendingPathComponent("private.image"))
+        let snapshot = directory.appendingPathComponent("Widgets/snapshot.json")
+        try Data("old snapshot".utf8).write(to: snapshot)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: snapshot.path))
+        let api = try makeAPI(assetID: UUID().uuidString)
+
+        await WidgetSnapshotExporter.refresh(api: api, imageAPI: api, container: directory,
+            selectedAlbumIDs: [], dataManager: store)
+
+        let thumbnailCount = await api.thumbnailCount.value
+        XCTAssertEqual(thumbnailCount, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("Widgets").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: marker.path))
+    }
+
     func testCurrentThumbnailStillPublishesReferencedImageBytes() async throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

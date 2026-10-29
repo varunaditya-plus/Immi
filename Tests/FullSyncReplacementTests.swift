@@ -44,6 +44,124 @@ final class FullSyncReplacementTests: XCTestCase {
         XCTAssertEqual(fixture.transport.acknowledgmentCount, 1)
     }
 
+    func testRecoveryBarrierForcesDeltaToCompleteAFullSnapshotBeforeReleasingVisibility() async throws {
+        for major in [2, 3] {
+            let fixture = try FullSyncFixture()
+            defer { fixture.cleanup() }
+            let marker = fixture.storeURL.appendingPathExtension("visibility-recovery")
+            fixture.session.mockVersion = ServerVersionDTO(major: major, minor: 0, patch: 0)
+            try Data().write(to: marker)
+            fixture.reopenRepository()
+            XCTAssertTrue(fixture.dataManager.isPersistentStoreAvailable)
+            XCTAssertFalse(fixture.dataManager.isVisibilityStateAvailable)
+            let snapshot = FullSyncTransport.asset("public")
+                + FullSyncTransport.asset("archive", visibility: "archive")
+                + FullSyncTransport.asset("private", visibility: "locked") + FullSyncTransport.complete
+            fixture.transport.responses = [.body(major == 2
+                ? snapshot.replacingOccurrences(of: "AssetV2", with: "AssetV1") : snapshot)]
+
+            try await fixture.repository.deltaSync()
+
+            XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
+            XCTAssertTrue(fixture.dataManager.isVisibilityStateAvailable)
+            XCTAssertNil(fixture.dataManager.getCachedAsset(id: "stale"), "Recovery must replace the old snapshot, not apply a delta")
+            let reopened = fixture.reopen()
+            XCTAssertTrue(reopened.isVisibilityStateAvailable)
+            let collection = AssetVisibilityPolicy(dataManager: reopened)
+            let timeline = AssetVisibilityPolicy(scope: .timeline, dataManager: reopened)
+            XCTAssertTrue(collection.allows(id: "public"))
+            XCTAssertTrue(collection.allows(id: "archive"))
+            XCTAssertFalse(timeline.allows(id: "archive"))
+            XCTAssertFalse(collection.allows(id: "private"))
+            XCTAssertEqual(reopened.privateAssetIDs, ["private"])
+            XCTAssertEqual(fixture.transport.acknowledgmentCount, 1)
+        }
+    }
+
+    func testFailedOrIncompleteRecoverySyncKeepsTheBarrierAcrossOfflineReopen() async throws {
+        let responses: [FullSyncTransport.Response] = [
+            .status(503), .body(FullSyncTransport.asset("public")),
+            .body(FullSyncTransport.asset("private", visibility: "locked")
+                .replacingOccurrences(of: "\"visibility\":\"locked\",", with: "") + FullSyncTransport.complete)
+        ]
+        for response in responses {
+            let fixture = try FullSyncFixture()
+            defer { fixture.cleanup() }
+            let marker = fixture.storeURL.appendingPathExtension("visibility-recovery")
+            try Data().write(to: marker)
+            fixture.reopenRepository()
+            fixture.transport.responses = [response]
+
+            await expectFailure { try await fixture.repository.deltaSync() }
+
+            XCTAssertTrue(FileManager.default.fileExists(atPath: marker.path))
+            XCTAssertFalse(fixture.dataManager.isVisibilityStateAvailable)
+            let reopened = fixture.reopen()
+            XCTAssertTrue(reopened.isPersistentStoreAvailable)
+            XCTAssertFalse(reopened.isVisibilityStateAvailable)
+            XCTAssertFalse(AssetVisibilityPolicy(dataManager: reopened).allows(id: "retained-unmapped-private"))
+            XCTAssertNotNil(reopened.getCachedAsset(id: "stale"))
+            XCTAssertEqual(fixture.transport.acknowledgmentCount, 0)
+        }
+    }
+
+    func testFailedRecoveryMarkerRemovalKeepsPrivacyBlockedUntilSuccessfulRetry() async throws {
+        let files = FullSyncFileManager()
+        let fixture = try FullSyncFixture(fileManager: files)
+        defer { fixture.cleanup() }
+        let marker = fixture.storeURL.appendingPathExtension("visibility-recovery")
+        try Data().write(to: marker)
+        fixture.reopenRepository(fileManager: files)
+        files.rejectMarkerRemoval = true
+        let complete = FullSyncTransport.asset("public")
+            + FullSyncTransport.asset("private", visibility: "locked") + FullSyncTransport.complete
+        fixture.transport.responses = [.body(complete)]
+
+        await expectFailure { try await fixture.repository.fullSync() }
+
+        XCTAssertNotNil(fixture.reopen().getCachedAsset(id: "public"), "The complete replacement is already durable")
+        XCTAssertFalse(fixture.dataManager.isVisibilityStateAvailable)
+        XCTAssertFalse(fixture.reopen().isVisibilityStateAvailable)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: marker.path))
+        XCTAssertEqual(fixture.transport.acknowledgmentCount, 0)
+        files.rejectMarkerRemoval = false
+        fixture.transport.responses = [.body(complete)]
+
+        try await fixture.repository.deltaSync()
+
+        XCTAssertTrue(fixture.dataManager.isVisibilityStateAvailable)
+        XCTAssertFalse(AssetVisibilityPolicy(dataManager: fixture.dataManager).allows(id: "private"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
+        XCTAssertEqual(fixture.transport.acknowledgmentCount, 1)
+    }
+
+    func testRecoveryCannotRemoveADirectoryOrDanglingSymlinkAsItsMarker() async throws {
+        for symlink in [false, true] {
+            let fixture = try FullSyncFixture()
+            defer { fixture.cleanup() }
+            let marker = fixture.storeURL.appendingPathExtension("visibility-recovery")
+            if symlink {
+                try FileManager.default.createSymbolicLink(at: marker,
+                    withDestinationURL: fixture.directory.appendingPathComponent("missing-marker-target"))
+            } else {
+                try FileManager.default.createDirectory(at: marker, withIntermediateDirectories: true)
+                try Data("preserve".utf8).write(to: marker.appendingPathComponent("keep"))
+            }
+            fixture.reopenRepository()
+            XCTAssertFalse(fixture.dataManager.isVisibilityStateAvailable)
+            fixture.transport.responses = [.body(FullSyncTransport.asset("public") + FullSyncTransport.complete)]
+
+            await expectFailure { try await fixture.repository.fullSync() }
+
+            XCTAssertFalse(fixture.dataManager.isVisibilityStateAvailable)
+            XCTAssertFalse(fixture.reopen().isVisibilityStateAvailable)
+            let attributes = try FileManager.default.attributesOfItem(atPath: marker.path)
+            if symlink { XCTAssertEqual(attributes[.type] as? FileAttributeType, .typeSymbolicLink) }
+            else { XCTAssertEqual(try Data(contentsOf: marker.appendingPathComponent("keep")), Data("preserve".utf8)) }
+            XCTAssertEqual(fixture.transport.acknowledgmentCount, 0)
+        }
+    }
+
     func testMalformedStreamAfterMoreThanOneBatchPreservesWorkingCacheAndRegistries() async throws {
         let fixture = try FullSyncFixture()
         defer { fixture.cleanup() }
@@ -499,6 +617,13 @@ private final class FullSyncFixture {
         SyncRepository(api: APIClient(session: session, urlSession: urlSession), dataManager: dataManager)
     }
 
+    func reopenRepository(fileManager: FileManager = .default) {
+        storedRepository = nil
+        storedDataManager = SwiftDataManager(storeURL: storeURL, backupJournalURL: journalURL, fileManager: fileManager)
+        storedRepository = SyncRepository(api: APIClient(session: session, urlSession: urlSession),
+            dataManager: dataManager)
+    }
+
     func cleanup() {
         urlSession.invalidateAndCancel()
         transport.close()
@@ -519,11 +644,17 @@ private final class FullSyncSession: MockSessionManager {
 
 private final class FullSyncFileManager: FileManager, @unchecked Sendable {
     var rejectWrites = false
+    var rejectMarkerRemoval = false
     override func createDirectory(at url: URL, withIntermediateDirectories: Bool,
         attributes: [FileAttributeKey: Any]? = nil) throws {
         if rejectWrites { throw CocoaError(.fileWriteNoPermission) }
         try super.createDirectory(at: url, withIntermediateDirectories: withIntermediateDirectories,
             attributes: attributes)
+    }
+
+    override func removeItem(at url: URL) throws {
+        if rejectMarkerRemoval, url.pathExtension == "visibility-recovery" { throw CocoaError(.fileWriteNoPermission) }
+        try super.removeItem(at: url)
     }
 }
 

@@ -194,7 +194,8 @@ struct AlbumCoverImage: View {
         // penyelesaian ulang fallback walau id albumnya tetap sama.
         .task(id: CoverRequestKey(albumID: album.id, count: album.assetCount,
                                   coverID: album.albumThumbnailAssetId,
-                                  excludedIDs: AlbumCoverStore.shared.excludedIDs)) {
+                                  excludedIDs: AlbumCoverStore.shared.excludedIDs,
+                                  visibilityAvailable: SwiftDataManager.shared.isVisibilityStateAvailable)) {
             await AlbumCoverStore.shared.resolveCover(for: album, session: session)
         }
     }
@@ -205,4 +206,5 @@ private struct CoverRequestKey: Hashable {
     let count: Int
     let coverID: String?
     let excludedIDs: Set<String>
+    let visibilityAvailable: Bool
 }

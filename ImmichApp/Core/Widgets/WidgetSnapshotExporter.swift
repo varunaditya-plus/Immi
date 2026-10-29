@@ -44,7 +44,7 @@ enum WidgetSnapshotExporter {
         dataManager: SwiftDataManager? = nil
     ) async {
         let dataManager = dataManager ?? .shared
-        guard dataManager.isPersistentStoreAvailable else {
+        guard dataManager.isVisibilityStateAvailable else {
             clear(container: container)
             return
         }

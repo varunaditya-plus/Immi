@@ -62,6 +62,7 @@ final class SwiftDataManager {
     private let storeURL: URL
     private let backupJournalURL: URL
     private let fileManager: FileManager
+    private(set) var requiresVisibilityRefresh: Bool
     private(set) var startupState: LocalStoreStartupState
     /// Kept with backup mappings because clearing the rebuildable cache must
     /// not make a locked or archived device copy appear in Photos.
@@ -83,6 +84,14 @@ final class SwiftDataManager {
 
     var isPersistentStoreAvailable: Bool {
         startupState.isPersistentStoreAvailable
+    }
+
+    var isVisibilityStateAvailable: Bool {
+        isPersistentStoreAvailable && !requiresVisibilityRefresh
+    }
+
+    private var visibilityRecoveryURL: URL {
+        storeURL.appendingPathExtension("visibility-recovery")
     }
 
     init(
@@ -120,6 +129,8 @@ final class SwiftDataManager {
         self.modelContainer = bootstrap.container
         self.modelContext = ModelContext(bootstrap.container)
         self.startupState = bootstrap.state
+        self.requiresVisibilityRefresh = (try? Self.hasVisibilityRecoveryMarker(
+            at: resolvedStoreURL.appendingPathExtension("visibility-recovery"), fileManager: fileManager)) ?? true
 
         reconcileBackupRecordJournalAfterStartup()
     }
@@ -143,6 +154,18 @@ final class SwiftDataManager {
             return ContainerBootstrap(container: container, state: .ready)
         } catch {
             let openingError = error.localizedDescription
+            // The journal can lag a saved lock. Persist that uncertainty before
+            // quarantining the primary records that could resolve it.
+            do {
+                let marker = storeURL.appendingPathExtension("visibility-recovery")
+                if try !hasVisibilityRecoveryMarker(at: marker, fileManager: fileManager) {
+                    try fileManager.createDirectory(at: marker.deletingLastPathComponent(),
+                        withIntermediateDirectories: true)
+                    try Data().write(to: marker, options: .atomic)
+                }
+            } catch {
+                return memoryFallback(schema: schema, error: error)
+            }
             let quarantinedStore = try? quarantineStoreFiles(
                 at: storeURL,
                 fileManager: fileManager)
@@ -163,27 +186,29 @@ final class SwiftDataManager {
                         restoredBackupRecords: 0,
                         warning: String(localized: "The previous local cache could not be opened: \(openingError)")))
             } catch {
-                // A broken disk store must not crash application launch. The
-                // in-memory container keeps read-only/cache UI usable, while
-                // backup is explicitly disabled through `startupState` so an
-                // empty mapping can never be mistaken for a clean database.
-                let fallbackConfiguration = ModelConfiguration(
-                    schema: schema,
-                    isStoredInMemoryOnly: true,
-                    cloudKitDatabase: .none)
-                do {
-                    let container = try ModelContainer(
-                        for: schema,
-                        configurations: [fallbackConfiguration])
-                    return ContainerBootstrap(
-                        container: container,
-                        state: .persistentStoreUnavailable(error.localizedDescription))
-                } catch {
-                    // If SwiftData cannot even construct the current schema in
-                    // memory, no storage-backed feature can run safely.
-                    fatalError("Unable to create the SwiftData model: \(error)")
-                }
+                return memoryFallback(schema: schema, error: error)
             }
+        }
+    }
+
+    private static func memoryFallback(schema: Schema, error: Error) -> ContainerBootstrap {
+        let configuration = ModelConfiguration(schema: schema,
+            isStoredInMemoryOnly: true, cloudKitDatabase: .none)
+        do {
+            let container = try ModelContainer(for: schema, configurations: [configuration])
+            return ContainerBootstrap(container: container,
+                state: .persistentStoreUnavailable(error.localizedDescription))
+        } catch {
+            fatalError("Unable to create the SwiftData model: \(error)")
+        }
+    }
+
+    private static func hasVisibilityRecoveryMarker(at url: URL, fileManager: FileManager) throws -> Bool {
+        do {
+            _ = try fileManager.attributesOfItem(atPath: url.path)
+            return true
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile || error.code == .fileNoSuchFile {
+            return false
         }
     }
 
@@ -463,6 +488,19 @@ final class SwiftDataManager {
         publishRestorations(Array(activeIDs))
         assetMutationRevision = UUID()
         WidgetSnapshotExporter.clear()
+        try completeVisibilityRecovery()
+    }
+
+    private func completeVisibilityRecovery() throws {
+        guard requiresVisibilityRefresh else { return }
+        if try Self.hasVisibilityRecoveryMarker(at: visibilityRecoveryURL, fileManager: fileManager) {
+            let values = try visibilityRecoveryURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+            guard values.isRegularFile == true, values.isSymbolicLink != true else {
+                throw CocoaError(.fileWriteInvalidFileName)
+            }
+            try fileManager.removeItem(at: visibilityRecoveryURL)
+        }
+        requiresVisibilityRefresh = false
     }
 
     private func saveWithTimelineVisibility(
@@ -875,6 +913,7 @@ final class SwiftDataManager {
     /// journal JSON kecil di luar SQLite. Jika cache SQLite rusak, store boleh
     /// dibangun ulang dan mapping upload dipulihkan dari journal ini.
     private func reconcileBackupRecordJournalAfterStartup() {
+        if requiresVisibilityRefresh { WidgetSnapshotExporter.clear() }
         guard startupState.isPersistentStoreAvailable else {
             WidgetSnapshotExporter.clear()
             return

@@ -9,6 +9,7 @@ struct AssetVisibilityPolicy {
         let removedIDs: Set<String>
         let deletedIDs: Set<String>
         let mappingRevision: UUID
+        let isVisibilityStateAvailable: Bool
     }
 
     let scope: Scope
@@ -51,11 +52,12 @@ struct AssetVisibilityPolicy {
     var state: State {
         State(suppressedIDs: suppressedIDs, removedIDs: removed.excludedIDs(scope: removalScope),
               deletedIDs: deletedIDs,
-              mappingRevision: dataManager.backupMappingRevision)
+              mappingRevision: dataManager.backupMappingRevision,
+              isVisibilityStateAvailable: dataManager.isVisibilityStateAvailable)
     }
 
     func allows(id: String) -> Bool {
-        guard scope == .locked || dataManager.isPersistentStoreAvailable else { return false }
+        guard scope == .locked || dataManager.isVisibilityStateAvailable else { return false }
         let isLocal = LocalPhotoLibrary.isLocal(id)
         let suppressed = suppressedIDs
         if isLocal {
@@ -75,7 +77,7 @@ struct AssetVisibilityPolicy {
     }
 
     func filter(_ assets: [AssetLite]) -> [AssetLite] {
-        guard scope == .locked || dataManager.isPersistentStoreAvailable else { return [] }
+        guard scope == .locked || dataManager.isVisibilityStateAvailable else { return [] }
         let current = state
         let suppressed = current.suppressedIDs
         let deleted = current.deletedIDs

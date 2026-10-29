@@ -16,7 +16,7 @@ class SyncRepository {
 
     @MainActor
     func deltaSync() async throws {
-        try await sync(reset: false)
+        try await sync(reset: dataManager.requiresVisibilityRefresh)
     }
 
     /// Delta batches become visible as they arrive. Full snapshots stay in a

@@ -127,6 +127,73 @@ final class AssetVisibilityPersistenceTests: XCTestCase {
         }
     }
 
+    func testCorruptPrimaryRecoveryCannotExposeALockMissingFromAnOlderJournal() throws {
+        for previousVisibility in ["archive", "timeline"] {
+            let fixture = try VisibilityStoreFixture()
+            defer { fixture.cleanup() }
+            let id = UUID().uuidString
+            let unmappedID = UUID().uuidString
+            try {
+                let fileManager = VisibilityJournalFileManager()
+                let store = fixture.open(fileManager: fileManager)
+                try store.linkDeviceAsset(localIdentifier: "local-\(id)", to: id)
+                try store.setAssetVisibility([id, unmappedID], to: previousVisibility)
+                let journal = try Data(contentsOf: fixture.journalURL)
+                fileManager.rejectWrites = true
+                XCTAssertThrowsError(try store.setAssetVisibility([id, unmappedID], to: "locked"))
+                XCTAssertEqual(Set(try store.modelContext.fetch(FetchDescriptor<PrivateAssetRecord>()).map(\.id)),
+                    [id, unmappedID])
+                XCTAssertEqual(try Data(contentsOf: fixture.journalURL), journal)
+            }()
+            try Data("not a SQLite database".utf8).write(to: fixture.storeURL, options: .atomic)
+
+            let recovered = fixture.open()
+
+            guard case .recovered(let quarantine, let restoredCount, _) = recovered.startupState else {
+                return XCTFail("The corrupt primary must be quarantined and rebuilt")
+            }
+            XCTAssertNotNil(quarantine)
+            XCTAssertEqual(restoredCount, 1)
+            XCTAssertTrue(recovered.isPersistentStoreAvailable)
+            XCTAssertFalse(recovered.isVisibilityStateAvailable)
+            XCTAssertEqual(recovered.serverAssetIDsByLocalIdentifier()["local-\(id)"], id)
+            let policy = AssetVisibilityPolicy(dataManager: recovered, removed: RemovedAssets())
+            XCTAssertFalse(policy.allows(id: id), previousVisibility)
+            XCTAssertFalse(policy.allows(id: "device:local-\(id)"), previousVisibility)
+            XCTAssertFalse(policy.allows(id: unmappedID), previousVisibility)
+            XCTAssertFalse(policy.allows(id: "device:unmapped-\(unmappedID)"), previousVisibility)
+            XCTAssertTrue(policy.filter([AssetLite(makeTestAsset(id: id)),
+                AssetLite(makeTestAsset(id: "device:local-\(id)")),
+                AssetLite(makeTestAsset(id: unmappedID))]).isEmpty, previousVisibility)
+            let reopened = fixture.open()
+            XCTAssertTrue(reopened.isPersistentStoreAvailable)
+            XCTAssertFalse(reopened.isVisibilityStateAvailable)
+            XCTAssertFalse(AssetVisibilityPolicy(dataManager: reopened).allows(id: unmappedID))
+        }
+    }
+
+    func testFailedRecoveryMarkerCreationPreservesTheCorruptPrimaryAndJournal() throws {
+        let fixture = try VisibilityStoreFixture()
+        defer { fixture.cleanup() }
+        try {
+            let store = fixture.open()
+            try store.linkDeviceAsset(localIdentifier: "local", to: "server")
+        }()
+        let journal = try Data(contentsOf: fixture.journalURL)
+        let corrupt = Data("not a SQLite database".utf8)
+        try corrupt.write(to: fixture.storeURL, options: .atomic)
+        let files = VisibilityMarkerFileManager(blockedParent: fixture.directory)
+
+        let fallback = fixture.open(fileManager: files)
+
+        XCTAssertFalse(fallback.isPersistentStoreAvailable)
+        XCTAssertFalse(fallback.isVisibilityStateAvailable)
+        XCTAssertEqual(try Data(contentsOf: fixture.storeURL), corrupt)
+        XCTAssertEqual(try Data(contentsOf: fixture.journalURL), journal)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.directory.appendingPathComponent("RecoveredStores").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.storeURL.appendingPathExtension("visibility-recovery").path))
+    }
+
     func testConfirmedLockOverridesOlderArchiveJournalWhenJournalWriteFails() throws {
         for cached in [false, true] {
             let fixture = try VisibilityStoreFixture()
@@ -277,5 +344,17 @@ private final class VisibilityJournalFileManager: FileManager, @unchecked Sendab
         if rejectWrites { throw CocoaError(.fileWriteNoPermission) }
         try super.createDirectory(at: url, withIntermediateDirectories: withIntermediateDirectories,
             attributes: attributes)
+    }
+}
+
+private final class VisibilityMarkerFileManager: FileManager, @unchecked Sendable {
+    let blockedParent: URL
+
+    init(blockedParent: URL) { self.blockedParent = blockedParent }
+
+    override func createDirectory(at url: URL, withIntermediateDirectories: Bool,
+                                 attributes: [FileAttributeKey: Any]? = nil) throws {
+        if url.standardizedFileURL == blockedParent.standardizedFileURL { throw CocoaError(.fileWriteNoPermission) }
+        try super.createDirectory(at: url, withIntermediateDirectories: withIntermediateDirectories, attributes: attributes)
     }
 }
