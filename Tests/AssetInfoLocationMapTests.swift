@@ -48,6 +48,31 @@ final class AssetInfoLocationMapTests: XCTestCase {
         XCTAssertTrue(findMap(in: try XCTUnwrap(window)) === map, "The existing map must accept the fresh metadata")
     }
 
+    func testZeroLatitudeAndLongitudeDisplayTheirMapAndAnnotation() async throws {
+        let origin = CLLocationCoordinate2D(latitude: 0, longitude: 0)
+        let input = LocationPanelInput(detail: photo("origin", at: origin))
+        try mount(detail: { input.detail })
+
+        let map = try await mountedMap(at: origin)
+
+        XCTAssertTrue(hasAnnotation(map, at: origin))
+    }
+
+    func testLocationEditorStartsAtSavedZeroLatitudeAndLongitude() async throws {
+        let origin = CLLocationCoordinate2D(latitude: 0, longitude: 0)
+        let detail = photo("origin", at: origin)
+        let coordinate = try XCTUnwrap(AssetDetailView.coordinate(for: detail),
+            "A saved location at 0/0 must remain available to the editor")
+        XCTAssertEqual(coordinate.latitude, 0)
+        XCTAssertEqual(coordinate.longitude, 0)
+        try mount(AssetLocationEditor(initialCoordinate: coordinate) { _ in })
+
+        try await waitUntil("The editor's map starts at the saved 0/0 location") {
+            guard let map = self.findMap(in: self.window) else { return false }
+            return self.isCentered(map, at: origin)
+        }
+    }
+
     func testUnrelatedMetadataPreservesPanAndAnotherPhotoRecentersEvenAtTheSameLocation() async throws {
         let input = LocationPanelInput(detail: photo("first", at: barcelona))
         try mount(detail: { input.detail })
@@ -104,11 +129,15 @@ final class AssetInfoLocationMapTests: XCTestCase {
     }
 
     private func mount(detail: @escaping () -> AssetResponseDTO?, expanded: @escaping () -> Bool = { true }) throws {
+        try mount(LocationPanelFixture(detail: detail, expanded: expanded))
+    }
+
+    private func mount<Content: View>(_ content: Content) throws {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         previousKeyWindow = scene.windows.first { $0.isKeyWindow }
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
-        window.rootViewController = UIHostingController(rootView: LocationPanelFixture(detail: detail, expanded: expanded)
+        window.rootViewController = UIHostingController(rootView: content
             .environment(MockSessionManager() as SessionManager))
         window.makeKeyAndVisible()
         window.layoutIfNeeded()
@@ -161,11 +190,12 @@ final class AssetInfoLocationMapTests: XCTestCase {
         XCTAssertTrue(condition(), message, file: file, line: line)
     }
 
-    private func photo(_ id: String, at coordinate: CLLocationCoordinate2D) -> AssetResponseDTO {
+    private func photo(_ id: String, at coordinate: CLLocationCoordinate2D,
+                       city: String? = nil, state: String? = nil, country: String? = nil) -> AssetResponseDTO {
         makeTestAsset(id: id, exifInfo: ExifDTO(make: nil, model: nil, exifImageWidth: nil,
             exifImageHeight: nil, orientation: nil, fileSizeInByte: nil, dateTimeOriginal: nil,
-            latitude: coordinate.latitude, longitude: coordinate.longitude, city: nil, state: nil,
-            country: nil, lensModel: nil, fNumber: nil, focalLength: nil, iso: nil, exposureTime: nil,
+            latitude: coordinate.latitude, longitude: coordinate.longitude, city: city, state: state,
+            country: country, lensModel: nil, fNumber: nil, focalLength: nil, iso: nil, exposureTime: nil,
             description: nil))
     }
 }

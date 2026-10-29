@@ -398,7 +398,7 @@ struct AssetDetailView: View {
     }
 
     private func locationEditor(_ target: AssetViewerState.Target) -> some View {
-        AssetLocationEditor(initialCoordinate: coordinate(for: target.detail)) { coordinate in
+        AssetLocationEditor(initialCoordinate: Self.coordinate(for: target.detail)) { coordinate in
             guard let serverID = target.serverID else { return }
             Task {
                 if await vm?.updateLocation(serverID, latitude: coordinate.latitude, longitude: coordinate.longitude) == true {
@@ -408,9 +408,8 @@ struct AssetDetailView: View {
         }
     }
 
-    private func coordinate(for detail: AssetResponseDTO?) -> CLLocationCoordinate2D? {
-        guard let exif = detail?.exifInfo, let lat = exif.latitude, let lon = exif.longitude,
-              lat != 0 || lon != 0 else { return nil }
+    static func coordinate(for detail: AssetResponseDTO?) -> CLLocationCoordinate2D? {
+        guard let exif = detail?.exifInfo, let lat = exif.latitude, let lon = exif.longitude else { return nil }
         return CLLocationCoordinate2D(latitude: lat, longitude: lon)
     }
 

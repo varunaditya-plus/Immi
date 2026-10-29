@@ -405,8 +405,7 @@ struct AssetInfoPanel: View {
 
     private var mapLocation: MapLocation? {
         guard let lat = detail.exifInfo?.latitude,
-              let lon = detail.exifInfo?.longitude,
-              lat != 0 || lon != 0 else { return nil }
+              let lon = detail.exifInfo?.longitude else { return nil }
         return MapLocation(assetID: detail.id, latitude: lat, longitude: lon)
     }
 
