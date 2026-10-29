@@ -595,7 +595,9 @@ struct AssetDetailView: View {
             // balik menggeser panelHeight dan memicu osilasi.
             onIntrinsicHeightChange: { newHeight in
                 guard !isPanelDragging, newHeight > 0 else { return }
+                let wasExpanded = isPanelAtMax
                 panelContentHeight = max(panelContentHeight, newHeight)
+                if wasExpanded { panelHeight = panelMaxHeight }
             },
             onScrollOffsetChange: { newOffset in
                 // Perubahan tinggi/posisi panel dapat memicu laporan geometry

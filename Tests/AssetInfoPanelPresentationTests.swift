@@ -41,6 +41,29 @@ final class AssetInfoPanelPresentationTests: XCTestCase {
         XCTAssertGreaterThan(firstPanel.bounds.height, 0)
     }
 
+    func testExpandedPanelRemainsScrollableWhenCaptionReflowsAfterResize() async throws {
+        let caption = "A long description of this photograph and the people and places we remember from our journey together."
+        let window = try showViewer(size: CGSize(width: 1000, height: 800), sizeClass: .regular,
+            caption: caption)
+        let panel = try await openPanel(in: window)
+        try await Task.sleep(for: .milliseconds(500))
+        let field = try XCTUnwrap(descendant(of: UITextView.self, in: window))
+        XCTAssertTrue(field.becomeFirstResponder())
+        try await waitUntil("The expanded panel scrolls") { panel.isScrollEnabled }
+        let wideHeaderHeight = field.bounds.height
+        resize(window, to: CGSize(width: 270, height: 800))
+        try await waitUntil("The caption wraps in the narrower window") {
+            field.bounds.height > wideHeaderHeight + 20
+        }
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertTrue(panel.isScrollEnabled, "A resized expanded panel must still allow scrolling and map interaction")
+    }
+
+    private func descendant<T: UIView>(of type: T.Type, in view: UIView) -> T? {
+        if let match = view as? T { return match }
+        return view.subviews.compactMap { descendant(of: type, in: $0) }.first
+    }
+
     private func checkResize(sizeClass: UserInterfaceSizeClass) async throws {
         let window = try showViewer(size: CGSize(width: 390, height: 844), sizeClass: sizeClass)
         let panel = try await openPanel(in: window)
@@ -57,12 +80,12 @@ final class AssetInfoPanelPresentationTests: XCTestCase {
         XCTAssertLessThanOrEqual(panel.bounds.height, 650 * 0.75 + 1)
     }
 
-    private func showViewer(size: CGSize, sizeClass: UserInterfaceSizeClass) throws -> UIWindow {
+    private func showViewer(size: CGSize, sizeClass: UserInterfaceSizeClass, caption: String? = nil) throws -> UIWindow {
         let detail = makeTestAsset(id: UUID().uuidString, exifInfo: ExifDTO(make: nil, model: nil,
             exifImageWidth: nil, exifImageHeight: nil, orientation: nil, fileSizeInByte: nil,
             dateTimeOriginal: nil, latitude: 41.3874, longitude: 2.1686, city: nil, state: nil,
             country: nil, lensModel: nil, fNumber: nil, focalLength: nil, iso: nil,
-            exposureTime: nil, description: nil))
+            exposureTime: nil, description: caption))
         snapshotIDs.append(detail.id)
         LocalSnapshot.save(detail, for: LocalSnapshot.Key.assetDetail(detail.id))
         let session = MockSessionManager()
