@@ -279,16 +279,17 @@ private struct MemoriesTimelineProvider: TimelineProvider {
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<MemoriesEntry>) -> Void) {
         let entry = currentEntry()
-        let nextMidnight = Calendar.current.startOfDay(for: Date()).addingTimeInterval(24 * 60 * 60)
-        completion(Timeline(entries: [entry], policy: .after(nextMidnight)))
+        let nextDay = WidgetCalendar.nextDay(after: entry.date)
+        completion(Timeline(entries: [entry], policy: nextDay.map(TimelineReloadPolicy.after) ?? .atEnd))
     }
 
     private func currentEntry() -> MemoriesEntry {
+        let now = Date()
         let snapshot = WidgetSnapshot.load()
-        let memory = Calendar.current.isDate(snapshot.generatedAt, inSameDayAs: Date())
+        let memory = Calendar.current.isDate(snapshot.generatedAt, inSameDayAs: now)
             ? snapshot.memories.first
             : nil
-        return MemoriesEntry(date: Date(), memory: memory)
+        return MemoriesEntry(date: now, memory: memory)
     }
 }
 
