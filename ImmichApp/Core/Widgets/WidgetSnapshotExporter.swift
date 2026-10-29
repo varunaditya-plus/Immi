@@ -209,7 +209,7 @@ enum WidgetSnapshotExporter {
         }
         let favorites = Album(
             id: favoritesID,
-            name: "Favorites",
+            name: String(localized: "Favorites"),
             assetCount: favoriteCount,
             imageNames: favoriteImageNames)
 

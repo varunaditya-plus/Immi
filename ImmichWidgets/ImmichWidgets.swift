@@ -52,7 +52,7 @@ private struct WidgetSnapshot: Decodable {
 
     static let favorites = Album(
         id: widgetFavoritesID,
-        name: "Favorites",
+        name: String(localized: "Favorites"),
         assetCount: 0,
         imageNames: [])
 
@@ -90,10 +90,11 @@ struct AlbumWidgetEntity: AppEntity, Identifiable {
 
     static let favorites = AlbumWidgetEntity(
         id: widgetFavoritesID,
-        name: "Favorites")
+        name: String(localized: "Favorites"))
 
     var displayRepresentation: DisplayRepresentation {
-        DisplayRepresentation(title: "\(name)")
+        id == widgetFavoritesID ? DisplayRepresentation(title: "Favorites")
+            : DisplayRepresentation(title: "\(name)")
     }
 }
 
@@ -150,7 +151,7 @@ private struct AlbumTimelineProvider: AppIntentTimelineProvider {
             date: Date(),
             album: .init(
                 id: widgetFavoritesID,
-                name: "Favorites",
+                name: String(localized: "Favorites"),
                 assetCount: 42,
                 imageNames: []),
             imageName: nil)
@@ -232,7 +233,8 @@ private struct AlbumWidgetView: View {
                     .font(.caption2.weight(.semibold))
                     .textCase(.uppercase)
                     .opacity(0.82)
-                Text(entry.album?.name ?? String(localized: "Open SelfPhotos"))
+                Text(entry.album?.id == widgetFavoritesID ? String(localized: "Favorites")
+                    : entry.album?.name ?? String(localized: "Open SelfPhotos"))
                     .font(family == .systemSmall ? .headline : .title3.bold())
                     .lineLimit(2)
                 if let count = entry.album?.assetCount {
@@ -265,8 +267,10 @@ private struct MemoriesTimelineProvider: TimelineProvider {
         MemoriesEntry(
             date: Date(),
             memory: .init(
-                id: "preview", title: "5 years ago",
-                subtitle: "August 9, 2021", imageName: nil))
+                id: "preview", title: String(localized: "\(5) years ago"),
+                subtitle: (Calendar(identifier: .gregorian).date(
+                    from: DateComponents(year: 2021, month: 8, day: 9)) ?? .now)
+                    .formatted(date: .long, time: .omitted), imageName: nil))
     }
 
     func getSnapshot(in context: Context, completion: @escaping (MemoriesEntry) -> Void) {

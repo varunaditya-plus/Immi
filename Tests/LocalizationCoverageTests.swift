@@ -11,7 +11,8 @@ final class LocalizationCoverageTests: XCTestCase {
 
     func testEveryCatalogEntryHasAllSupportedTranslationsAndValidFormatArguments() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-        for path in ["ImmichApp/Resources/Localizable.xcstrings", "SelfPhotosShareExtension/Localizable.xcstrings"] {
+        for path in ["ImmichApp/Resources/Localizable.xcstrings", "ImmichWidgets/Localizable.xcstrings",
+                     "SelfPhotosShareExtension/Localizable.xcstrings"] {
             let data = try Data(contentsOf: root.appendingPathComponent(path))
             let catalog = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
             let entries = try XCTUnwrap(catalog["strings"] as? [String: [String: Any]])
@@ -181,6 +182,16 @@ final class LocalizationCoverageTests: XCTestCase {
             let french = try localizedBundle(shared, language: "fr")
             let error = french.localizedString(forKey: "No supported photos or videos were shared.", value: nil, table: nil)
             XCTAssertTrue(error.contains("photo") && error.contains("vidéo"), error)
+        }
+    }
+
+    func testWidgetContainsItsOwnCompiledTranslations() throws {
+        let plugins = try XCTUnwrap(Bundle.main.builtInPlugInsURL)
+        let widget = try XCTUnwrap(Bundle(url: plugins.appendingPathComponent("ImmichWidgets.appex")))
+        for language in languages {
+            let bundle = try localizedBundle(widget, language: language)
+            assertCompiled("Favorites", in: bundle)
+            assertCompiled("%lld years ago", in: bundle)
         }
     }
 
