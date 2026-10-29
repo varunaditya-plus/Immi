@@ -1821,21 +1821,6 @@ private final class ShareItemSource: NSObject, UIActivityItemSource {
     }
 }
 
-struct VideoPlayerView: View {
-    let assetId: String
-    @Environment(SessionManager.self) private var session
-
-    var body: some View {
-        VStack {
-            Text("Video - Coming Soon")
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.black)
-    }
-}
-
-
 #Preview {
     let asset = AssetLite(id: "test-123", isVideo: false, ratio: 1.0, thumbhash: nil, createdAt: Date())
     AssetDetailView(currentAsset: asset, assets: [asset])
