@@ -69,7 +69,6 @@ final class SettingsViewModel {
     var serverInfo: ServerAboutDTO?
     var assetStats: AssetStatsDTO?
     var latestVersion: String?
-    var cacheSize = 0
 
     /// Fase yang HANYA menyangkut data server.
     ///
@@ -166,15 +165,6 @@ final class SettingsViewModel {
 
     func displayedServerVersion(fallback: ServerVersionDTO?) -> String? {
         serverInfo?.version ?? fallback?.displayName
-    }
-
-    func refreshCacheSize() async {
-        cacheSize = await ImageCache.shared.diskCacheSize()
-    }
-
-    func clearCache() async {
-        await ImageCache.shared.clear()
-        await refreshCacheSize()
     }
 
     func updateTheme(_ theme: String) {
