@@ -302,11 +302,7 @@ struct SettingsView: View {
     }
 
     private func handleBackupRowTipAction(_ action: Tips.Action) {
-        switch action.id {
-        case "open": openBackup()
-        case "skip": backupSetupJourney.skip()
-        default: break
-        }
+        if action.id == "open" { openBackup() }
     }
 
     private func openBackup() {

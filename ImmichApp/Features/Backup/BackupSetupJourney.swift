@@ -49,7 +49,7 @@ final class BackupSetupJourney {
         }
 
         // Transisi dari "ada album" ke "kosong" adalah kebutuhan setup baru,
-        // jadi Skip dari keadaan kosong sebelumnya tidak boleh menahannya.
+        // jadi penyelesaian sebelumnya tidak boleh menahannya.
         if lastHadSelectedAlbums == true {
             suppressedForCurrentEmptySelection = false
         }
@@ -63,8 +63,6 @@ final class BackupSetupJourney {
         activate(at: .backupRow)
     }
 
-    /// Menutup popover tidak sama dengan Skip. Highlight tetap ada, tetapi
-    /// popover tidak langsung memantul terbuka lagi di sesi yang sama.
     func dismissCoachmark() {
         isCoachmarkVisible = false
     }
@@ -85,10 +83,6 @@ final class BackupSetupJourney {
     func finish() {
         suppressedForCurrentEmptySelection = !hasSelectedAlbums()
         deactivate()
-    }
-
-    func skip() {
-        finish()
     }
 
     private func activate(at step: Step) {
@@ -122,7 +116,6 @@ struct BackupSetupProfileTip: Tip {
 
     var actions: [Tips.Action] {
         Tips.Action(id: "setup", title: "Set Up Backup")
-//        Tips.Action(id: "skip", title: "Skip")
     }
 }
 
@@ -232,11 +225,7 @@ struct JourneyProfileButton: View {
     }
 
     private func handleTipAction(_ action: Tips.Action) {
-        switch action.id {
-        case "setup": proceedToSettings()
-        case "skip": journey.skip()
-        default: break
-        }
+        if action.id == "setup" { proceedToSettings() }
     }
 
     private func proceedToSettings() {
@@ -284,6 +273,5 @@ struct BackupSetupRowTip: Tip {
 
     var actions: [Tips.Action] {
         Tips.Action(id: "open", title: "Open Backup")
-//        Tips.Action(id: "skip", title: "Skip")
     }
 }

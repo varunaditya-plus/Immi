@@ -47,10 +47,10 @@ final class BackupSetupJourneyTests: XCTestCase {
         assertCoachmarkBecomesVisibleWhenReady(journey)
     }
 
-    func testSkipSuppressesRepeatedRefreshOnlyForCurrentEmptySelection() {
+    func testCompletionSuppressesRepeatedRefreshOnlyForCurrentEmptySelection() {
         let journey = makeJourney()
         journey.refreshForAlbumSelection()
-        journey.skip()
+        journey.finish()
 
         journey.refreshForAlbumSelection()
 
@@ -69,7 +69,7 @@ final class BackupSetupJourneyTests: XCTestCase {
     func testNewAppSessionOffersTipAgainWhenAlbumsRemainEmpty() {
         let firstSession = makeJourney()
         firstSession.refreshForAlbumSelection()
-        firstSession.skip()
+        firstSession.finish()
 
         let nextSession = makeJourney()
         nextSession.refreshForAlbumSelection()
@@ -114,11 +114,11 @@ final class BackupSetupJourneyTests: XCTestCase {
         assertCoachmarkBecomesVisibleWhenReady(journey)
     }
 
-    func testCallbackAfterSkipDoesNotPresentCoachmark() {
+    func testCallbackAfterCompletionDoesNotPresentCoachmark() {
         let journey = makeJourney()
         journey.refreshForAlbumSelection()
         let request = journey.presentationRequest
-        journey.skip()
+        journey.finish()
 
         journey.markTipReady(for: .profile, request: request)
 
