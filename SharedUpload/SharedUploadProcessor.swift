@@ -33,6 +33,8 @@ final class SharedUploadProcessor {
         let total = batch.items.count { $0.state.isReadyForUpload }
         var current = 0
         var cleanupError: Error?
+        do { try await store.removeUnreferencedFiles(in: batch) }
+        catch { cleanupError = error }
 
         for index in batch.items.indices {
             try Task.checkCancellation()

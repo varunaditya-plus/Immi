@@ -45,6 +45,8 @@ final class SharedUploadSubmission {
         let batch = SharedUploadBatch(id: batchID, owner: owner, createdAt: .now, items: items)
         try await store.save(batch)
         isCommitted = true
+        // Keep the draft claim through cleanup; recovery retries a failed cleanup.
+        try? await store.removeUnreferencedFiles(in: batch)
         draftClaim = nil
     }
 

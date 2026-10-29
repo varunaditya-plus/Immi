@@ -47,6 +47,139 @@ final class SharedUploadSubmissionTests: XCTestCase {
         XCTAssertEqual(batches.first?.items, [fixture.item])
     }
 
+    func testAdmissionReclaimsUnselectedOriginalsWhilePreservingFailedSelectedWork() async throws {
+        let fixture = try await Fixture()
+        defer { fixture.cleanup() }
+        let unselected = fixture.directory.appendingPathComponent("unselected.mov")
+        try Data("unselected original".utf8).write(to: unselected)
+        let otherID = UUID()
+        let otherDirectory = try await fixture.store.makeBatchDirectory(id: otherID)
+        let otherFile = otherDirectory.appendingPathComponent("other.jpg")
+        let otherSource = Data("other source".utf8)
+        try otherSource.write(to: otherFile)
+
+        XCTAssertTrue(fixture.submission.begin())
+        try await fixture.submission.admit(owner: fixture.owner, items: [fixture.item])
+        fixture.submission.finish()
+        XCTAssertTrue(fixture.submission.isCommitted)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: unselected.path),
+            "An imported original that was not selected has no durable upload intent")
+        XCTAssertEqual(try Data(contentsOf: fixture.sourceURL), fixture.source)
+
+        let outcome = try await SharedUploadProcessor(store: fixture.store).process(
+            batchID: fixture.submission.batchID, owner: fixture.owner,
+            upload: { _, _, _ in throw SharedUploadClientError.server(status: 400, message: "Rejected photo") })
+        guard case .finished(let remaining) = outcome else {
+            return XCTFail("The released draft claim must allow processing")
+        }
+        XCTAssertEqual(remaining, 1)
+        let reopened = SharedUploadStore(rootURL: fixture.rootURL)
+        let saved = try await reopened.batch(id: fixture.submission.batchID, owner: fixture.owner)
+        let batch = try XCTUnwrap(saved)
+        XCTAssertEqual(batch.items.count, 1)
+        XCTAssertEqual(batch.items.first?.id, fixture.item.id)
+        XCTAssertEqual(batch.items.first?.state, .failed)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.manifestURL.path))
+        XCTAssertEqual(try Data(contentsOf: fixture.sourceURL), fixture.source)
+        XCTAssertEqual(try Data(contentsOf: otherFile), otherSource)
+        let closed = try await fixture.submission.close()
+        XCTAssertTrue(closed)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.manifestURL.path))
+        XCTAssertEqual(try Data(contentsOf: fixture.sourceURL), fixture.source)
+    }
+
+    func testAdmissionPreservesDirectoriesSymlinksAndLockFiles() async throws {
+        let fixture = try await Fixture()
+        defer { fixture.cleanup() }
+        let nested = fixture.directory.appendingPathComponent("nested", isDirectory: true)
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        let nestedFile = nested.appendingPathComponent("nested.jpg")
+        try Data("nested source".utf8).write(to: nestedFile)
+        let outside = fixture.rootURL.appendingPathComponent("outside.jpg")
+        try Data("outside source".utf8).write(to: outside)
+        let link = fixture.directory.appendingPathComponent("outside-link.jpg")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: outside)
+        let lock = fixture.directory.appendingPathComponent(".other.lock")
+        try Data("lock file".utf8).write(to: lock)
+
+        XCTAssertTrue(fixture.submission.begin())
+        try await fixture.submission.admit(owner: fixture.owner, items: [fixture.item])
+        fixture.submission.finish()
+
+        XCTAssertEqual(try Data(contentsOf: fixture.sourceURL), fixture.source)
+        XCTAssertEqual(try Data(contentsOf: nestedFile), Data("nested source".utf8))
+        XCTAssertEqual(try Data(contentsOf: outside), Data("outside source".utf8))
+        XCTAssertTrue(try link.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink == true)
+        XCTAssertEqual(try Data(contentsOf: lock), Data("lock file".utf8))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.manifestURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.directory.appendingPathComponent(".processing.lock").path))
+    }
+
+    func testFailedUnselectedCleanupRecoversWithoutRetryingATerminalUpload() async throws {
+        let files = FaultingFileManager()
+        let fixture = try await Fixture(fileManager: files)
+        defer { fixture.cleanup() }
+        let unselected = fixture.directory.appendingPathComponent("unselected.mov")
+        try Data("unselected source".utf8).write(to: unselected)
+        XCTAssertTrue(fixture.submission.begin())
+        files.failure = .remove
+        try await fixture.submission.admit(owner: fixture.owner, items: [fixture.item])
+        fixture.submission.finish()
+        XCTAssertTrue(fixture.submission.isCommitted)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: unselected.path))
+
+        do {
+            _ = try await SharedUploadProcessor(store: fixture.store).process(
+                batchID: fixture.submission.batchID, owner: fixture.owner,
+                upload: { _, _, _ in throw SharedUploadClientError.server(status: 400, message: "Rejected") })
+            XCTFail("Failed file cleanup must remain visible after the upload checkpoint")
+        } catch {
+            XCTAssertEqual((error as NSError).code, CocoaError.fileWriteNoPermission.rawValue)
+        }
+        XCTAssertEqual(try Data(contentsOf: fixture.sourceURL), fixture.source)
+        let failed = try await fixture.store.batch(id: fixture.submission.batchID, owner: fixture.owner)
+        XCTAssertEqual(failed?.items.first?.state, .failed)
+
+        files.failure = nil
+        let reopened = SharedUploadStore(rootURL: fixture.rootURL)
+        let outcome = try await SharedUploadProcessor(store: reopened).process(
+            batchID: fixture.submission.batchID, owner: fixture.owner,
+            upload: { _, _, _ in XCTFail("Cleaning unused originals must not retry a terminal upload") })
+
+        XCTAssertEqual(outcome, .finished(remaining: 1))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: unselected.path))
+        XCTAssertEqual(try Data(contentsOf: fixture.sourceURL), fixture.source)
+        let retained = try await reopened.batch(id: fixture.submission.batchID, owner: fixture.owner)
+        XCTAssertEqual(retained, failed)
+    }
+
+    func testUnselectedCleanupKeepsTheAdmissionClaimUntilFilesAreRemoved() async throws {
+        let files = HeldRemoveFileManager()
+        let fixture = try await Fixture(fileManager: files)
+        defer { fixture.cleanup() }
+        let unselected = fixture.directory.appendingPathComponent("unselected.mov")
+        try Data("unselected source".utf8).write(to: unselected)
+        XCTAssertTrue(fixture.submission.begin())
+        files.holdNextRemove()
+        let admission = Task { try await fixture.submission.admit(owner: fixture.owner, items: [fixture.item]) }
+        await fulfillment(of: [files.started], timeout: 2)
+        defer { files.release.signal() }
+        let competitor = SharedUploadStore(rootURL: fixture.rootURL)
+        let whileCleaning = try await competitor.claimBatch(id: fixture.submission.batchID)
+        XCTAssertNil(whileCleaning, "Another processor must not create upload bodies while admission is pruning files")
+        XCTAssertTrue(fixture.submission.isCommitted)
+        XCTAssertEqual(try Data(contentsOf: fixture.sourceURL), fixture.source)
+
+        files.release.signal()
+        try await admission.value
+        fixture.submission.finish()
+        let afterCleaning = try await competitor.claimBatch(id: fixture.submission.batchID)
+        XCTAssertNotNil(afterCleaning)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: unselected.path))
+        XCTAssertEqual(try Data(contentsOf: fixture.sourceURL), fixture.source)
+        withExtendedLifetime(afterCleaning) {}
+    }
+
     func testSynchronousBeginRejectsAnotherSubmitAndCloseUntilProcessingFinishes() async throws {
         let fixture = try await Fixture()
         defer { fixture.cleanup() }
@@ -75,6 +208,8 @@ final class SharedUploadSubmissionTests: XCTestCase {
         let fileManager = FaultingFileManager()
         let fixture = try await Fixture(fileManager: fileManager)
         defer { fixture.cleanup() }
+        let unselected = fixture.directory.appendingPathComponent("unselected.mov")
+        try Data("unselected source".utf8).write(to: unselected)
         XCTAssertTrue(fixture.submission.begin())
         fileManager.failure = .create
 
@@ -91,6 +226,7 @@ final class SharedUploadSubmissionTests: XCTestCase {
         let stillClaimed = try await competitor.claimBatch(id: fixture.submission.batchID)
         XCTAssertNil(stillClaimed, "A failed admission must remain protected as an active draft")
         XCTAssertEqual(try? Data(contentsOf: fixture.sourceURL), fixture.source)
+        XCTAssertEqual(try Data(contentsOf: unselected), Data("unselected source".utf8))
         XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.manifestURL.path))
 
         fileManager.failure = nil
@@ -320,5 +456,27 @@ private final class HeldCreateFileManager: FileManager, @unchecked Sendable {
             }
         }
         try super.createDirectory(at: url, withIntermediateDirectories: createIntermediates, attributes: attributes)
+    }
+}
+
+private final class HeldRemoveFileManager: FileManager, @unchecked Sendable {
+    let started = XCTestExpectation(description: "The committed draft is pruning an unselected original")
+    let release = DispatchSemaphore(value: 0)
+    private let lock = NSLock()
+    private var shouldHold = false
+
+    func holdNextRemove() { lock.withLock { shouldHold = true } }
+
+    override func removeItem(at url: URL) throws {
+        let held = lock.withLock {
+            let held = shouldHold
+            shouldHold = false
+            return held
+        }
+        if held {
+            started.fulfill()
+            guard release.wait(timeout: .now() + 3) == .success else { throw CocoaError(.fileWriteUnknown) }
+        }
+        try super.removeItem(at: url)
     }
 }

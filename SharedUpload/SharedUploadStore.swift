@@ -248,6 +248,23 @@ actor SharedUploadStore {
         }
     }
 
+    func removeUnreferencedFiles(in batch: SharedUploadBatch) throws {
+        let directory = try batchDirectory(id: batch.id)
+        let values = try directory.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+        guard values.isDirectory == true, values.isSymbolicLink != true else {
+            throw SharedUploadStoreError.invalidFilename
+        }
+        let retained = try Set(batch.items.map { try fileURL(for: $0, batchID: batch.id).standardizedFileURL })
+        let files = try fileManager.contentsOfDirectory(at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey], options: [.skipsHiddenFiles])
+        for file in files where file.lastPathComponent != "manifest.json"
+            && !retained.contains(file.standardizedFileURL) {
+            let values = try file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+            guard values.isRegularFile == true, values.isSymbolicLink != true else { continue }
+            try fileManager.removeItem(at: file)
+        }
+    }
+
     func removeBatch(id: UUID) throws {
         let directory = try batchDirectory(id: id)
         if fileManager.fileExists(atPath: directory.path) {
