@@ -42,6 +42,91 @@ final class AssetVisibilityPersistenceTests: XCTestCase {
         XCTAssertEqual(fixture.open().privateAssetIDs, ["photo"])
     }
 
+    func testMemoryFallbackRetainsReadableJournalPrivacyWithoutRewritingIt() throws {
+        let fixture = try VisibilityStoreFixture()
+        defer { fixture.cleanup() }
+        let store = fixture.open()
+        let prefix = UUID().uuidString
+        let privateID = "\(prefix)-private"
+        let archiveID = "\(prefix)-archive"
+        let publicID = "\(prefix)-public"
+        for id in [privateID, archiveID, publicID] {
+            try store.linkDeviceAsset(localIdentifier: "local-\(id)", to: id)
+        }
+        try store.setAssetVisibility([privateID], to: "locked")
+        try store.setAssetVisibility([archiveID], to: "archive")
+        let persistentCollection = AssetVisibilityPolicy(dataManager: store, removed: RemovedAssets())
+        XCTAssertTrue(persistentCollection.allows(id: archiveID))
+        XCTAssertTrue(persistentCollection.allows(id: publicID))
+        let originalJournal = try Data(contentsOf: fixture.journalURL)
+        let blockedParent = fixture.directory.appendingPathComponent("not-a-directory")
+        try Data("blocked".utf8).write(to: blockedParent)
+
+        let fallback = SwiftDataManager(storeURL: blockedParent.appendingPathComponent("test.store"),
+            backupJournalURL: fixture.journalURL)
+        let collection = AssetVisibilityPolicy(dataManager: fallback, removed: RemovedAssets())
+        let timeline = AssetVisibilityPolicy(scope: .timeline, dataManager: fallback, removed: RemovedAssets())
+
+        guard case .persistentStoreUnavailable = fallback.startupState else {
+            return XCTFail("The blocked store must use the memory fallback")
+        }
+        XCTAssertFalse(fallback.isPersistentStoreAvailable)
+        let ids = [privateID, archiveID, publicID].flatMap { [$0, "device:local-\($0)"] }
+            + ["device:unmapped-\(prefix)"]
+        for id in ids {
+            XCTAssertFalse(collection.allows(id: id))
+            XCTAssertFalse(timeline.allows(id: id))
+        }
+        let assets = ids.map { AssetLite(makeTestAsset(id: $0)) }
+        XCTAssertTrue(collection.filter(assets).isEmpty)
+        XCTAssertTrue(timeline.filter(assets).isEmpty)
+        let unlocked = AssetVisibilityPolicy(scope: .locked, dataManager: fallback, removed: RemovedAssets())
+        XCTAssertTrue(unlocked.allows(id: privateID))
+        XCTAssertEqual(unlocked.filter([assets[0]]).map(\.id), [privateID])
+        XCTAssertEqual(try Data(contentsOf: fixture.journalURL), originalJournal)
+        XCTAssertThrowsError(try fallback.unlinkDeviceAsset(localIdentifier: "local-\(privateID)"))
+        XCTAssertNoThrow(try fallback.recordServerVisibility([makeTestAsset(id: publicID)]))
+        var observedPrivate = makeTestAsset(id: privateID)
+        observedPrivate.visibility = "locked"
+        XCTAssertThrowsError(try fallback.recordServerVisibility([observedPrivate]))
+        XCTAssertThrowsError(try fallback.setAssetVisibility([privateID], to: "timeline"))
+        let replacement = try FullSyncStaging()
+        XCTAssertThrowsError(try fallback.replaceSyncCache(with: replacement,
+            expectedVisibilityRevision: fallback.visibilityMutationRevision,
+            expectedAssetRevision: fallback.assetMutationRevision))
+        XCTAssertEqual(try Data(contentsOf: fixture.journalURL), originalJournal)
+    }
+
+    func testMemoryFallbackCannotTrustArchiveOrTimelineJournalAfterFailedLockWrite() throws {
+        for previousVisibility in ["archive", "timeline"] {
+            let fixture = try VisibilityStoreFixture()
+            defer { fixture.cleanup() }
+            let fileManager = VisibilityJournalFileManager()
+            let store = fixture.open(fileManager: fileManager)
+            let id = UUID().uuidString
+            try store.linkDeviceAsset(localIdentifier: "local-\(id)", to: id)
+            try store.setAssetVisibility([id], to: previousVisibility)
+            let originalJournal = try Data(contentsOf: fixture.journalURL)
+            fileManager.rejectWrites = true
+            XCTAssertThrowsError(try store.setAssetVisibility([id], to: "locked"))
+            XCTAssertEqual(try store.modelContext.fetch(FetchDescriptor<PrivateAssetRecord>()).map(\.id), [id])
+            XCTAssertEqual(try Data(contentsOf: fixture.journalURL), originalJournal)
+            let blockedParent = fixture.directory.appendingPathComponent("not-a-directory")
+            try Data("blocked".utf8).write(to: blockedParent)
+
+            let fallback = SwiftDataManager(storeURL: blockedParent.appendingPathComponent("test.store"),
+                backupJournalURL: fixture.journalURL)
+            let policy = AssetVisibilityPolicy(dataManager: fallback, removed: RemovedAssets())
+
+            XCTAssertFalse(fallback.isPersistentStoreAvailable)
+            XCTAssertFalse(policy.allows(id: id))
+            XCTAssertFalse(policy.allows(id: "device:local-\(id)"))
+            XCTAssertTrue(policy.filter([AssetLite(makeTestAsset(id: id)),
+                AssetLite(makeTestAsset(id: "device:local-\(id)"))]).isEmpty)
+            XCTAssertEqual(try Data(contentsOf: fixture.journalURL), originalJournal)
+        }
+    }
+
     func testConfirmedLockOverridesOlderArchiveJournalWhenJournalWriteFails() throws {
         for cached in [false, true] {
             let fixture = try VisibilityStoreFixture()

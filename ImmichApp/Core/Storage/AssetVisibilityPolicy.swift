@@ -55,6 +55,7 @@ struct AssetVisibilityPolicy {
     }
 
     func allows(id: String) -> Bool {
+        guard scope == .locked || dataManager.isPersistentStoreAvailable else { return false }
         let isLocal = LocalPhotoLibrary.isLocal(id)
         let suppressed = suppressedIDs
         if isLocal {
@@ -74,6 +75,7 @@ struct AssetVisibilityPolicy {
     }
 
     func filter(_ assets: [AssetLite]) -> [AssetLite] {
+        guard scope == .locked || dataManager.isPersistentStoreAvailable else { return [] }
         let current = state
         let suppressed = current.suppressedIDs
         let deleted = current.deletedIDs

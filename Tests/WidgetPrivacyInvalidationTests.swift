@@ -51,6 +51,28 @@ final class WidgetPrivacyInvalidationTests: XCTestCase {
         XCTAssertEqual(try imageNames(in: directory).count, 1)
     }
 
+    func testUnavailablePrivacyStoreClearsPublishedWidgetsAndCannotExportVisibleMetadata() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let images = directory.appendingPathComponent("Widgets/old-generation")
+        try FileManager.default.createDirectory(at: images, withIntermediateDirectories: true)
+        try Data([1]).write(to: images.appendingPathComponent("private.image"))
+        try Data("old snapshot".utf8).write(to: directory.appendingPathComponent("Widgets/snapshot.json"))
+        let blockedParent = directory.appendingPathComponent("not-a-directory")
+        try Data("blocked".utf8).write(to: blockedParent)
+        let store = SwiftDataManager(storeURL: blockedParent.appendingPathComponent("test.store"),
+            backupJournalURL: directory.appendingPathComponent("journal.json"))
+        let api = try makeAPI(assetID: UUID().uuidString)
+        XCTAssertFalse(store.isPersistentStoreAvailable)
+
+        await WidgetSnapshotExporter.refresh(api: api, imageAPI: api, container: directory,
+            selectedAlbumIDs: [], dataManager: store)
+
+        let thumbnailCount = await api.thumbnailCount.value
+        XCTAssertEqual(thumbnailCount, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("Widgets").path))
+    }
+
     func testCurrentThumbnailStillPublishesReferencedImageBytes() async throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

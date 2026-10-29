@@ -44,6 +44,10 @@ enum WidgetSnapshotExporter {
         dataManager: SwiftDataManager? = nil
     ) async {
         let dataManager = dataManager ?? .shared
+        guard dataManager.isPersistentStoreAvailable else {
+            clear(container: container)
+            return
+        }
         let isEligible: (String) -> Bool = { id in
             !dataManager.nonTimelineAssetIDs.contains(id)
                 && !RemovedAssets.shared.ids.contains(id)

@@ -342,6 +342,9 @@ final class SwiftDataManager {
         expectedAssetRevision: UUID
     ) throws {
         try Task.checkCancellation()
+        guard startupState.isPersistentStoreAvailable else {
+            throw LocalDatabaseMaintenanceError.persistentStoreUnavailable
+        }
         guard expectedVisibilityRevision == visibilityMutationRevision,
               expectedAssetRevision == assetMutationRevision else {
             throw CancellationError()
@@ -477,6 +480,9 @@ final class SwiftDataManager {
     private func saveVisibility(
         _ updates: [String: String], in context: ModelContext, save: () throws -> Void
     ) throws {
+        guard startupState.isPersistentStoreAvailable else {
+            throw LocalDatabaseMaintenanceError.persistentStoreUnavailable
+        }
         var nonTimeline = nonTimelineAssetIDs
         var archived = archivedAssetIDs
         for (id, visibility) in updates {
@@ -869,7 +875,10 @@ final class SwiftDataManager {
     /// journal JSON kecil di luar SQLite. Jika cache SQLite rusak, store boleh
     /// dibangun ulang dan mapping upload dipulihkan dari journal ini.
     private func reconcileBackupRecordJournalAfterStartup() {
-        guard startupState.isPersistentStoreAvailable else { return }
+        guard startupState.isPersistentStoreAvailable else {
+            WidgetSnapshotExporter.clear()
+            return
+        }
 
         do {
             let hiddenRows = try modelContext.fetch(FetchDescriptor<CachedAsset>(
