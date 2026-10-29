@@ -297,7 +297,8 @@ final class AlbumListConsistencyTests: XCTestCase {
         old.complete(.success([album("album", name: "Personal")]))
         await load.value
 
-        XCTAssertEqual(model.sharedAlbums.map(\.id), ["album"])
+        XCTAssertEqual(model.albums.map(\.id), ["album"])
+        XCTAssertEqual(model.albums.first?.shared, true)
         XCTAssertEqual(model.albums.first?.albumName, "Shared")
         XCTAssertEqual(cached().first?.shared, true)
         XCTAssertEqual(driver.listCalls, 2)
@@ -327,8 +328,8 @@ final class AlbumListConsistencyTests: XCTestCase {
         XCTAssertTrue(accepted)
         XCTAssertTrue(changed.didPublish)
         XCTAssertNil(model.actionError, "A failed read must not report that the accepted sharing request failed")
-        XCTAssertEqual(model.sharedAlbums.map(\.id), ["album"])
-        XCTAssertTrue(model.myAlbums.isEmpty)
+        XCTAssertEqual(model.albums.map(\.id), ["album"])
+        XCTAssertEqual(model.albums.first?.shared, true)
         XCTAssertEqual(model.albums.first?.albumName, "Kept name")
         XCTAssertEqual(model.albums.first?.description, "Kept description")
         XCTAssertEqual(model.albums.first?.assetCount, 8)

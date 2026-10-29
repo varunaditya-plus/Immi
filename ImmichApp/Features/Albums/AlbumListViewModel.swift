@@ -236,12 +236,4 @@ final class AlbumListViewModel {
     func retry() async {
         await loadAlbums()
     }
-
-    var myAlbums: [AlbumResponseDTO] {
-        albums.filter { !$0.shared }
-    }
-
-    var sharedAlbums: [AlbumResponseDTO] {
-        albums.filter { $0.shared }
-    }
 }

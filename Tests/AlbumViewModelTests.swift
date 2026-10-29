@@ -60,9 +60,8 @@ final class AlbumListViewModelTests: XCTestCase {
 
         await viewModel.loadAlbums()
 
-        XCTAssertEqual(viewModel.albums.count, 2)
-        XCTAssertEqual(viewModel.myAlbums.count, 1)
-        XCTAssertEqual(viewModel.sharedAlbums.count, 1)
+        XCTAssertEqual(viewModel.albums.map(\.id), ["1", "2"])
+        XCTAssertEqual(viewModel.albums.map(\.shared), [false, true])
         if case .loaded = viewModel.phase {
             // Success
         } else {
@@ -134,19 +133,6 @@ final class AlbumListViewModelTests: XCTestCase {
         await viewModel.deleteAlbum("1")
 
         XCTAssertEqual(viewModel.albums.count, 1)
-    }
-
-    func testAlbumFiltering() {
-        viewModel.albums = [
-            makeAlbum(id: "1", name: "My Album 1", assetCount: 5),
-            makeAlbum(id: "2", name: "My Album 2", assetCount: 3),
-            makeAlbum(id: "3", name: "Shared Album", shared: true, assetCount: 10),
-        ]
-
-        XCTAssertEqual(viewModel.myAlbums.count, 2)
-        XCTAssertEqual(viewModel.sharedAlbums.count, 1)
-        XCTAssertTrue(viewModel.myAlbums.allSatisfy { !$0.shared })
-        XCTAssertTrue(viewModel.sharedAlbums.allSatisfy { $0.shared })
     }
 
     func testApplyContentsUpdatesCountAndReplacesMissingCover() {
