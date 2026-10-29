@@ -23,7 +23,7 @@ final class OnboardingViewModel {
     /// Dipakai untuk menyembunyikan tab yang tidak berlaku — mis. server
     /// OAuth-only yang mematikan login kata sandi.
     var features: ServerFeaturesDTO?
-    var oauthButtonText = "Sign In with OAuth"
+    var oauthButtonText = String(localized: "Sign In with OAuth")
     private(set) var validatedServerText: String?
 
     private let session: SessionManager
@@ -93,7 +93,7 @@ final class OnboardingViewModel {
             let trimmedButtonText = configuredButtonText?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             oauthButtonText = trimmedButtonText.flatMap { $0.isEmpty ? nil : $0 }
-                ?? "Sign In with OAuth"
+                ?? String(localized: "Sign In with OAuth")
             features = compatibility.features
             validatedServerText = server
             validatedContext = context
@@ -171,7 +171,7 @@ final class OnboardingViewModel {
         validatedServerText = nil
         validatedContext = nil
         features = nil
-        oauthButtonText = "Sign In with OAuth"
+        oauthButtonText = String(localized: "Sign In with OAuth")
     }
 
     private func isCurrentAttempt(_ attempt: UUID, server: String) -> Bool {

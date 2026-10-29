@@ -45,7 +45,8 @@ final class LocalizationCoverageTests: XCTestCase {
             "Search returned an incomplete page. Please try again.", "Selects this item.",
             "Deselects this item.", "Opens the viewer.", "Shows this item in the viewer.",
             "Unable to play video. Try again.", "Unable to play Live Photo. Touch and hold to try again.",
-            "Automatic Backup Off", "Accessible Photos Backed Up", "Shared Uploads", "Upload Details"]
+            "Automatic Backup Off", "Accessible Photos Backed Up", "Shared Uploads", "Upload Details",
+            "Sign In with OAuth"]
         for language in languages {
             let bundle = try localizedBundle(Bundle.main, language: language)
             for key in keys { assertCompiled(key, in: bundle) }
