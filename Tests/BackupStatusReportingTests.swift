@@ -425,6 +425,45 @@ final class BackupStatusReportingTests: XCTestCase {
         }
     }
 
+    func testRemainingLivePhotosRequireCellularPermissionForBothResources() async throws {
+        for (photosAllowed, videosAllowed) in [(false, false), (true, false), (false, true), (true, true)] {
+            let fixture = try fixture(photos: ["live-photo"], livePhotoIDs: ["live-photo"],
+                cellularPhotos: photosAllowed, cellularVideos: videosAllowed)
+            await fixture.library.load()
+            fixture.service.refreshCounts()
+            let photo = try XCTUnwrap(fixture.library.photos.first)
+            let policy = BackupNetworkPolicy(isOnline: true, isExpensive: true,
+                cellularPhotos: photosAllowed, cellularVideos: videosAllowed)
+            let allowed = photosAllowed && videosAllowed
+
+            XCTAssertEqual(BackupUploadRequests(queue: fixture.queue).allowsCellular(for: photo, policy: policy), allowed)
+            XCTAssertEqual(fixture.service.cellularUploadStatus, allowed ? .allowed : .blocked)
+            let message = fixture.status.explanation(backup: fixture.service,
+                backgroundRefreshAvailable: true, isOnline: true, isExpensive: true).lowercased()
+            XCTAssertEqual(message.contains("wi-fi"), !allowed)
+        }
+    }
+
+    func testQueuedLivePhotoKeepsBothCellularRequirementsAfterItsStillIsMapped() async throws {
+        let fixture = try fixture(photos: ["manual-photo"], livePhotoIDs: ["manual-photo"],
+            cellularPhotos: true, cellularVideos: false, queueState: .queued, queueIntent: nil)
+        try fixture.map("manual-photo")
+        await fixture.library.load()
+        fixture.service.refreshCounts()
+
+        XCTAssertEqual(fixture.service.selectionStatus, .backedUp)
+        XCTAssertEqual(fixture.service.cellularUploadStatus, .blocked)
+    }
+
+    func testOrdinaryPhotoCanUseCellularWhileALivePhotoWaitsForVideoPermission() async throws {
+        let fixture = try fixture(photos: ["ordinary-photo", "live-photo"], livePhotoIDs: ["live-photo"],
+            cellularPhotos: true, cellularVideos: false)
+        await fixture.library.load()
+        fixture.service.refreshCounts()
+
+        XCTAssertEqual(fixture.service.cellularUploadStatus, .allowed)
+    }
+
     func testAutomaticQueueOutsideTheSelectionHasUnknownCellularRequirements() async throws {
         for state in [BackupQueueItemState.queued, .waitingForNetwork] {
             for allowPhotos in [false, true] {
@@ -715,7 +754,8 @@ final class BackupStatusReportingTests: XCTestCase {
 
     private func fixture(
         enabled: Bool = true, selection: Set<String> = ["selected"], photos: [String] = [],
-        videoIDs: Set<String> = [], cellularPhotos: Bool = false, cellularVideos: Bool = false,
+        videoIDs: Set<String> = [], livePhotoIDs: Set<String> = [],
+        cellularPhotos: Bool = false, cellularVideos: Bool = false,
         queueState: BackupQueueItemState? = nil, queueIntent: BackupQueueIntent? = .manualUpload,
         pendingAlbum: Bool = false,
         scan: ((Set<String>) async -> LocalPhotoScan)? = nil
@@ -724,6 +764,7 @@ final class BackupStatusReportingTests: XCTestCase {
         UserDefaults.standard.set(cellularPhotos, forKey: "backup.cellularPhotos")
         UserDefaults.standard.set(cellularVideos, forKey: "backup.cellularVideos")
         let fixture = try BackupStatusFixture(selection: selection, photoIDs: photos, videoIDs: videoIDs,
+            livePhotoIDs: livePhotoIDs,
             queueState: queueState, queueIntent: queueIntent, pendingAlbum: pendingAlbum, scan: scan)
         fixtures.append(fixture)
         return fixture
@@ -747,7 +788,7 @@ private final class BackupStatusFixture {
     var session: BackupStatusSession { retainedSession! }
     var status: BackupStatus { BackupStatus(backup: service, sharedUploads: sharedUploads) }
 
-    init(selection: Set<String>, photoIDs: [String], videoIDs: Set<String>,
+    init(selection: Set<String>, photoIDs: [String], videoIDs: Set<String>, livePhotoIDs: Set<String>,
          queueState: BackupQueueItemState?, queueIntent: BackupQueueIntent?,
          pendingAlbum: Bool, scan: ((Set<String>) async -> LocalPhotoScan)?) throws {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("backup-status-\(UUID())")
@@ -778,6 +819,7 @@ private final class BackupStatusFixture {
         }
         let access = BackupStatusAccess(photoIDs: photoIDs)
         access.videoIDs = videoIDs
+        access.livePhotoIDs = livePhotoIDs
         self.access = access
         library = LocalPhotoLibrary(defaults: UserDefaults(suiteName: suiteName)!, reader: .init(
             authorizationStatus: { access.authorization },
@@ -844,6 +886,7 @@ private final class BackupStatusAccess {
     var authorization = PHAuthorizationStatus.authorized
     var photoIDs: [String]
     var videoIDs: Set<String> = []
+    var livePhotoIDs: Set<String> = []
     var reads = 0
     var permissionRequests = 0
 
@@ -853,7 +896,7 @@ private final class BackupStatusAccess {
         let date = Date(timeIntervalSince1970: 1_700_000_000)
         return .init(photos: photoIDs.map {
             LocalPhoto(id: $0, createdAt: date, modifiedAt: date,
-                isVideo: videoIDs.contains($0), isLivePhoto: false, duration: nil, ratio: 1)
+                isVideo: videoIDs.contains($0), isLivePhoto: livePhotoIDs.contains($0), duration: nil, ratio: 1)
         }, albumTitles: Dictionary(uniqueKeysWithValues: photoIDs.map { ($0, "Selected Album") }))
     }
 }

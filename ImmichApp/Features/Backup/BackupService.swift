@@ -130,7 +130,7 @@ final class BackupService {
     private var countedMappingRevision: UUID?
     private var hasRemainingPhotos = false
     private var hasRemainingVideos = false
-    private var countedMediaTypes: [String: Bool] = [:]
+    private var countedMediaTypes: [String: (isVideo: Bool, isLivePhoto: Bool)] = [:]
     private var lastQueueError: String?
 
     var hasPhotosAccess: Bool { localLibrary.isAuthorized }
@@ -524,12 +524,14 @@ final class BackupService {
         total = photos.count
         var remainingPhotos = false
         var remainingVideos = false
-        var mediaTypes: [String: Bool] = [:]
+        var mediaTypes: [String: (isVideo: Bool, isLivePhoto: Bool)] = [:]
         backedUp = photos.reduce(into: 0) { count, photo in
-            mediaTypes[photo.id] = photo.isVideo
+            mediaTypes[photo.id] = (photo.isVideo, photo.isLivePhoto)
             if uploaded.contains(photo.id) { count += 1 }
-            else if photo.isVideo { remainingVideos = true }
-            else { remainingPhotos = true }
+            else if !photo.isLivePhoto {
+                if photo.isVideo { remainingVideos = true }
+                else { remainingPhotos = true }
+            }
         }
         hasRemainingPhotos = remainingPhotos
         hasRemainingVideos = remainingVideos
@@ -988,11 +990,11 @@ final class BackupService {
         if (hasRemainingPhotos && cellularPhotos) || (hasRemainingVideos && cellularVideos) { return .allowed }
         var hasUnknownMedia = false
         for item in pending {
-            guard let isVideo = countedMediaTypes[item.id] else {
+            guard let media = countedMediaTypes[item.id] else {
                 hasUnknownMedia = true
                 continue
             }
-            if isVideo ? cellularVideos : cellularPhotos { return .allowed }
+            if !media.isLivePhoto && (media.isVideo ? cellularVideos : cellularPhotos) { return .allowed }
         }
         return hasUnknownMedia ? .unknown : .blocked
     }
