@@ -1,4 +1,5 @@
 import Foundation
+import SQLite3
 import SwiftData
 import XCTest
 @testable import ImmichApp
@@ -76,6 +77,41 @@ final class FullSyncReplacementTests: XCTestCase {
             XCTAssertEqual(reopened.privateAssetIDs, ["private"])
             XCTAssertEqual(fixture.transport.acknowledgmentCount, 1)
         }
+    }
+
+    func testMissingPrivacyTableCanRecoverThroughACompleteSyncAndOfflineReopen() async throws {
+        let fixture = try FullSyncFixture()
+        defer { fixture.cleanup() }
+        try fixture.dataManager.setAssetVisibility(["private"], to: "locked")
+        fixture.closeRepository()
+        try {
+            var database: OpaquePointer?
+            XCTAssertEqual(sqlite3_open_v2(fixture.storeURL.path, &database,
+                SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil), SQLITE_OK)
+            defer { if let database { sqlite3_close(database) } }
+            XCTAssertEqual(sqlite3_exec(try XCTUnwrap(database),
+                "DROP TABLE ZPRIVATEASSETRECORD", nil, nil, nil), SQLITE_OK)
+        }()
+        fixture.reopenRepository()
+        guard case .recovered = fixture.dataManager.startupState else {
+            return XCTFail("The missing privacy table must be rebuilt before sync")
+        }
+        XCTAssertTrue(fixture.dataManager.isPersistentStoreAvailable)
+        XCTAssertFalse(fixture.dataManager.isVisibilityStateAvailable)
+        XCTAssertFalse(fixture.reopen().isVisibilityStateAvailable)
+        fixture.transport.responses = [.body(FullSyncTransport.asset("public")
+            + FullSyncTransport.asset("private", visibility: "locked") + FullSyncTransport.complete)]
+
+        try await fixture.repository.deltaSync()
+
+        let reopened = fixture.reopen()
+        XCTAssertTrue(reopened.isVisibilityStateAvailable)
+        XCTAssertEqual(try reopened.modelContext.fetch(FetchDescriptor<PrivateAssetRecord>()).map(\.id), ["private"])
+        XCTAssertFalse(AssetVisibilityPolicy(dataManager: reopened).allows(id: "private"))
+        XCTAssertTrue(AssetVisibilityPolicy(dataManager: reopened).allows(id: "public"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath:
+            fixture.storeURL.appendingPathExtension("visibility-recovery").path))
+        XCTAssertEqual(fixture.transport.acknowledgmentCount, 1)
     }
 
     func testFailedOrIncompleteRecoverySyncKeepsTheBarrierAcrossOfflineReopen() async throws {
@@ -618,10 +654,15 @@ private final class FullSyncFixture {
     }
 
     func reopenRepository(fileManager: FileManager = .default) {
-        storedRepository = nil
+        closeRepository()
         storedDataManager = SwiftDataManager(storeURL: storeURL, backupJournalURL: journalURL, fileManager: fileManager)
         storedRepository = SyncRepository(api: APIClient(session: session, urlSession: urlSession),
             dataManager: dataManager)
+    }
+
+    func closeRepository() {
+        storedRepository = nil
+        storedDataManager = nil
     }
 
     func cleanup() {

@@ -1,9 +1,72 @@
+import SQLite3
 import SwiftData
 import XCTest
 @testable import ImmichApp
 
 @MainActor
 final class AssetVisibilityPersistenceTests: XCTestCase {
+    func testMissingPrimaryPrivacyTableCannotExposeAnUnmappedLockFromAnOlderJournal() throws {
+        let fixture = try VisibilityStoreFixture()
+        defer { fixture.cleanup() }
+        let id = UUID().uuidString
+        try {
+            let files = VisibilityJournalFileManager()
+            let store = fixture.open(fileManager: files)
+            try store.setAssetVisibility([id], to: "timeline")
+            files.rejectWrites = true
+            XCTAssertThrowsError(try store.setAssetVisibility([id], to: "locked"))
+            XCTAssertEqual(try store.modelContext.fetch(FetchDescriptor<PrivateAssetRecord>()).map(\.id), [id])
+            XCTAssertTrue(store.serverAssetIDsByLocalIdentifier().isEmpty)
+        }()
+        let journal = try Data(contentsOf: fixture.journalURL)
+        try {
+            var handle: OpaquePointer?
+            let opened = sqlite3_open_v2(fixture.storeURL.path, &handle,
+                SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil)
+            defer { if let handle { sqlite3_close(handle) } }
+            XCTAssertEqual(opened, SQLITE_OK)
+            let database = try XCTUnwrap(handle)
+            var table: OpaquePointer?
+            XCTAssertEqual(sqlite3_prepare_v2(database,
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='ZPRIVATEASSETRECORD'",
+                -1, &table, nil), SQLITE_OK)
+            defer { sqlite3_finalize(table) }
+            XCTAssertEqual(sqlite3_step(table), SQLITE_ROW)
+            let name = try XCTUnwrap(sqlite3_column_text(table, 0))
+            XCTAssertEqual(String(cString: name), "ZPRIVATEASSETRECORD")
+            sqlite3_finalize(table)
+            table = nil
+            XCTAssertEqual(sqlite3_exec(database, "DROP TABLE ZPRIVATEASSETRECORD", nil, nil, nil), SQLITE_OK)
+        }()
+
+        let reopened = fixture.open()
+
+        guard case .recovered = reopened.startupState else {
+            return XCTFail("An unreadable privacy table must rebuild the persistent cache")
+        }
+        XCTAssertTrue(reopened.isPersistentStoreAvailable)
+        XCTAssertFalse(reopened.isVisibilityStateAvailable)
+        XCTAssertEqual(try Data(contentsOf: fixture.journalURL), journal)
+        let policy = AssetVisibilityPolicy(dataManager: reopened, removed: RemovedAssets())
+        XCTAssertFalse(policy.allows(id: id), "Losing the primary privacy table must not certify an unmapped old snapshot as public")
+        XCTAssertTrue(policy.filter([AssetLite(makeTestAsset(id: id))]).isEmpty)
+        XCTAssertFalse(fixture.open().isVisibilityStateAvailable)
+
+        let snapshot = try FullSyncStaging()
+        try snapshot.append(CachedAsset(id: id, assetId: id, type: "IMAGE", isArchived: true), visibility: "locked")
+        try snapshot.append(CachedAsset(id: "public", assetId: "public", type: "IMAGE"), visibility: "timeline")
+        try reopened.replaceSyncCache(with: snapshot,
+            expectedVisibilityRevision: reopened.visibilityMutationRevision,
+            expectedAssetRevision: reopened.assetMutationRevision)
+
+        XCTAssertTrue(reopened.isVisibilityStateAvailable)
+        let recovered = fixture.open()
+        XCTAssertTrue(recovered.isVisibilityStateAvailable)
+        XCTAssertEqual(try recovered.modelContext.fetch(FetchDescriptor<PrivateAssetRecord>()).map(\.id), [id])
+        XCTAssertFalse(AssetVisibilityPolicy(dataManager: recovered).allows(id: id))
+        XCTAssertTrue(AssetVisibilityPolicy(dataManager: recovered).allows(id: "public"))
+    }
+
     func testRawSyncVisibilityDistinguishesArchivesFromPrivateAndUnknownAssets() throws {
         let fixture = try VisibilityStoreFixture()
         defer { fixture.cleanup() }

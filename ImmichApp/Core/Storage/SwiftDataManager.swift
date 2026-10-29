@@ -131,13 +131,29 @@ final class SwiftDataManager {
         self.startupState = bootstrap.state
         self.requiresVisibilityRefresh = (try? Self.hasVisibilityRecoveryMarker(
             at: resolvedStoreURL.appendingPathExtension("visibility-recovery"), fileManager: fileManager)) ?? true
+        self.nonTimelineAssetIDs = bootstrap.nonTimelineAssetIDs
 
-        reconcileBackupRecordJournalAfterStartup()
+        reconcileBackupRecordJournalAfterStartup(privateIDs: bootstrap.privateAssetIDs)
     }
 
     private struct ContainerBootstrap {
         let container: ModelContainer
         let state: LocalStoreStartupState
+        let nonTimelineAssetIDs: Set<String>
+        let privateAssetIDs: Set<String>
+
+        @MainActor
+        init(container: ModelContainer, state: LocalStoreStartupState) throws {
+            // A container can open successfully while its privacy tables are unreadable.
+            let context = ModelContext(container)
+            let hiddenRows = try context.fetch(FetchDescriptor<CachedAsset>(
+                predicate: #Predicate { $0.isArchived }))
+            let privateIDs = Set(try context.fetch(FetchDescriptor<PrivateAssetRecord>()).map(\.id))
+            self.container = container
+            self.state = state
+            self.privateAssetIDs = privateIDs
+            self.nonTimelineAssetIDs = Set(hiddenRows.map(\.id)).union(privateIDs)
+        }
     }
 
     private static func bootstrapContainer(
@@ -151,7 +167,7 @@ final class SwiftDataManager {
                 for: schema,
                 migrationPlan: LocalStoreMigrationPlan.self,
                 configurations: [configuration])
-            return ContainerBootstrap(container: container, state: .ready)
+            return try ContainerBootstrap(container: container, state: .ready)
         } catch {
             let openingError = error.localizedDescription
             // The journal can lag a saved lock. Persist that uncertainty before
@@ -179,7 +195,7 @@ final class SwiftDataManager {
                     for: schema,
                     migrationPlan: LocalStoreMigrationPlan.self,
                     configurations: [recoveredConfiguration])
-                return ContainerBootstrap(
+                return try ContainerBootstrap(
                     container: container,
                     state: .recovered(
                         quarantinedStore: quarantinedStore,
@@ -196,7 +212,7 @@ final class SwiftDataManager {
             isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         do {
             let container = try ModelContainer(for: schema, configurations: [configuration])
-            return ContainerBootstrap(container: container,
+            return try ContainerBootstrap(container: container,
                 state: .persistentStoreUnavailable(error.localizedDescription))
         } catch {
             fatalError("Unable to create the SwiftData model: \(error)")
@@ -912,7 +928,7 @@ final class SwiftDataManager {
     /// ada di server tampak belum pernah diunggah. Karena itu ia dicerminkan ke
     /// journal JSON kecil di luar SQLite. Jika cache SQLite rusak, store boleh
     /// dibangun ulang dan mapping upload dipulihkan dari journal ini.
-    private func reconcileBackupRecordJournalAfterStartup() {
+    private func reconcileBackupRecordJournalAfterStartup(privateIDs: Set<String>) {
         if requiresVisibilityRefresh { WidgetSnapshotExporter.clear() }
         guard startupState.isPersistentStoreAvailable else {
             WidgetSnapshotExporter.clear()
@@ -920,11 +936,6 @@ final class SwiftDataManager {
         }
 
         do {
-            let hiddenRows = try modelContext.fetch(FetchDescriptor<CachedAsset>(
-                predicate: #Predicate { $0.isArchived }))
-            nonTimelineAssetIDs = Set(hiddenRows.map(\.id))
-            let privateIDs = Set(try modelContext.fetch(FetchDescriptor<PrivateAssetRecord>()).map(\.id))
-            nonTimelineAssetIDs.formUnion(privateIDs)
             let journal = try readBackupRecordJournal()
             let protectedIDs = Set(journal.nonTimelineAssetIDs ?? [])
             nonTimelineAssetIDs.formUnion(protectedIDs)
