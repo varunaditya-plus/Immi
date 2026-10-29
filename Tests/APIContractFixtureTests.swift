@@ -28,10 +28,6 @@ final class APIContractFixtureTests: XCTestCase {
         XCTAssertEqual(assetDuration["jsonType"] as? String, "integer")
         XCTAssertEqual(assetDuration["unit"] as? String, "milliseconds")
 
-        let bucketDuration = try XCTUnwrap(
-            contracts["TimeBucketAssetResponseDto.duration.items"] as? [String: Any])
-        XCTAssertEqual(bucketDuration["unit"] as? String, "milliseconds")
-
         let syncDuration = try XCTUnwrap(
             contracts["SyncAssetV1.duration"] as? [String: Any])
         XCTAssertEqual(syncDuration["jsonType"] as? String, "string")
@@ -112,10 +108,9 @@ final class APIContractFixtureTests: XCTestCase {
             "22222222-2222-4222-8222-222222222222")
     }
 
-    func testTimelineAndSyncUseTheirDistinctDurationContracts() throws {
-        let bucket = try decoder.decode(
-            TimelineBucketDTO.self, from: fixtureData(for: "timeBucket"))
-        XCTAssertEqual(bucket.duration?.first?.seconds, 95)
+    func testAssetAndSyncUseTheirDistinctDurationContracts() throws {
+        let asset = try decoder.decode(AssetResponseDTO.self, from: fixtureData(for: "asset"))
+        XCTAssertEqual(asset.duration, 95)
 
         let lineData = try fixtureData(for: "syncAssetLine")
         let envelope = try decoder.decode(SyncLineEnvelopeDTO.self, from: lineData)

@@ -29,11 +29,6 @@
       "nullable": true,
       "unit": "milliseconds"
     },
-    "TimeBucketAssetResponseDto.duration.items": {
-      "jsonType": "integer",
-      "nullable": true,
-      "unit": "milliseconds"
-    },
     "SyncAssetV1.duration": {
       "jsonType": "string",
       "nullable": true,

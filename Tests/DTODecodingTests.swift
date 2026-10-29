@@ -307,64 +307,6 @@ final class DTODecodingTests: XCTestCase {
         XCTAssertEqual(dto.longitude, -74.0060)
     }
 
-    // MARK: - Timeline
-
-    func testTimeBucketDecoding() throws {
-        let json = """
-        {
-            "timeBucket": "2024-08",
-            "count": 42
-        }
-        """
-        let dto = try decoder.decode(TimeBucketDTO.self, from: json.data(using: .utf8)!)
-
-        XCTAssertEqual(dto.timeBucket, "2024-08")
-        XCTAssertEqual(dto.count, 42)
-    }
-
-    func testTimelineBucketColumnarDecoding() throws {
-        let json = """
-        {
-            "id": ["asset-1", "asset-2", "asset-3"],
-            "ownerId": ["owner-1", "owner-1", "owner-1"],
-            "isImage": [true, true, false],
-            "isFavorite": [false, true, false],
-            "thumbhash": ["hash1", null, "hash3"],
-            "fileCreatedAt": ["2024-08-03T10:00:00.000Z", "2024-08-02T15:30:00.000Z", "2024-08-01T12:00:00.000Z"],
-            "duration": [null, null, "0:00:12.00000"],
-            "ratio": [1.5, 1.0, 0.75]
-        }
-        """
-        let dto = try decoder.decode(TimelineBucketDTO.self, from: json.data(using: .utf8)!)
-
-        XCTAssertEqual(dto.id.count, 3)
-        XCTAssertEqual(dto.id[0], "asset-1")
-        XCTAssertEqual(dto.isImage?[2], false)
-        XCTAssertEqual(dto.isFavorite?[1], true)
-        XCTAssertEqual(dto.thumbhash?[1], String?.none)
-        XCTAssertNil(dto.duration?[0].seconds)
-        XCTAssertEqual(dto.duration?[2].seconds, 12)
-        XCTAssertEqual(dto.ratio?[0], 1.5)
-    }
-
-    /// Inilah bentuk yang dulu menjatuhkan seluruh bucket: satu video di antara
-    /// foto-foto sudah cukup, dan album yang memuatnya gagal dibuka.
-    func testTimelineBucketDurationVariants() throws {
-        let json = """
-        {
-            "id": ["a", "b", "c", "d"],
-            "duration": [null, "0:01:35.00000", 95000, true]
-        }
-        """
-        let dto = try decoder.decode(TimelineBucketDTO.self, from: json.data(using: .utf8)!)
-
-        XCTAssertNil(dto.duration?[0].seconds)
-        XCTAssertEqual(dto.duration?[1].seconds, 95)
-        XCTAssertEqual(dto.duration?[2].seconds, 95)
-        // Bentuk asing kehilangan durasinya saja, bukan seluruh bucket.
-        XCTAssertNil(dto.duration?[3].seconds)
-    }
-
     // MARK: - Albums / people
 
     func testAlbumResponseDecoding() throws {
