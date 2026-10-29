@@ -5,7 +5,6 @@ import UIKit
 
 struct SharePreviewItem: Identifiable {
     var uploadItem: SharedUploadItem
-    let fileURL: URL
     let thumbnail: UIImage?
     var isSelected = true
 
@@ -24,7 +23,7 @@ final class ShareExtensionModel: ObservableObject {
 
     @Published private(set) var phase: Phase = .loading
     @Published private(set) var items: [SharePreviewItem] = []
-    @Published private(set) var session = SharedSessionStore.shared.load()
+    private let session = SharedSessionStore.shared.load()
     private let submission = SharedUploadSubmission()
     private weak var shareContext: NSExtensionContext?
     private var hasLoaded = false
@@ -218,7 +217,6 @@ final class ShareExtensionModel: ObservableObject {
                         lastError: nil)
                     continuation.resume(returning: SharePreviewItem(
                         uploadItem: item,
-                        fileURL: destination,
                         thumbnail: SharePreviewThumbnail.image(at: destination)))
                 } catch {
                     continuation.resume(throwing: error)

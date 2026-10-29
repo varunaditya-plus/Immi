@@ -2,13 +2,10 @@ import SwiftUI
 import UIKit
 
 final class ShareViewController: UIViewController {
-    private var host: UIHostingController<ShareUploadView>?
-
     override func viewDidLoad() {
         super.viewDidLoad()
         let model = ShareExtensionModel(extensionContext: extensionContext)
         let host = UIHostingController(rootView: ShareUploadView(model: model))
-        self.host = host
 
         addChild(host)
         view.addSubview(host.view)
