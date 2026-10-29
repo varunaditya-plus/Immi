@@ -583,7 +583,8 @@ struct LibraryView: View {
                 .contextMenu {
                     assetMenu(for: asset)
                 } preview: {
-                    AssetContextPreview(asset: asset, session: session)
+                    AssetContextPreview(asset: asset, session: session,
+                        visibilityPolicy: AssetVisibilityPolicy(scope: .timeline))
                 }
             }
         }

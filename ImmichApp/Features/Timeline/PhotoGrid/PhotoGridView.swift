@@ -1692,10 +1692,11 @@ extension PhotoGridController: UICollectionViewDelegate {
 
         return UIContextMenuConfiguration(
             identifier: id as NSString,
-            previewProvider: { [session] in
+            previewProvider: { [session, visibilityPolicy] in
                 // Pratinjau memakai rasio asli foto; sel grid sengaja persegi.
                 let host = UIHostingController(
-                    rootView: AssetContextPreview(asset: asset, session: session))
+                    rootView: AssetContextPreview(asset: asset, session: session,
+                        visibilityPolicy: visibilityPolicy))
                 host.preferredContentSize = host.sizeThatFits(
                     in: CGSize(width: 320, height: 460))
                 return host

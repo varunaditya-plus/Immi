@@ -55,18 +55,24 @@ struct AssetContextPreview: View {
     /// tidak mewarisi environment view pemanggil; tanpa ini `AuthImage` crash
     /// saat membaca `SessionManager`.
     let session: SessionManager
+    var visibilityPolicy = AssetVisibilityPolicy()
 
     var body: some View {
         let size = previewSize
-        AuthImage(
-            assetId: asset.id,
-            size: "preview",
-            thumbhash: asset.thumbhash,
-            contentMode: .fit,
-            // Pratinjau tidak pernah lebih besar dari 320×460pt; 2048px hanya
-            // membayar bitmap belasan megabyte untuk sesuatu yang muncul sekejap.
-            pixelSize: 1400
-        )
+        Group {
+            if visibilityPolicy.allows(id: asset.id) {
+                AuthImage(
+                    assetId: asset.id,
+                    size: "preview",
+                    thumbhash: asset.thumbhash,
+                    contentMode: .fit,
+                    // Pratinjau tidak pernah lebih besar dari 320×460pt; 2048px hanya
+                    // membayar bitmap belasan megabyte untuk sesuatu yang muncul sekejap.
+                    pixelSize: 1400)
+            } else {
+                Color.clear
+            }
+        }
         .frame(width: size.width, height: size.height)
         .environment(session)
     }
