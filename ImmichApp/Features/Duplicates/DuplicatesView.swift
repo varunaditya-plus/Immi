@@ -70,7 +70,7 @@ struct DuplicatesView: View {
 
     private func reviewExplanation(groupCount: Int) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("^[\(groupCount) group](inflect: true) to review")
+            Text("\(groupCount) groups to review")
                 .font(.headline)
             Text("Select the best items to keep. Unselected items will be moved to Trash after confirmation.")
                 .font(.subheadline)
@@ -203,7 +203,7 @@ private struct DuplicateGroupCard: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Similar Items")
                     .font(.headline)
-                Text("^[\(group.assets.count) item](inflect: true) · tap to keep or trash")
+                Text("\(group.assets.count) items · tap to keep or trash")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

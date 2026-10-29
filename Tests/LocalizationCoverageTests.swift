@@ -9,6 +9,50 @@ final class LocalizationCoverageTests: XCTestCase {
         "he", "hi", "hr", "hu", "id", "it", "ja", "kk", "ko", "lt", "ms", "nb", "nl", "pl",
         "pt", "ro", "ru", "sk", "sl", "sv", "th", "tr", "uk", "vi", "zh-Hans", "zh-Hant"]
 
+    func testEveryCatalogEntryHasAllSupportedTranslationsAndValidFormatArguments() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        for path in ["ImmichApp/Resources/Localizable.xcstrings"] {
+            let data = try Data(contentsOf: root.appendingPathComponent(path))
+            let catalog = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            let entries = try XCTUnwrap(catalog["strings"] as? [String: [String: Any]])
+            XCTAssertFalse(entries.isEmpty)
+            for (key, entry) in entries {
+                guard !key.isEmpty else { continue }
+                let translations = try XCTUnwrap(entry["localizations"] as? [String: [String: Any]], "Missing translations: \(key)")
+                for language in languages {
+                    let translation = try XCTUnwrap(translations[language], "\(path): \(language): \(key)")
+                    let values = stringValues(in: translation)
+                    XCTAssertFalse(values.isEmpty, "\(language): \(key)")
+                    for form in values {
+                        let value = form.value
+                        XCTAssertFalse(value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                            "\(language): \(key)")
+                        XCTAssertTrue(validArguments(source: key, translation: value,
+                            category: form.category, language: language), "\(language): \(key): \(value)")
+                    }
+                    if let variations = translation["variations"] as? [String: Any],
+                       let plural = variations["plural"] as? [String: Any] {
+                        XCTAssertNotNil(plural["other"], "A plural resource requires its fallback form")
+                    }
+                }
+            }
+        }
+    }
+
+    func testRecentUserFacingErrorsAndPaginationAreInCompiledAppResources() throws {
+        let keys = ["Load More", "Loading More…", "Failed to load more photos",
+            "Search returned an incomplete page. Please try again.", "Selects this item.",
+            "Deselects this item.", "Opens the viewer.", "Shows this item in the viewer.",
+            "Unable to play video. Try again.", "Unable to play Live Photo. Touch and hold to try again.",
+            "Automatic Backup Off", "Accessible Photos Backed Up", "Shared Uploads", "Upload Details"]
+        for language in languages {
+            let bundle = try localizedBundle(Bundle.main, language: language)
+            for key in keys { assertCompiled(key, in: bundle) }
+        }
+        let french = try localizedBundle(Bundle.main, language: "fr")
+        XCTAssertEqual(french.localizedString(forKey: "Load More", value: nil, table: nil), "Charger plus")
+    }
+
     func testSettingsCountsChooseEnglishAndRussianPluralForms() throws {
         let english = try localizedBundle(Bundle.main, language: "en")
         XCTAssertEqual(SettingsView.assetCounts(images: 1, videos: 2, bundle: english,
@@ -142,6 +186,29 @@ final class LocalizationCoverageTests: XCTestCase {
     private func localizedBundle(_ bundle: Bundle, language: String) throws -> Bundle {
         let url = try XCTUnwrap(bundle.url(forResource: language, withExtension: "lproj"), "Missing \(language) resources")
         return try XCTUnwrap(Bundle(url: url))
+    }
+
+    private func assertCompiled(_ key: String, in bundle: Bundle, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertNotEqual(bundle.localizedString(forKey: key, value: "MISSING-TRANSLATION", table: nil),
+            "MISSING-TRANSLATION", "Missing compiled key: \(key)", file: file, line: line)
+    }
+
+    private struct CatalogForm {
+        let category: String?
+        let value: String
+    }
+
+    private func stringValues(in object: [String: Any]) -> [CatalogForm] {
+        if let unit = object["stringUnit"] as? [String: Any], let value = unit["value"] as? String {
+            return [CatalogForm(category: nil, value: value)]
+        }
+        if let variations = object["variations"] as? [String: Any],
+           let plural = variations["plural"] as? [String: [String: Any]] {
+            return plural.flatMap { category, value in
+                stringValues(in: value).map { CatalogForm(category: category, value: $0.value) }
+            }
+        }
+        return object.values.compactMap { $0 as? [String: Any] }.flatMap { stringValues(in: $0) }
     }
 
     private func validArguments(source: String, translation: String, category: String?, language: String) -> Bool {
