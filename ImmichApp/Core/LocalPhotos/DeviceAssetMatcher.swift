@@ -1,5 +1,4 @@
 import Foundation
-import Observation
 
 enum DeviceAssetSyncError: LocalizedError {
     case offline
@@ -31,12 +30,7 @@ enum DeviceAssetSyncError: LocalizedError {
 /// - Pembacaannya di luar main actor, sepotong-sepotong, dengan jeda di antara
 ///   kelompoknya — supaya menggulir linimasa tidak ikut tersendat.
 @MainActor
-@Observable
 final class DeviceAssetMatcher {
-    /// Sedang mencocokkan; dipakai layar untuk menunjukkan bahwa daftarnya
-    /// masih bisa berubah.
-    private(set) var isMatching = false
-
     private let repo: BackupRepository
     private let dataManager: SwiftDataManager
     private let accountGeneration = LocalSnapshot.generation
@@ -45,9 +39,8 @@ final class DeviceAssetMatcher {
     /// Penomor putaran pencocokan.
     ///
     /// `cancel()` lalu `match()` lagi bisa membuat putaran LAMA selesai
-    /// belakangan dan menimpa pembukuan milik yang baru — spinner padam padahal
-    /// masih berjalan, dan penjaga "satu saja" ikut bocor. Task tidak punya
-    /// identitas yang bisa dibandingkan dari luar, jadi nomornya yang dipakai.
+    /// belakangan dan menghapus task milik yang baru, sehingga penjaga "satu
+    /// saja" ikut bocor. Nomor putaran membatasi cleanup ke task yang sesuai.
     private var generation = 0
 
     /// Jumlah foto per permintaan ke server.
@@ -87,7 +80,6 @@ final class DeviceAssetMatcher {
         let pending = photos.filter { !known.contains($0.id) }
         guard !pending.isEmpty else { return }
 
-        isMatching = true
         generation &+= 1
         // Nama BERBEDA dari propertinya. `let generation = generation` membaca
         // sisi kanan sebagai deklarasi yang belum ada — Swift menolaknya.
@@ -96,7 +88,6 @@ final class DeviceAssetMatcher {
             defer {
                 // Hanya putaran yang MASIH tercatat yang boleh membereskan.
                 if runID == self.generation {
-                    self.isMatching = false
                     self.task = nil
                 }
             }
@@ -149,7 +140,6 @@ final class DeviceAssetMatcher {
         generation &+= 1
         task?.cancel()
         task = nil
-        isMatching = false
     }
 
     /// Menjalankan pencocokan sebagai job yang bisa DITUNGGU halaman status.
