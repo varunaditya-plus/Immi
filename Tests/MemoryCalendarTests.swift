@@ -31,6 +31,21 @@ final class MemoryCalendarTests: XCTestCase {
 
         XCTAssertEqual(stories.count, 1)
         XCTAssertEqual(stories.first?.title, "6 years ago")
+        XCTAssertEqual(stories.first?.yearsAgo, 6)
+        XCTAssertEqual(stories.first?.memoryAt, input.memoryAt)
+    }
+
+    func testPrivacyFilteringKeepsTheRawPresentationMetadata() throws {
+        let photo = AssetLite(makeTestAsset(id: UUID().uuidString))
+        let date = try instant("2020-01-01T00:00:00Z")
+        let story = MemoryStory(id: "memory", title: "5 years ago", subtitle: "January 1, 2020",
+            assets: [photo], memoryAt: date, yearsAgo: 5)
+
+        let filtered = try XCTUnwrap(story.filteringAssets(using: AssetVisibilityPolicy()))
+
+        XCTAssertEqual(filtered.assets, [photo])
+        XCTAssertEqual(filtered.memoryAt, date)
+        XCTAssertEqual(filtered.yearsAgo, 5)
     }
 
     private func calendar(_ identifier: Calendar.Identifier) -> Calendar {

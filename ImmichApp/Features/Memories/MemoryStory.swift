@@ -14,6 +14,18 @@ struct MemoryStory: Identifiable {
     /// "August 5, 2024" — tanggal lengkapnya.
     let subtitle: String
     let assets: [AssetLite]
+    let memoryAt: Date?
+    let yearsAgo: Int?
+
+    init(id: String, title: String, subtitle: String, assets: [AssetLite],
+         memoryAt: Date? = nil, yearsAgo: Int? = nil) {
+        self.id = id
+        self.title = title
+        self.subtitle = subtitle
+        self.assets = assets
+        self.memoryAt = memoryAt
+        self.yearsAgo = yearsAgo
+    }
 
     var cover: AssetLite? { assets.first }
 
@@ -21,7 +33,8 @@ struct MemoryStory: Identifiable {
     func filteringAssets(using policy: AssetVisibilityPolicy) -> MemoryStory? {
         let visible = policy.filter(assets)
         guard !visible.isEmpty else { return nil }
-        return MemoryStory(id: id, title: title, subtitle: subtitle, assets: visible)
+        return MemoryStory(id: id, title: title, subtitle: subtitle, assets: visible,
+            memoryAt: memoryAt, yearsAgo: yearsAgo)
     }
 
     /// Kenangan yang layak ditampilkan, terbaru dulu.
@@ -54,7 +67,7 @@ struct MemoryStory: Identifiable {
                     id: memory.id,
                     title: title(yearsAgo: years),
                     subtitle: dateFormatter.string(from: memory.memoryAt),
-                    assets: visibleAssets.map(AssetLite.init))
+                    assets: visibleAssets.map(AssetLite.init), memoryAt: memory.memoryAt, yearsAgo: years)
             }
             .prefix(limit))
     }

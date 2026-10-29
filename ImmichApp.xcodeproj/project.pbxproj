@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		AA0000000000000000000025 /* WidgetMemory.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000024 /* WidgetMemory.swift */; };
 		AA0000000000000000000023 /* WidgetCalendar.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000022 /* WidgetCalendar.swift */; };
 		BB0000000000000000000002 /* ImmichWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000001 /* ImmichWidgets.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		CC0000000000000000000002 /* SelfPhotosShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = CC0000000000000000000001 /* SelfPhotosShareExtension.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
@@ -61,6 +62,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		AA0000000000000000000024 /* WidgetMemory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmichWidgets/WidgetMemory.swift; sourceTree = SOURCE_ROOT; };
 		AA0000000000000000000022 /* WidgetCalendar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmichWidgets/WidgetCalendar.swift; sourceTree = SOURCE_ROOT; };
 		242E7F0E30206D79000F50F4 /* ImmichApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ImmichApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA000000000000000000000E /* ImmichAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ImmichAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -501,6 +503,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AA0000000000000000000025 /* WidgetMemory.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

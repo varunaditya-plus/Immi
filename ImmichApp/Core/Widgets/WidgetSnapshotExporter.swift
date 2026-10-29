@@ -17,7 +17,7 @@ enum WidgetSnapshotExporter {
     private struct Snapshot: Encodable {
         let generatedAt: Date
         let albums: [Album]
-        let memories: [Memory]
+        let memories: [WidgetMemory]
     }
 
     private struct Album: Encodable {
@@ -25,13 +25,6 @@ enum WidgetSnapshotExporter {
         let name: String
         let assetCount: Int
         let imageNames: [String]
-    }
-
-    private struct Memory: Encodable {
-        let id: String
-        let title: String
-        let subtitle: String
-        let imageName: String?
     }
 
     /// Penyegaran mandiri saat aplikasi dibuka. Widget tidak bergantung pada
@@ -226,11 +219,12 @@ enum WidgetSnapshotExporter {
         }
         let wireMemories = memories.map { memory in
             let name = "memory-\(memory.id).image"
-            return Memory(
+            return WidgetMemory(
                 id: memory.id,
                 title: memory.title,
                 subtitle: memory.subtitle,
-                imageName: written.contains(name) ? "\(generation)/\(name)" : nil)
+                imageName: written.contains(name) ? "\(generation)/\(name)" : nil,
+                memoryAt: memory.memoryAt, yearsAgo: memory.yearsAgo)
         }
 
         let snapshot = Snapshot(

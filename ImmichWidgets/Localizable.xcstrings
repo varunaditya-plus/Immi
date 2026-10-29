@@ -1726,23 +1726,13 @@
       }
     },
     "Memories": {
+      "comment": "Core navigation item.",
+      "extractionState": "manual",
       "localizations": {
-        "id": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Kenangan"
-          }
-        },
         "ar": {
           "stringUnit": {
             "state": "translated",
             "value": "الذكريات"
-          }
-        },
-        "bn": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "স্মৃতি"
           }
         },
         "bg": {
@@ -1751,16 +1741,16 @@
             "value": "Спомени"
           }
         },
+        "bn": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "স্মৃতি"
+          }
+        },
         "ca": {
           "stringUnit": {
             "state": "translated",
             "value": "Records"
-          }
-        },
-        "hr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Uspomene"
           }
         },
         "cs": {
@@ -1775,10 +1765,34 @@
             "value": "Minder"
           }
         },
-        "nl": {
+        "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Herinneringen"
+            "value": "Erinnerungen"
+          }
+        },
+        "el": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Αναμνήσεις"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Memories"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recuerdos"
+          }
+        },
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "خاطرات"
           }
         },
         "fi": {
@@ -1793,18 +1807,6 @@
             "value": "Souvenirs"
           }
         },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Erinnerungen"
-          }
-        },
-        "el": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Αναμνήσεις"
-          }
-        },
         "he": {
           "stringUnit": {
             "state": "translated",
@@ -1817,10 +1819,22 @@
             "value": "यादें"
           }
         },
+        "hr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uspomene"
+          }
+        },
         "hu": {
           "stringUnit": {
             "state": "translated",
             "value": "Emlékek"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kenangan"
           }
         },
         "it": {
@@ -1865,10 +1879,10 @@
             "value": "Minner"
           }
         },
-        "fa": {
+        "nl": {
           "stringUnit": {
             "state": "translated",
-            "value": "خاطرات"
+            "value": "Herinneringen"
           }
         },
         "pl": {
@@ -1895,12 +1909,6 @@
             "value": "Воспоминания"
           }
         },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "回忆"
-          }
-        },
         "sk": {
           "stringUnit": {
             "state": "translated",
@@ -1913,12 +1921,6 @@
             "value": "Spomini"
           }
         },
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Recuerdos"
-          }
-        },
         "sv": {
           "stringUnit": {
             "state": "translated",
@@ -1929,12 +1931,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "ความทรงจำ"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "回憶"
           }
         },
         "tr": {
@@ -1953,6 +1949,18 @@
           "stringUnit": {
             "state": "translated",
             "value": "Kỷ niệm"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回忆"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回憶"
           }
         }
       }
@@ -3915,6 +3923,238 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "This year": {
+      "localizations": {
+        "ar": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "هذا العام"
+          }
+        },
+        "bg": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Тази година"
+          }
+        },
+        "bn": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "এই বছর"
+          }
+        },
+        "ca": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aquest any"
+          }
+        },
+        "cs": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tento rok"
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I år"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dieses Jahr"
+          }
+        },
+        "el": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Φέτος"
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Este año"
+          }
+        },
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "امسال"
+          }
+        },
+        "fi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tänä vuonna"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cette année"
+          }
+        },
+        "he": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "השנה"
+          }
+        },
+        "hi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "इस वर्ष"
+          }
+        },
+        "hr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ove godine"
+          }
+        },
+        "hu": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Idén"
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tahun ini"
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quest'anno"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今年"
+          }
+        },
+        "kk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Биыл"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "올해"
+          }
+        },
+        "lt": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Šiais metais"
+          }
+        },
+        "ms": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tahun ini"
+          }
+        },
+        "nb": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I år"
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dit jaar"
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "W tym roku"
+          }
+        },
+        "pt": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Este ano"
+          }
+        },
+        "ro": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anul acesta"
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "В этом году"
+          }
+        },
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tento rok"
+          }
+        },
+        "sl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Letos"
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I år"
+          }
+        },
+        "th": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ปีนี้"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bu yıl"
+          }
+        },
+        "uk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Цього року"
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Năm nay"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今年"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "今年"
           }
         }
       }

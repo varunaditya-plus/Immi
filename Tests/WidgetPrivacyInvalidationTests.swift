@@ -69,6 +69,29 @@ final class WidgetPrivacyInvalidationTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: file), Data([1, 2, 3]))
     }
 
+    func testExportedMemoryIncludesRawDateAndAgeForWidgetLocalization() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let api = try makeAPI(assetID: UUID().uuidString, includesCollections: true)
+
+        await WidgetSnapshotExporter.refresh(api: api, imageAPI: api, container: directory, selectedAlbumIDs: [])
+
+        let data = try Data(contentsOf: directory.appendingPathComponent("Widgets/snapshot.json"))
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let memories = try XCTUnwrap(object["memories"] as? [[String: Any]])
+        let memory = try XCTUnwrap(memories.first)
+        let year = try XCTUnwrap(memory["yearsAgo"] as? Int)
+        let date = try XCTUnwrap(memory["memoryAt"] as? String)
+        let instant = try XCTUnwrap(ISO8601DateFormatter().date(from: date))
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .gmt
+        XCTAssertEqual(year, Calendar(identifier: .gregorian).component(.year, from: Date()) - 2020)
+        XCTAssertEqual(calendar.component(.year, from: instant), 2020)
+        XCTAssertNotNil(memory["title"], "Keep the captions readable by an older widget process")
+        XCTAssertNotNil(memory["subtitle"])
+        XCTAssertNotNil(memory["imageName"])
+    }
+
     func testLateMetadataCannotStartAnExportAfterPrivacyInvalidation() async throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

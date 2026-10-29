@@ -39,16 +39,9 @@ private struct WidgetSnapshot: Decodable {
         }
     }
 
-    struct Memory: Decodable, Identifiable {
-        let id: String
-        let title: String
-        let subtitle: String
-        let imageName: String?
-    }
-
     let generatedAt: Date
     let albums: [Album]
-    let memories: [Memory]
+    let memories: [WidgetMemory]
 
     static let favorites = Album(
         id: widgetFavoritesID,
@@ -233,8 +226,15 @@ private struct AlbumWidgetView: View {
                     .font(.caption2.weight(.semibold))
                     .textCase(.uppercase)
                     .opacity(0.82)
-                Text(entry.album?.id == widgetFavoritesID ? String(localized: "Favorites")
-                    : entry.album?.name ?? String(localized: "Open SelfPhotos"))
+                Group {
+                    if entry.album?.id == widgetFavoritesID {
+                        Text("Favorites")
+                    } else if let album = entry.album {
+                        Text(verbatim: album.name)
+                    } else {
+                        Text("Open SelfPhotos")
+                    }
+                }
                     .font(family == .systemSmall ? .headline : .title3.bold())
                     .lineLimit(2)
                 if let count = entry.album?.assetCount {
@@ -259,7 +259,7 @@ private struct AlbumWidgetView: View {
 
 private struct MemoriesEntry: TimelineEntry {
     let date: Date
-    let memory: WidgetSnapshot.Memory?
+    let memory: WidgetMemory?
 }
 
 private struct MemoriesTimelineProvider: TimelineProvider {
@@ -267,10 +267,8 @@ private struct MemoriesTimelineProvider: TimelineProvider {
         MemoriesEntry(
             date: Date(),
             memory: .init(
-                id: "preview", title: String(localized: "\(5) years ago"),
-                subtitle: (Calendar(identifier: .gregorian).date(
-                    from: DateComponents(year: 2021, month: 8, day: 9)) ?? .now)
-                    .formatted(date: .long, time: .omitted), imageName: nil))
+                id: "preview", imageName: nil,
+                memoryAt: Date(timeIntervalSince1970: 1_628_467_200), yearsAgo: 5))
     }
 
     func getSnapshot(in context: Context, completion: @escaping (MemoriesEntry) -> Void) {
@@ -295,6 +293,7 @@ private struct MemoriesTimelineProvider: TimelineProvider {
 
 private struct MemoriesWidgetView: View {
     @Environment(\.widgetFamily) private var family
+    @Environment(\.locale) private var locale
     let entry: MemoriesEntry
 
     var body: some View {
@@ -311,10 +310,16 @@ private struct MemoriesWidgetView: View {
                     .font(.caption2.weight(.semibold))
                     .textCase(.uppercase)
                     .opacity(0.9)
-                Text(entry.memory?.title ?? String(localized: "No memories today"))
+                Group {
+                    if let memory = entry.memory {
+                        Text(memory.localizedTitle(locale: locale))
+                    } else {
+                        Text("No memories today")
+                    }
+                }
                     .font(family == .systemSmall ? .headline : .title2.bold())
                     .lineLimit(2)
-                if let subtitle = entry.memory?.subtitle {
+                if let subtitle = entry.memory?.localizedSubtitle(locale: locale) {
                     Text(subtitle)
                         .font(.caption)
                         .opacity(0.82)
