@@ -294,21 +294,36 @@ final class BackupService {
     /// karena itu sesinya dipasang belakangan.
     func configure(session: SessionManager) {
         guard session.isLoggedIn, session.backupQueueOwner != nil else { return }
+        let recoveringStorage = repo != nil && !acceptsUploadResults && hasAuthenticatedSession
+            && self.session?.backupQueueOwner == session.backupQueueOwner
         if repo != nil {
-            if self.session === session {
+            if self.session === session, !recoveringStorage {
                 recoverCompletedAlbumPlacements()
                 resumePendingAlbumPlacements()
                 return
             }
             if self.session?.backupQueueOwner != session.backupQueueOwner { stop() }
         }
-        attach(session)
-        guard (isEnabled || queue.hasPendingUserRequests), acceptsUploadResults else { return }
+        attach(session, recoveringStorage: recoveringStorage)
+        guard acceptsUploadResults, let ownership = uploadOwnership,
+              isEnabled || queue.hasPendingUserRequests || recoveringStorage else { return }
         if isEnabled { BackupScheduler.schedule() }
         Task { [weak self] in
-            guard let self else { return }
+            guard let self, self.uploadOwnership == ownership else { return }
+            if recoveringStorage {
+                do {
+                    guard try await self.reconcileBackgroundTasks(ownership: ownership) else { return }
+                    self.applyQueueSnapshot()
+                } catch {
+                    guard self.uploadOwnership == ownership else { return }
+                    self.lastError = error.localizedDescription
+                    self.acceptsUploadResults = false
+                    return
+                }
+            }
             if self.isEnabled {
                 await self.prepare()
+                guard self.uploadOwnership == ownership else { return }
                 self.start()
             } else {
                 self.requestNetworkWake()
@@ -337,7 +352,7 @@ final class BackupService {
         attach(session)
     }
 
-    private func attach(_ session: SessionManager) {
+    private func attach(_ session: SessionManager, recoveringStorage: Bool = false) {
         self.session = session
         let api = APIClient(session: session)
         repo = BackupRepository(api: api)
@@ -350,6 +365,10 @@ final class BackupService {
             }
             if missingTransfers?.ownership != queue.ownership { missingTransfers = nil }
             try queue.releaseAuthenticationWaits()
+            if recoveringStorage, acceptsUploadResults {
+                lastError = nil
+                lastQueueError = nil
+            }
             // Notifikasi terminal ditunda sampai failure lama sempat divalidasi
             // terhadap PhotoKit oleh `prepare()`/restore lifecycle.
             applyQueueSnapshot(notify: false)
