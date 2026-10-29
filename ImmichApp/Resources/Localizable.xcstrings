@@ -172466,6 +172466,1196 @@
           }
         }
       }
+    },
+    "Sign in to verify the copies on your server before removing device copies." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sign in to verify the copies on your server before removing device copies."
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "قم بتسجيل الدخول للتحقق من النسخ الموجودة على الخادم الخاص بك قبل إزالة نسخ الجهاز."
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Влезте, за да проверите копията на вашия сървър, преди да премахнете копията на устройството."
+          }
+        },
+        "bn" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ডিভাইসের অনুলিপিগুলি সরানোর আগে আপনার সার্ভারে অনুলিপিগুলি যাচাই করতে সাইন ইন করুন৷"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inicieu la sessió per verificar les còpies al vostre servidor abans d'eliminar les còpies del dispositiu."
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Před odebráním kopií ze zařízení se přihlaste a ověřte kopie na serveru."
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Log ind for at bekræfte kopierne på din server, før du fjerner enhedskopier."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Melden Sie sich an, um die Kopien auf Ihrem Server zu überprüfen, bevor Sie Gerätekopien entfernen."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Συνδεθείτε για να επαληθεύσετε τα αντίγραφα στον διακομιστή σας πριν αφαιρέσετε τα αντίγραφα της συσκευής."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inicie sesión para verificar las copias en su servidor antes de eliminar las copias del dispositivo."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "قبل از حذف کپی های دستگاه، برای تأیید کپی ها در سرور خود وارد شوید."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kirjaudu sisään vahvistaaksesi palvelimellasi olevat kopiot ennen laitekopioiden poistamista."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connectez-vous pour vérifier les copies sur votre serveur avant de supprimer les copies de l'appareil."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "היכנס כדי לאמת את העותקים בשרת שלך לפני הסרת עותקי המכשיר."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "डिवाइस प्रतियां हटाने से पहले अपने सर्वर पर प्रतियां सत्यापित करने के लिए साइन इन करें।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Prijavite se kako biste provjerili kopije na svom poslužitelju prije uklanjanja kopija s uređaja."
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Jelentkezzen be, hogy ellenőrizze a másolatokat a szerveren, mielőtt eltávolítaná az eszközpéldányokat."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Masuk untuk memverifikasi salinan di server Anda sebelum menghapus salinan perangkat."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Accedi per verificare le copie sul tuo server prima di rimuovere le copie del dispositivo."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "デバイス上のコピーを削除する前に、サインインしてサーバー上のコピーを確認してください。"
+          }
+        },
+        "kk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Құрылғы көшірмелерін жоймас бұрын сервердегі көшірмелерді тексеру үшін жүйеге кіріңіз."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "장치 복사본을 제거하기 전에 로그인하여 서버의 복사본을 확인하세요."
+          }
+        },
+        "lt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Prieš pašalindami įrenginio kopijas prisijunkite, kad patikrintumėte kopijas savo serveryje."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Log masuk untuk mengesahkan salinan pada pelayan anda sebelum mengalih keluar salinan peranti."
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Logg på for å bekrefte kopiene på serveren din før du fjerner enhetskopier."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Meld u aan om de kopieën op uw server te verifiëren voordat u apparaatkopieën verwijdert."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zaloguj się, aby zweryfikować kopie na serwerze przed usunięciem kopii z urządzenia."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inicie sessão para verificar as cópias no servidor antes de remover as cópias do dispositivo."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conectați-vă pentru a verifica copiile de pe server înainte de a elimina copiile de pe dispozitiv."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Войдите в систему, чтобы проверить копии на вашем сервере, прежде чем удалять копии с устройства."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pred odstránením kópií zo zariadenia sa prihláste, aby ste si overili kópie na svojom serveri."
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Prijavite se, da preverite kopije v strežniku, preden odstranite kopije iz naprave."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Logga in för att verifiera kopiorna på din server innan du tar bort enhetskopior."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ลงชื่อเข้าใช้เพื่อตรวจสอบสำเนาบนเซิร์ฟเวอร์ของคุณก่อนที่จะลบสำเนาของอุปกรณ์"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cihaz kopyalarını kaldırmadan önce sunucunuzdaki kopyaları doğrulamak için oturum açın."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Увійдіть, щоб перевірити копії на вашому сервері, перш ніж видаляти копії з пристрою."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Đăng nhập để xác minh các bản sao trên máy chủ của bạn trước khi xóa bản sao thiết bị."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在删除设备副本之前，请登录以验证服务器上的副本。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在刪除裝置副本之前，請登入以驗證伺服器上的副本。"
+          }
+        }
+      }
+    },
+    "A device or server copy changed or could not be verified. Refresh the photos and try again." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A device or server copy changed or could not be verified. Refresh the photos and try again."
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "تم تغيير نسخة الجهاز أو الخادم أو تعذر التحقق منها. قم بتحديث الصور وحاول مرة أخرى."
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Копие на устройство или сървър е променено или не може да бъде потвърдено. Опреснете снимките и опитайте отново."
+          }
+        },
+        "bn" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "একটি ডিভাইস বা সার্ভার কপি পরিবর্তিত হয়েছে বা যাচাই করা যায়নি৷ ফটো রিফ্রেশ করুন এবং আবার চেষ্টা করুন."
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Una còpia del dispositiu o del servidor ha canviat o no s’ha pogut verificar. Actualitzeu les fotos i torneu-ho a provar."
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopie zařízení nebo serveru se změnila nebo se nepodařilo ověřit. Obnovte fotky a zkuste to znovu."
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En enheds- eller serverkopi er ændret eller kunne ikke bekræftes. Opdater billederne, og prøv igen."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eine Geräte- oder Serverkopie wurde geändert oder konnte nicht überprüft werden. Aktualisieren Sie die Fotos und versuchen Sie es erneut."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ένα αντίγραφο συσκευής ή διακομιστή άλλαξε ή δεν ήταν δυνατό να επαληθευτεί. Ανανεώστε τις φωτογραφίες και δοκιμάστε ξανά."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Una copia del dispositivo o del servidor ha cambiado o no se ha podido verificar. Actualice las fotos e inténtelo de nuevo."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "کپی دستگاه یا سرور تغییر کرد یا تأیید نشد. عکس ها را بازخوانی کنید و دوباره امتحان کنید."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Laitteen tai palvelimen kopiota muutettiin tai sitä ei voitu vahvistaa. Päivitä kuvat ja yritä uudelleen."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Une copie sur l'appareil ou le serveur a changé ou n'a pas pu être vérifiée. Actualisez les photos et réessayez."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "עותק של מכשיר או שרת השתנה או לא ניתן היה לאמת. רענן את התמונות ונסה שוב."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "किसी डिवाइस या सर्वर की कॉपी बदल गई या सत्यापित नहीं की जा सकी. फ़ोटो ताज़ा करें और पुनः प्रयास करें।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopija uređaja ili poslužitelja promijenjena je ili se nije mogla potvrditi. Osvježite fotografije i pokušajte ponovno."
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Egy eszköz vagy szerver másolata módosult, vagy nem ellenőrizhető. Frissítse a fényképeket, és próbálja újra."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Salinan perangkat atau server berubah atau tidak dapat diverifikasi. Segarkan foto dan coba lagi."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Una copia del dispositivo o del server è stata modificata o non è stato possibile verificarla. Aggiorna le foto e riprova."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "デバイスまたはサーバーのコピーが変更されたか、検証できませんでした。写真を更新してもう一度お試しください。"
+          }
+        },
+        "kk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Құрылғы немесе сервер көшірмесі өзгертілді немесе расталмады. Фотосуреттерді жаңартып, әрекетті қайталаңыз."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "장치 또는 서버 사본이 변경되었거나 확인할 수 없습니다. 사진을 새로 고치고 다시 시도하세요."
+          }
+        },
+        "lt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Įrenginio arba serverio kopija pasikeitė arba negalėjo būti patvirtinta. Atnaujinkite nuotraukas ir bandykite dar kartą."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Salinan peranti atau pelayan ditukar atau tidak dapat disahkan. Muat semula foto dan cuba lagi."
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En kopi på enheten eller serveren er endret eller kunne ikke bekreftes. Oppdater bildene og prøv igjen."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Een apparaat- of serverkopie is gewijzigd of kon niet worden geverifieerd. Vernieuw de foto's en probeer het opnieuw."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopia urządzenia lub serwera została zmieniona lub nie można jej zweryfikować. Odśwież zdjęcia i spróbuj ponownie."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uma cópia do dispositivo ou do servidor foi alterada ou não pôde ser verificada. Atualize as fotos e tente novamente."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O copie de pe dispozitiv sau de pe server a fost modificată sau nu a putut fi verificată. Actualizați fotografiile și încercați din nou."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Копия на устройстве или сервере изменилась или не может быть проверена. Обновите фотографии и повторите попытку."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kópia zariadenia alebo servera sa zmenila alebo sa nepodarilo overiť. Obnovte fotografie a skúste to znova."
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopija naprave ali strežnika je bila spremenjena ali je ni bilo mogoče preveriti. Osvežite fotografije in poskusite znova."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En enhets- eller serverkopia har ändrats eller kunde inte verifieras. Uppdatera fotona och försök igen."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "สำเนาอุปกรณ์หรือเซิร์ฟเวอร์มีการเปลี่ยนแปลงหรือไม่สามารถตรวจสอบได้ รีเฟรชรูปภาพแล้วลองอีกครั้ง"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bir cihaz veya sunucu kopyası değiştirildi veya doğrulanamadı. Fotoğrafları yenileyip tekrar deneyin."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Копія пристрою або сервера змінена або не може бути перевірена. Оновіть фотографії та повторіть спробу."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bản sao của thiết bị hoặc máy chủ đã thay đổi hoặc không thể xác minh được. Hãy làm mới ảnh và thử lại."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设备或服务器副本已更改或无法验证。刷新照片并重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "設備或伺服器副本已更改或無法驗證。刷新照片並重試。"
+          }
+        }
+      }
+    },
+    "Photos could not confirm which device copies were removed." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photos could not confirm which device copies were removed."
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "تعذر على تطبيق «الصور» تأكيد نسخ الجهاز التي تمت إزالتها."
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Приложението „Снимки“ не можа да потвърди кои копия са премахнати от устройството."
+          }
+        },
+        "bn" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ফটো অ্যাপ নিশ্চিত করতে পারেনি ডিভাইসের কোন অনুলিপিগুলি সরানো হয়েছে।"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L’app Fotos no ha pogut confirmar quines còpies del dispositiu s’han eliminat."
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aplikace Fotky nemohla potvrdit, které kopie byly ze zařízení odstraněny."
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fotos kunne ikke bekræfte, hvilke enhedskopier der blev fjernet."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die App „Fotos“ konnte nicht bestätigen, welche Gerätekopien entfernt wurden."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Η εφαρμογή Φωτογραφίες δεν μπόρεσε να επιβεβαιώσει ποια αντίγραφα αφαιρέθηκαν από τη συσκευή."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fotos no pudo confirmar qué copias del dispositivo se eliminaron."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photos نتوانست تأیید کند کدام نسخه‌های موجود در دستگاه حذف شده‌اند."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kuvat-appi ei voinut vahvistaa, mitkä laitteella olevat kopiot poistettiin."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photos n'a pas pu confirmer quelles copies de l'appareil ont été supprimées."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "יישום התמונות לא הצליח לאשר אילו עותקים הוסרו מהמכשיר."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "फ़ोटो ऐप यह पुष्टि नहीं कर सका कि डिवाइस की कौन-सी प्रतियां हटाई गईं।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aplikacija Fotografije nije mogla potvrditi koje su kopije uklonjene s uređaja."
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A Fotók alkalmazás nem tudta megerősíteni, mely másolatokat távolították el az eszközről."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Foto tidak dapat mengonfirmasi salinan perangkat mana yang dihapus."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Foto non ha potuto confermare quali copie del dispositivo sono state rimosse."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「写真」では、デバイス上のどのコピーが削除されたか確認できませんでした。"
+          }
+        },
+        "kk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photos қолданбасы құрылғыдан қандай көшірмелер жойылғанын растай алмады."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사진 앱에서 기기의 어떤 사본이 삭제되었는지 확인할 수 없었습니다."
+          }
+        },
+        "lt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Programai „Nuotraukos“ nepavyko patvirtinti, kurios kopijos pašalintos iš įrenginio."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aplikasi Foto tidak dapat mengesahkan salinan pada peranti yang telah dialih keluar."
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bilder kunne ikke bekrefte hvilke enhetskopier som ble fjernet."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "De app Foto's kon niet bevestigen welke apparaatkopieën zijn verwijderd."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aplikacja Zdjęcia nie mogła potwierdzić, które kopie zostały usunięte z urządzenia."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A app Fotos não conseguiu confirmar quais as cópias do dispositivo que foram removidas."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aplicația Fotografii nu a putut confirma ce copii au fost eliminate de pe dispozitiv."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Приложение «Фото» не смогло подтвердить, какие копии были удалены с устройства."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aplikácia Fotky nedokázala potvrdiť, ktoré kópie boli odstránené zo zariadenia."
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aplikacija Fotografije ni mogla potrditi, katere kopije so bile odstranjene iz naprave."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Foton kunde inte bekräfta vilka enhetskopior som togs bort."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "แอปรูปภาพไม่สามารถยืนยันได้ว่าสำเนาใดบนอุปกรณ์ถูกลบไปแล้ว"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fotoğraflar hangi cihaz kopyalarının kaldırıldığını doğrulayamadı."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Програма «Фотографії» не змогла підтвердити, які копії було видалено з пристрою."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ứng dụng Ảnh không thể xác nhận những bản sao nào trên thiết bị đã bị xóa."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“照片”无法确认此设备上哪些副本已被移除。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「照片」無法確認此裝置上哪些副本已被移除。"
+          }
+        }
+      }
+    },
+    "Allow Photos access to verify the copies on this device." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow Photos access to verify the copies on this device."
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "اسمح بالوصول إلى الصور للتحقق من النسخ الموجودة على هذا الجهاز."
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Разрешете достъп до снимките, за да се проверят копията на това устройство."
+          }
+        },
+        "bn" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "এই ডিভাইসে অনুলিপি যাচাই করতে ফটো অ্যাক্সেসের অনুমতি দিন।"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Permeteu l’accés a Fotos per verificar les còpies en aquest dispositiu."
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Povolte přístup k fotkám pro ověření kopií na tomto zařízení."
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillad adgang til Fotos for at bekræfte kopierne på denne enhed."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erlauben Sie den Zugriff auf Fotos, um die Kopien auf diesem Gerät zu überprüfen."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Επιτρέψτε την πρόσβαση στις Φωτογραφίες για την επαλήθευση των αντιγράφων σε αυτήν τη συσκευή."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Permita el acceso a Fotos para verificar las copias en este dispositivo."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "برای تأیید نسخه‌های موجود در این دستگاه، اجازه دسترسی به عکس‌ها را بدهید."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Salli pääsy Kuvat-kirjastoon, jotta tällä laitteella olevat kopiot voidaan vahvistaa."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Autorisez l'accès à Photos pour vérifier les copies sur cet appareil."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "אפשר גישה לתמונות כדי לאמת את העותקים במכשיר זה."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "इस डिवाइस पर मौजूद प्रतियों को सत्यापित करने के लिए फ़ोटो तक पहुँच की अनुमति दें।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dopustite pristup fotografijama za provjeru kopija na ovom uređaju."
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Engedélyezze a fotók elérését az eszközön lévő másolatok ellenőrzéséhez."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Izinkan akses Foto untuk memverifikasi salinan di perangkat ini."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Consenti l'accesso a Foto per verificare le copie su questo dispositivo."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このデバイス上のコピーを確認するには、「写真」へのアクセスを許可してください。"
+          }
+        },
+        "kk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Осы құрылғыдағы көшірмелерді тексеру үшін фотосуреттерге қол жеткізуге рұқсат беріңіз."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 기기에 있는 사본을 확인하려면 사진 접근을 허용하세요."
+          }
+        },
+        "lt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leiskite pasiekti nuotraukas, kad būtų galima patikrinti kopijas šiame įrenginyje."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Benarkan akses Foto untuk mengesahkan salinan pada peranti ini."
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillat tilgang til Bilder for å bekrefte kopiene på denne enheten."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sta toegang tot Foto's toe om de kopieën op dit apparaat te verifiëren."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zezwól na dostęp do zdjęć, aby zweryfikować kopie na tym urządzeniu."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Permita o acesso a Fotos para verificar as cópias neste dispositivo."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Permiteți accesul la Fotografii pentru a verifica copiile de pe acest dispozitiv."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Разрешите доступ к фото, чтобы проверить копии на этом устройстве."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Povoľte prístup k Fotkám na overenie kópií na tomto zariadení."
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Omogočite dostop do fotografij za preverjanje kopij v tej napravi."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillåt åtkomst till Foton för att verifiera kopiorna på den här enheten."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "อนุญาตให้เข้าถึงรูปภาพเพื่อตรวจสอบสำเนาบนอุปกรณ์นี้"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bu cihazdaki kopyaları doğrulamak için Fotoğraflar'a erişim izni verin."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Надайте доступ до фотографій, щоб перевірити копії на цьому пристрої."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cho phép truy cập Ảnh để xác minh các bản sao trên thiết bị này."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许访问照片以验证此设备上的副本。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允許存取照片以驗證此裝置上的副本。"
+          }
+        }
+      }
+    },
+    "Your photo library changed. Scan again before removing device copies." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your photo library changed. Scan again before removing device copies."
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "تغيرت مكتبة الصور الخاصة بك. قم بالمسح مرة أخرى قبل إزالة نسخ الجهاز."
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Вашата библиотека със снимки е променена. Сканирайте отново, преди да премахнете копията на устройството."
+          }
+        },
+        "bn" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "আপনার ফটো লাইব্রেরি পরিবর্তিত হয়েছে. ডিভাইসের অনুলিপিগুলি সরানোর আগে আবার স্ক্যান করুন।"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La vostra biblioteca de fotos ha canviat. Torneu a escanejar abans d’eliminar les còpies del dispositiu."
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaše knihovna fotografií se změnila. Před odebráním kopií zařízení znovu naskenujte."
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dit fotobibliotek er ændret. Scan igen, før du fjerner enhedens kopier."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ihre Fotobibliothek hat sich geändert. Scannen Sie erneut, bevor Sie Gerätekopien entfernen."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Η βιβλιοθήκη φωτογραφιών σας άλλαξε. Σαρώστε ξανά πριν αφαιρέσετε τα αντίγραφα της συσκευής."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Su biblioteca de fotos ha cambiado. Vuelva a analizarla antes de eliminar las copias del dispositivo."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "کتابخانه عکس شما تغییر کرد. قبل از حذف کپی های دستگاه، دوباره اسکن کنید."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kuvakirjastosi muuttui. Tarkista kirjasto uudelleen ennen laitteella olevien kopioiden poistamista."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Votre photothèque a changé. Lancez une nouvelle analyse avant de supprimer les copies de l'appareil."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ספריית התמונות שלך השתנתה. סרוק שוב לפני הסרת עותקי המכשיר."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "आपकी फ़ोटो लाइब्रेरी बदल गई. डिवाइस प्रतियां हटाने से पहले दोबारा स्कैन करें।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaša biblioteka fotografija je promijenjena. Ponovno pregledajte biblioteku prije uklanjanja kopija s uređaja."
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A fotókönyvtár megváltozott. Vizsgálja át újra, mielőtt eltávolítaná a másolatokat az eszközről."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pustaka foto Anda telah berubah. Pindai ulang sebelum menghapus salinan di perangkat."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La tua libreria di foto è cambiata. Esegui di nuovo l'analisi prima di rimuovere le copie del dispositivo."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写真ライブラリが変更されました。デバイスのコピーを削除する前に、再度スキャンしてください。"
+          }
+        },
+        "kk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Фотосуреттер жинағыңыз өзгерді. Құрылғы көшірмелерін жою алдында қайта сканерлеңіз."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사진 라이브러리가 변경되었습니다. 장치 사본을 제거하기 전에 다시 스캔하십시오."
+          }
+        },
+        "lt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Jūsų nuotraukų biblioteka pasikeitė. Dar kartą patikrinkite biblioteką prieš pašalindami kopijas iš įrenginio."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pustaka foto anda telah berubah. Imbas semula sebelum mengeluarkan salinan peranti."
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bildebiblioteket ditt er endret. Skann igjen før du fjerner enhetskopier."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uw fotobibliotheek is gewijzigd. Scan opnieuw voordat u apparaatkopieën verwijdert."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Twoja biblioteka zdjęć uległa zmianie. Ponownie przeskanuj bibliotekę przed usunięciem kopii z urządzenia."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A fototeca foi alterada. Analise-a novamente antes de remover as cópias do dispositivo."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Biblioteca dvs. de fotografii s-a schimbat. Scanați din nou înainte de a elimina copiile de pe dispozitiv."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ваша медиатека изменилась. Повторите сканирование перед удалением копий с устройства."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaša knižnica fotografií sa zmenila. Pred odstránením kópií zo zariadenia znova naskenujte."
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaša knjižnica fotografij se je spremenila. Ponovno preglejte knjižnico, preden odstranite kopije iz naprave."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ditt fotobibliotek har ändrats. Skanna igen innan du tar bort enhetskopiorna."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "คลังภาพของคุณมีการเปลี่ยนแปลง สแกนอีกครั้งก่อนที่จะลบสำเนาของอุปกรณ์"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fotoğraf kitaplığınız değişti. Cihaz kopyalarını kaldırmadan önce tekrar tarayın."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ваша бібліотека фотографій змінилася. Повторіть сканування, перш ніж видаляти копії з пристрою."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thư viện ảnh của bạn đã thay đổi. Quét lại trước khi xóa bản sao thiết bị."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "您的照片库已更改。删除设备副本之前再次扫描。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "您的照片庫已變更。刪除設備副本之前再次掃描。"
+          }
+        }
+      }
     }
   },
   "version" : "1.1"

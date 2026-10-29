@@ -110,9 +110,9 @@ enum LocalSpaceLibraryError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .accessRequired:
-            "Allow Photos access to verify the copies on this device."
+            String(localized: "Allow Photos access to verify the copies on this device.")
         case .libraryChanged:
-            "Your photo library changed. Scan again before removing device copies."
+            String(localized: "Your photo library changed. Scan again before removing device copies.")
         }
     }
 }

@@ -13,11 +13,11 @@ enum DeviceCopySafetyError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .signInRequired:
-            "Sign in to verify the copies on your server before removing device copies."
+            String(localized: "Sign in to verify the copies on your server before removing device copies.")
         case .copiesChanged:
-            "A device or server copy changed or could not be verified. Refresh the photos and try again."
+            String(localized: "A device or server copy changed or could not be verified. Refresh the photos and try again.")
         case .invalidDeletionResult:
-            "Photos could not confirm which device copies were removed."
+            String(localized: "Photos could not confirm which device copies were removed.")
         }
     }
 }

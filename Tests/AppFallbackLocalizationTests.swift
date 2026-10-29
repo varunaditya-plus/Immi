@@ -49,6 +49,16 @@ final class AppFallbackLocalizationTests: XCTestCase {
              "Autorisez l'accès à Photos pour lire la photothèque sur cet appareil."),
             (LocalPhotoLibraryError.libraryChanged, "Your photo library changed. Try again.",
              "Votre photothèque a changé. Réessayez."),
+            (DeviceCopySafetyError.signInRequired, "Sign in to verify the copies on your server before removing device copies.",
+             "Connectez-vous pour vérifier les copies sur votre serveur avant de supprimer les copies de l'appareil."),
+            (DeviceCopySafetyError.copiesChanged, "A device or server copy changed or could not be verified. Refresh the photos and try again.",
+             "Une copie sur l'appareil ou le serveur a changé ou n'a pas pu être vérifiée. Actualisez les photos et réessayez."),
+            (DeviceCopySafetyError.invalidDeletionResult, "Photos could not confirm which device copies were removed.",
+             "Photos n'a pas pu confirmer quelles copies de l'appareil ont été supprimées."),
+            (LocalSpaceLibraryError.accessRequired, "Allow Photos access to verify the copies on this device.",
+             "Autorisez l'accès à Photos pour vérifier les copies sur cet appareil."),
+            (LocalSpaceLibraryError.libraryChanged, "Your photo library changed. Scan again before removing device copies.",
+             "Votre photothèque a changé. Lancez une nouvelle analyse avant de supprimer les copies de l'appareil.")
         ]
         for (error, english, french) in cases {
             XCTAssertEqual(error.localizedDescription, expected(english, french))

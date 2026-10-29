@@ -41,21 +41,11 @@ final class LocalizationCoverageTests: XCTestCase {
     }
 
     func testRecentUserFacingErrorsAndPaginationAreInCompiledAppResources() throws {
-        let keys = [
-            "Load More",
-            "Loading More…",
-            "Failed to load more photos",
-            "Search returned an incomplete page. Please try again.",
-            "Selects this item.",
-            "Deselects this item.",
-            "Opens the viewer.",
-            "Shows this item in the viewer.",
-            "Unable to play video. Try again.",
-            "Unable to play Live Photo. Touch and hold to try again.",
-            "Automatic Backup Off",
-            "Accessible Photos Backed Up",
-            "Shared Uploads",
-            "Upload Details",
+        let keys = ["Load More", "Loading More…", "Failed to load more photos",
+            "Search returned an incomplete page. Please try again.", "Selects this item.",
+            "Deselects this item.", "Opens the viewer.", "Shows this item in the viewer.",
+            "Unable to play video. Try again.", "Unable to play Live Photo. Touch and hold to try again.",
+            "Automatic Backup Off", "Accessible Photos Backed Up", "Shared Uploads", "Upload Details",
             "Sign In with OAuth",
             "The local sync database could not be exported.",
             "The local sync database is temporarily unavailable.",
@@ -64,7 +54,12 @@ final class LocalizationCoverageTests: XCTestCase {
             "Connect to the server before running this job.",
             "Connect to Wi-Fi before reading and hashing your photo library.",
             "Allow Photos access to read the library on this device.",
-            "Your photo library changed. Try again."]
+            "Your photo library changed. Try again.",
+            "Sign in to verify the copies on your server before removing device copies.",
+            "A device or server copy changed or could not be verified. Refresh the photos and try again.",
+            "Photos could not confirm which device copies were removed.",
+            "Allow Photos access to verify the copies on this device.",
+            "Your photo library changed. Scan again before removing device copies."]
         for language in languages {
             let bundle = try localizedBundle(Bundle.main, language: language)
             for key in keys { assertCompiled(key, in: bundle) }
