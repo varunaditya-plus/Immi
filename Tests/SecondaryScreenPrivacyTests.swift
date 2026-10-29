@@ -180,6 +180,53 @@ final class SecondaryScreenPrivacyTests: XCTestCase {
         XCTAssertEqual(store.coverID(for: album), fixture.ids[1])
     }
 
+    func testHeldCoverDoesNotCacheARejectedPhotoAsAnEmptyAlbum() async throws {
+        let fixture = try fixture()
+        let store = AlbumCoverStore(dataManager: fixture.manager)
+        let repository = SecondaryCoverRepository(api: fixture.api)
+        let gate = SecondaryResponseGate<[String]>()
+        cleanup.append { gate.close() }
+        repository.fetch = { try await gate.value() }
+        let album = album()
+        let load = Task { await store.resolveCover(for: album, repository: repository) }
+        await fulfillment(of: [gate.started], timeout: 2)
+
+        try fixture.manager.setAssetVisibility([fixture.ids[0]], to: "locked")
+        gate.complete([fixture.ids[0]])
+        await load.value
+        XCTAssertNil(store.coverID(for: album))
+
+        repository.fetch = { [fixture] in [fixture.ids[1]] }
+        await store.resolveCover(for: album, repository: repository)
+
+        XCTAssertTrue(fixture.manager.privateAssetIDs.contains(fixture.ids[0]))
+        XCTAssertEqual(repository.requests, 2)
+        XCTAssertEqual(store.coverID(for: album), fixture.ids[1])
+    }
+
+    func testHeldEmptyCoverDoesNotCacheAnObsoleteVisibilityContext() async throws {
+        let fixture = try fixture()
+        let store = AlbumCoverStore(dataManager: fixture.manager)
+        let repository = SecondaryCoverRepository(api: fixture.api)
+        let gate = SecondaryResponseGate<[String]>()
+        cleanup.append { gate.close() }
+        try fixture.manager.setAssetVisibility([fixture.ids[0]], to: "locked")
+        repository.fetch = { try await gate.value() }
+        let album = album()
+        let load = Task { await store.resolveCover(for: album, repository: repository) }
+        await fulfillment(of: [gate.started], timeout: 2)
+
+        try fixture.manager.setAssetVisibility([fixture.ids[0]], to: "timeline")
+        gate.complete([])
+        await load.value
+
+        repository.fetch = { [fixture] in [fixture.ids[0]] }
+        await store.resolveCover(for: album, repository: repository)
+
+        XCTAssertEqual(repository.requests, 2)
+        XCTAssertEqual(store.coverID(for: album), fixture.ids[0])
+    }
+
     func testEmptyCoverIsCachedUntilCountChangesAndVisibleArchiveCanBeFetched() async throws {
         let fixture = try fixture()
         let store = AlbumCoverStore(dataManager: fixture.manager)

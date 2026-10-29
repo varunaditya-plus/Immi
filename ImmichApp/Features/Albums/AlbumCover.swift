@@ -109,7 +109,7 @@ final class AlbumCoverStore {
         // Album kosong tidak punya apa pun untuk dijadikan sampul; tidak ada
         // gunanya menanyakannya ke server.
         guard album.assetCount > 0 else {
-            remember(nil, for: album)
+            remember(nil, for: album, excludedIDs: exclusions)
             return
         }
 
@@ -137,7 +137,8 @@ final class AlbumCoverStore {
         // meleset membuat album itu memakai kotak abu-abu sampai aplikasi
         // ditutup — padahal sampulnya ada, cuma gagal diambil sekali.
         guard case .success(let id) = outcome else { return }
-        remember(id.flatMap { policy.allows(id: $0) ? $0 : nil }, for: album)
+        if let id, !policy.allows(id: id) { return }
+        remember(id, for: album, excludedIDs: exclusions)
     }
 
     /// Dipanggil saat logout: id album milik akun lama tidak boleh menempel di
@@ -156,7 +157,7 @@ final class AlbumCoverStore {
         inFlight.removeValue(forKey: albumID)?.task.cancel()
     }
 
-    private func remember(_ assetID: String?, for album: AlbumResponseDTO) {
+    private func remember(_ assetID: String?, for album: AlbumResponseDTO, excludedIDs: Set<String>) {
         resolved[album.id] = Resolution(assetCount: album.assetCount, assetID: assetID, excludedIDs: excludedIDs)
     }
 }
