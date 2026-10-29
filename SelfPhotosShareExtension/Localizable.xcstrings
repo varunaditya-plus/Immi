@@ -4,231 +4,795 @@
     "%lld item(s) will retry when SelfPhotos opens.": {
       "localizations": {
         "id": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld item akan dicoba lagi saat SelfPhotos dibuka."
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld item akan dicoba lagi ketika SelfPhotos terbuka."
+                }
+              }
+            }
           }
         },
         "ar": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "ستتم إعادة محاولة %lld عنصر عند فتح SelfPhotos."
+          "variations": {
+            "plural": {
+              "zero": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "ستتم إعادة محاولة %lld عنصر عند فتح SelfPhotos."
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "ستتم إعادة محاولة عنصر واحد عند فتح SelfPhotos."
+                }
+              },
+              "two": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "ستتم إعادة محاولة عنصرين عند فتح SelfPhotos."
+                }
+              },
+              "few": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "ستتم إعادة محاولة %lld عناصر عند فتح SelfPhotos."
+                }
+              },
+              "many": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "ستتم إعادة محاولة %lld عنصرًا عند فتح SelfPhotos."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "ستتم إعادة محاولة %lld عنصر عند فتح SelfPhotos."
+                }
+              }
+            }
           }
         },
         "bn": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "SelfPhotos খুললে %lldটি আইটেম আবার চেষ্টা করা হবে।"
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "SelfPhotos খুললে %lldটি আইটেম আবার চেষ্টা করবে।"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "SelfPhotos খুললে %lldটি আইটেম পুনরায় চেষ্টা করবে৷"
+                }
+              }
+            }
           }
         },
         "bg": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld елемента ще бъдат опитани отново при отваряне на SelfPhotos."
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld елемента ще опитат отново, когато SelfPhotos се отвори."
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld елемент ще направи повторен опит, когато SelfPhotos се отвори."
+                }
+              }
+            }
           }
         },
         "ca": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld elements es tornaran a provar quan s'obri SelfPhotos."
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld elements es tornaran a intentar quan s'obri SelfPhotos."
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld element es tornarà a provar quan s'obri SelfPhotos."
+                }
+              },
+              "many": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld elements es tornaran a intentar quan s'obri SelfPhotos."
+                }
+              }
+            }
           }
         },
         "hr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld stavki pokušat će se ponovno kada se SelfPhotos otvori."
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld stavki će pokušati ponovno kada se otvori SelfPhotos."
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld stavka će pokušati ponovno kada se otvori SelfPhotos."
+                }
+              },
+              "few": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld stavke će pokušati ponovno kada se otvori SelfPhotos."
+                }
+              }
+            }
           }
         },
         "cs": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld položek se znovu pokusí nahrát po otevření SelfPhotos."
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld položek se pokusí znovu, když se otevře SelfPhotos."
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld položka se pokusí znovu, když se otevře SelfPhotos."
+                }
+              },
+              "few": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld položky se pokusí znovu, když se otevře SelfPhotos."
+                }
+              }
+            }
           }
         },
         "da": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld emner forsøges igen, når SelfPhotos åbnes."
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld elementer vil prøve igen, når SelfPhotos åbner."
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld element vil prøve igen, når SelfPhotos åbner."
+                }
+              }
+            }
           }
         },
         "nl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld items worden opnieuw geprobeerd wanneer SelfPhotos wordt geopend."
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld items zullen opnieuw proberen wanneer SelfPhotos wordt geopend."
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld item wordt opnieuw geprobeerd wanneer SelfPhotos wordt geopend."
+                }
+              }
+            }
           }
         },
         "fi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld kohdetta yritetään uudelleen, kun SelfPhotos avataan."
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld kohdetta yrittää uudelleen, kun SelfPhotos avautuu."
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld kohde yrittää uudelleen, kun SelfPhotos avautuu."
+                }
+              }
+            }
           }
         },
         "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld éléments seront réessayés à l’ouverture de SelfPhotos."
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld élément sera réessayé à l'ouverture de SelfPhotos."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld éléments seront réessayés à l'ouverture de SelfPhotos."
+                }
+              },
+              "many": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld éléments seront réessayés à l'ouverture de SelfPhotos."
+                }
+              }
+            }
           }
         },
         "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld Elemente werden beim Öffnen von SelfPhotos erneut versucht."
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld Elemente werden erneut versucht, wenn SelfPhotos geöffnet wird."
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld Element wird erneut versucht, wenn SelfPhotos geöffnet wird."
+                }
+              }
+            }
           }
         },
         "el": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld στοιχεία θα δοκιμαστούν ξανά όταν ανοίξει το SelfPhotos."
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld στοιχεία θα προσπαθήσουν ξανά όταν ανοίξει το SelfPhotos."
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld στοιχείο θα προσπαθήσει ξανά όταν ανοίξει το SelfPhotos."
+                }
+              }
+            }
           }
         },
         "he": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld פריטים ינסו שוב כאשר SelfPhotos ייפתח."
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld פריטים ינסו שוב כאשר SelfPhotos ייפתח."
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "פריט אחד ינסה שוב כאשר SelfPhotos ייפתח."
+                }
+              },
+              "two": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld פריטים ינסו שוב כאשר SelfPhotos ייפתח."
+                }
+              }
+            }
           }
         },
         "hi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "SelfPhotos खुलने पर %lld आइटम फिर से प्रयास करेंगे।"
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "SelfPhotos खुलने पर %lld आइटम पुनः प्रयास करेगा।"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "SelfPhotos खुलने पर %lld आइटम पुनः प्रयास करेंगे।"
+                }
+              }
+            }
           }
         },
         "hu": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld elem feltöltése újraindul a SelfPhotos megnyitásakor."
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld elem fog újra próbálkozni, amikor a SelfPhotos megnyílik."
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld elem újra próbálkozik, amikor a SelfPhotos megnyílik."
+                }
+              }
+            }
           }
         },
         "it": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Il caricamento di %lld elementi verrà ritentato all'apertura di SelfPhotos."
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld elementi verranno ritentati all'apertura di SelfPhotos."
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld elemento verrà riprovato all'apertura di SelfPhotos."
+                }
+              },
+              "many": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld elementi verranno ritentati all'apertura di SelfPhotos."
+                }
+              }
+            }
           }
         },
         "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "SelfPhotosを開くと%lld件の項目を再試行します。"
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "SelfPhotos が開くと、%lld 個の項目が再試行されます。"
+                }
+              }
+            }
           }
         },
         "kk": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "SelfPhotos ашылғанда %lld элемент қайта әрекеттенеді."
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "SelfPhotos ашылғанда %lld элемент қайта әрекет етеді."
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "SelfPhotos ашылғанда, %lld элемент әрекетті қайталайды."
+                }
+              }
+            }
           }
         },
         "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "SelfPhotos를 열면 %lld개 항목을 다시 시도합니다."
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "SelfPhotos이 열리면 %lld개 항목이 다시 시도됩니다."
+                }
+              }
+            }
           }
         },
         "lt": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld elementai bus bandomi dar kartą atidarius SelfPhotos."
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld elementų bus bandoma dar kartą, kai atsidarys SelfPhotos."
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld elementas bus bandomas dar kartą, kai atsidarys SelfPhotos."
+                }
+              },
+              "few": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld elementai bus bandomi dar kartą, kai atsidarys SelfPhotos."
+                }
+              }
+            }
           }
         },
         "ms": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld item akan dicuba semula apabila SelfPhotos dibuka."
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld item akan mencuba semula apabila SelfPhotos dibuka."
+                }
+              }
+            }
           }
         },
         "nb": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld elementer prøves på nytt når SelfPhotos åpnes."
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld elementer vil prøve på nytt når SelfPhotos åpnes."
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld element vil prøve på nytt når SelfPhotos åpnes."
+                }
+              }
+            }
           }
         },
         "fa": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "با باز شدن SelfPhotos، %lld مورد دوباره تلاش می‌شود."
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "وقتی SelfPhotos باز شد، %lld مورد دوباره امتحان خواهد شد."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "وقتی SelfPhotos باز شد، %lld مورد دوباره امتحان خواهند شد."
+                }
+              }
+            }
           }
         },
         "pl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld elementów zostanie ponowionych po otwarciu SelfPhotos."
+          "variations": {
+            "plural": {
+              "many": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld elementów zostanie ponowionych po otwarciu SelfPhotos."
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld element zostanie ponowiony po otwarciu SelfPhotos."
+                }
+              },
+              "few": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld elementy zostaną ponowione po otwarciu SelfPhotos."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld elementów zostanie ponowionych po otwarciu SelfPhotos."
+                }
+              }
+            }
           }
         },
         "pt": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld item(ns) tentarão novamente quando o SelfPhotos abrir."
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld item tentará novamente quando SelfPhotos abrir."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld itens tentarão novamente quando SelfPhotos for aberto."
+                }
+              },
+              "many": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld itens tentarão novamente quando SelfPhotos for aberto."
+                }
+              }
+            }
           }
         },
         "ro": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld element(e) vor reîncerca atunci când se deschide SelfPhotos."
+          "variations": {
+            "plural": {
+              "few": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld elemente vor reîncerca când se deschide SelfPhotos."
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld articol va reîncerca când se deschide SelfPhotos."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld de articole vor încerca din nou când SelfPhotos se deschide."
+                }
+              }
+            }
           }
         },
         "ru": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld элементов повторят попытку при открытии SelfPhotos."
+          "variations": {
+            "plural": {
+              "many": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld элементов повторят попытку, когда откроется SelfPhotos."
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld элемент повторит попытку, когда откроется SelfPhotos."
+                }
+              },
+              "few": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld элемента повторят попытку, когда откроется SelfPhotos."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld элементов повторят попытку, когда откроется SelfPhotos."
+                }
+              }
+            }
           }
         },
         "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "打开 SelfPhotos 后将重试 %lld 个项目。"
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "当 SelfPhotos 打开时，%lld 个项目将重试。"
+                }
+              }
+            }
           }
         },
         "sk": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld položiek sa znova pokúsi nahrať po otvorení aplikácie SelfPhotos."
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld položiek sa pokúsi znova, keď sa otvorí SelfPhotos."
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Po otvorení SelfPhotos sa zopakuje %lld položka."
+                }
+              },
+              "few": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Po otvorení SelfPhotos sa zopakujú %lld položky."
+                }
+              }
+            }
           }
         },
         "sl": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld elementov bo poskusilo znova, ko se odpre SelfPhotos."
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld elementov bo znova poskusil, ko se odpre SelfPhotos."
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld element bo znova poskusil, ko se odpre SelfPhotos."
+                }
+              },
+              "two": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld elementa bosta znova poskusila, ko se odpre SelfPhotos."
+                }
+              },
+              "few": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld elementi bodo znova poskusili, ko se odpre SelfPhotos."
+                }
+              }
+            }
           }
         },
         "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld elementos volverán a intentarlo cuando se abra SelfPhotos."
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld elementos se volverán a intentar cuando se abra SelfPhotos."
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld elemento se reintentará cuando se abra SelfPhotos."
+                }
+              },
+              "many": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld elementos se volverán a intentar cuando se abra SelfPhotos."
+                }
+              }
+            }
           }
         },
         "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld objekt försöker igen när SelfPhotos öppnas."
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld objekt kommer att försöka igen när SelfPhotos öppnas."
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld objekt kommer att försöka igen när SelfPhotos öppnas."
+                }
+              }
+            }
           }
         },
         "th": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld รายการจะลองอีกครั้งเมื่อเปิด SelfPhotos"
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld รายการจะลองอีกครั้งเมื่อ SelfPhotos เปิดขึ้น"
+                }
+              }
+            }
           }
         },
         "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "開啟 SelfPhotos 後將重試 %lld 個項目。"
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "當 SelfPhotos 開啟時，%lld 個項目將重試。"
+                }
+              }
+            }
           }
         },
         "tr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "SelfPhotos açıldığında %lld öğe yeniden denenecek."
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "SelfPhotos açıldığında %lld öğe yeniden denenecek."
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "SelfPhotos açıldığında %lld öğe yeniden denenecek."
+                }
+              }
+            }
           }
         },
         "uk": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld елементів буде повторно оброблено після відкриття SelfPhotos."
+          "variations": {
+            "plural": {
+              "many": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld елементів буде повторено, коли відкриється SelfPhotos."
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld елемент буде повторено, коли відкриється SelfPhotos."
+                }
+              },
+              "few": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld елементи повторять спробу, коли відкриється SelfPhotos."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld елементів буде повторено, коли відкриється SelfPhotos."
+                }
+              }
+            }
           }
         },
         "vi": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld mục sẽ thử lại khi SelfPhotos mở."
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld mục sẽ thử lại khi SelfPhotos mở."
+                }
+              }
+            }
+          }
+        },
+        "en": {
+          "variations": {
+            "plural": {
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld items will retry when SelfPhotos opens."
+                }
+              },
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld item will retry when SelfPhotos opens."
+                }
+              }
+            }
           }
         }
       }
@@ -3960,7 +4524,481 @@
     },
     "No supported photos or videos were shared.": {
       "comment": "Error message displayed when no supported photos or videos were shared.",
-      "isCommentAutoGenerated": true
+      "isCommentAutoGenerated": true,
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No supported photos or videos were shared."
+          }
+        },
+        "ar": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "لم تتم مشاركة أي صور أو مقاطع فيديو مدعومة."
+          }
+        },
+        "bg": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Не са споделени поддържани снимки или видеоклипове."
+          }
+        },
+        "bn": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "কোন সমর্থিত ছবি বা ভিডিও শেয়ার করা হয়নি."
+          }
+        },
+        "ca": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No s'ha compartit cap foto ni vídeo compatible."
+          }
+        },
+        "cs": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nebyly sdíleny žádné podporované fotky ani videa."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ingen understøttede billeder eller videoer blev delt."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Es wurden keine unterstützten Fotos oder Videos geteilt."
+          }
+        },
+        "el": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Δεν κοινοποιήθηκαν υποστηριζόμενες φωτογραφίες ή βίντεο."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No se compartieron fotos ni videos compatibles."
+          }
+        },
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "هیچ عکس یا ویدیوی پشتیبانی شده ای به اشتراک گذاشته نشد."
+          }
+        },
+        "fi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tuettuja kuvia tai videoita ei jaettu."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aucune photo ou vidéo prise en charge n'a été partagée."
+          }
+        },
+        "he": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "לא שותפו תמונות או סרטונים נתמכים."
+          }
+        },
+        "hi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कोई समर्थित फ़ोटो या वीडियो साझा नहीं किया गया."
+          }
+        },
+        "hr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nisu podijeljene podržane fotografije ili videozapisi."
+          }
+        },
+        "hu": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nem osztottak meg támogatott fényképeket vagy videókat."
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tidak ada foto atau video yang didukung yang dibagikan."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Non sono state condivise foto o video supportati."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サポートされている写真やビデオは共有されていませんでした。"
+          }
+        },
+        "kk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Қолдау көрсетілетін фотосуреттер немесе бейнелер бөлісілген жоқ."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "지원되는 사진이나 비디오가 공유되지 않았습니다."
+          }
+        },
+        "lt": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nebuvo bendrinama palaikomų nuotraukų ar vaizdo įrašų."
+          }
+        },
+        "ms": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tiada foto atau video yang disokong dikongsi."
+          }
+        },
+        "nb": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ingen støttede bilder eller videoer ble delt."
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Er zijn geen ondersteunde foto's of video's gedeeld."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nie udostępniono żadnych obsługiwanych zdjęć ani filmów."
+          }
+        },
+        "pt": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nenhuma foto ou vídeo compatível foi compartilhado."
+          }
+        },
+        "ro": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nu au fost partajate fotografii sau videoclipuri acceptate."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Поддерживаемые фотографии и видео не были опубликованы."
+          }
+        },
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Neboli zdieľané žiadne podporované fotografie ani videá."
+          }
+        },
+        "sl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "V skupni rabi ni bila nobena podprta fotografija ali videoposnetek."
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inga foton eller videor som stöds delades."
+          }
+        },
+        "th": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ไม่มีการแชร์รูปภาพหรือวิดีโอที่รองรับ"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Desteklenen fotoğraf veya video paylaşılmadı."
+          }
+        },
+        "uk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Немає підтримуваних фото чи відео."
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Không có ảnh hoặc video được hỗ trợ nào được chia sẻ."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未共享受支持的照片或视频。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未分享任何支援的照片或影片。"
+          }
+        }
+      }
+    },
+    "Open SelfPhotos to retry or remove failed uploads in Backup > View Details.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open SelfPhotos to retry or remove failed uploads in Backup > View Details."
+          }
+        },
+        "ar": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "افتح SelfPhotos لإعادة محاولة التحميلات الفاشلة أو إزالتها في النسخ الاحتياطي > عرض التفاصيل."
+          }
+        },
+        "bg": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Отворете SelfPhotos, за да опитате отново или да премахнете неуспешните качвания в Backup > View Details."
+          }
+        },
+        "bn": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ব্যাকআপে ব্যর্থ আপলোডগুলি পুনরায় চেষ্টা করতে বা সরাতে SelfPhotos খুলুন > বিবরণ দেখুন৷"
+          }
+        },
+        "ca": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Obriu SelfPhotos per tornar a provar o eliminar les càrregues fallides a Còpia de seguretat > Mostra detalls."
+          }
+        },
+        "cs": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Otevřete SelfPhotos a zkuste to znovu nebo odstraňte neúspěšné nahrávání v Zálohování > Zobrazit podrobnosti."
+          }
+        },
+        "da": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Åbn SelfPhotos for at prøve igen eller fjerne mislykkede uploads i Sikkerhedskopiering > Vis detaljer."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Öffnen Sie SelfPhotos, um fehlgeschlagene Uploads unter „Sichern“ > „Details anzeigen“ erneut zu versuchen oder zu entfernen."
+          }
+        },
+        "el": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ανοίξτε το SelfPhotos για να προσπαθήσετε ξανά ή να καταργήσετε αποτυχημένες μεταφορτώσεις στο Backup > Προβολή λεπτομερειών."
+          }
+        },
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abra SelfPhotos para volver a intentar o eliminar cargas fallidas en Copia de seguridad > Ver detalles."
+          }
+        },
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SelfPhotos را باز کنید تا بارگذاری‌های ناموفق را دوباره امتحان کنید یا حذف کنید در پشتیبان‌گیری > مشاهده جزئیات."
+          }
+        },
+        "fi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avaa SelfPhotos ja yritä uudelleen tai poistaa epäonnistuneet lataukset kohdassa Varmuuskopiointi > Näytä tiedot."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvrez SelfPhotos pour réessayer ou supprimer les envois ayant échoué dans Sauvegarde > Voir les détails."
+          }
+        },
+        "he": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "פתח את SelfPhotos כדי לנסות שוב או להסיר העלאות שנכשלו בגיבוי > הצג פרטים."
+          }
+        },
+        "hi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बैकअप > विवरण देखें में विफल अपलोड को पुनः प्रयास करने या हटाने के लिए SelfPhotos खोलें।"
+          }
+        },
+        "hr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Otvorite SelfPhotos za ponovni pokušaj ili uklanjanje neuspjelih prijenosa u Backup > View Details."
+          }
+        },
+        "hu": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nyissa meg a SelfPhotos alkalmazást a sikertelen feltöltések újrapróbálásához vagy eltávolításához a Biztonsági mentés > Részletek megtekintése menüpontban."
+          }
+        },
+        "id": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Buka SelfPhotos untuk mencoba lagi atau menghapus unggahan yang gagal di Cadangan > Lihat Detail."
+          }
+        },
+        "it": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apri SelfPhotos per riprovare o rimuovere i caricamenti non riusciti in Backup > Visualizza dettagli."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SelfPhotos を開いて、[バックアップ] > [詳細の表示] で失敗したアップロードを再試行または削除します。"
+          }
+        },
+        "kk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Сақтық көшірме > Мәліметтерді қарау тармағында сәтсіз жүктеп салуларды қайталап көру немесе жою үшін SelfPhotos қолданбасын ашыңыз."
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SelfPhotos를 열어 백업 > 세부 정보 보기에서 실패한 업로드를 다시 시도하거나 제거하세요."
+          }
+        },
+        "lt": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Atidarykite „SelfPhotos“, kad bandytumėte dar kartą arba pašalintumėte nepavykusius įkėlimus, skiltyje Atsarginė kopija > Peržiūrėti išsamią informaciją."
+          }
+        },
+        "ms": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Buka SelfPhotos untuk mencuba semula atau mengalih keluar muat naik yang gagal dalam Sandaran > Lihat Butiran."
+          }
+        },
+        "nb": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Åpne SelfPhotos for å prøve på nytt eller fjerne mislykkede opplastinger i Sikkerhetskopiering > Vis detaljer."
+          }
+        },
+        "nl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open SelfPhotos om mislukte uploads opnieuw te proberen of te verwijderen in Back-up > Details bekijken."
+          }
+        },
+        "pl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Otwórz SelfPhotos, aby ponowić próbę lub usunąć nieudane przesyłanie w Kopia zapasowa > Wyświetl szczegóły."
+          }
+        },
+        "pt": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abra SelfPhotos para tentar novamente ou remover uploads com falha em Backup > Ver detalhes."
+          }
+        },
+        "ro": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deschideți SelfPhotos pentru a reîncerca sau pentru a elimina încărcările eșuate în Backup > Vedeți detalii."
+          }
+        },
+        "ru": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Откройте SelfPhotos, чтобы повторить попытку или удалить неудачные загрузки, в разделе «Резервное копирование» > «Просмотреть подробности»."
+          }
+        },
+        "sk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Otvorte SelfPhotos a skúste to znova alebo odstráňte neúspešné nahrávanie v časti Záloha > Zobraziť podrobnosti."
+          }
+        },
+        "sl": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Odprite SelfPhotos, da poskusite znova ali odstranite neuspela nalaganja v Varnostno kopiranje > Ogled podrobnosti."
+          }
+        },
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Öppna SelfPhotos för att försöka igen eller ta bort misslyckade uppladdningar i Säkerhetskopiering > Visa detaljer."
+          }
+        },
+        "th": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "เปิด SelfPhotos เพื่อลองอีกครั้งหรือลบการอัพโหลดที่ล้มเหลวในการสำรองข้อมูล > ดูรายละเอียด"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Yedekleme > Ayrıntıları Görüntüle bölümünde başarısız yüklemeleri yeniden denemek veya kaldırmak için SelfPhotos'u açın."
+          }
+        },
+        "uk": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Відкрийте SelfPhotos, щоб повторити спробу або видалити невдалі завантаження в Резервне копіювання > Переглянути деталі."
+          }
+        },
+        "vi": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mở SelfPhotos để thử lại hoặc xóa các lần tải lên không thành công trong Sao lưu > Xem chi tiết."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开 SelfPhotos，在“备份”>“查看详细信息”中重试或删除失败的上传。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "開啟 SelfPhotos，在「備份」>「檢視詳細資料」中重試或刪除失敗的上傳。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
