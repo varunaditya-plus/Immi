@@ -66,7 +66,9 @@ struct AlbumDetailView: View {
                 albumPicker(for: selection.ids)
             }
             .errorToast($actionMessage)
-            .task { await start() }
+            .task(id: LocalSnapshot.invalidationRevision(for: LocalSnapshot.Key.album(album.id))) {
+                await start()
+            }
             .onChange(of: vm?.hasBeenDeleted ?? false, initial: true) { _, deleted in
                 if deleted { handleDeletion() }
             }

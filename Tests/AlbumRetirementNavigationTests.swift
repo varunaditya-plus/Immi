@@ -80,6 +80,23 @@ final class AlbumRetirementNavigationTests: XCTestCase {
         XCTAssertEqual(fixture.route.deletions, 0)
     }
 
+    func testAnotherWindowsDeletionDismissesTheIdleVisibleAlbumWithoutRetry() async throws {
+        let fixture = try await showAlbum()
+        let reads = fixture.driver.reads
+
+        LocalSnapshot.remove(fixture.key)
+        await waitUntil("A confirmed deletion must retire an idle visible album without another action") {
+            !fixture.route.shown && self.gridController(in: fixture.host) == nil
+        }
+
+        XCTAssertFalse(fixture.route.shown)
+        XCTAssertEqual(fixture.route.deletions, 1)
+        XCTAssertTrue(fixture.parent.albums.isEmpty)
+        XCTAssertNil(LocalSnapshot.load([AssetLite].self, for: fixture.key))
+        XCTAssertTrue(fixture.model.assets.isEmpty)
+        XCTAssertEqual(fixture.driver.reads, reads)
+    }
+
     private func showAlbum() async throws -> RetirementFixture {
         let driver = RetirementDriver()
         let album = AlbumResponseDTO(id: UUID().uuidString, albumName: "Album", description: nil,
