@@ -14,22 +14,8 @@ concurrency:
 jobs:
   build:
     runs-on: xcode-27
-    timeout-minutes: 20
-
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
-
-      - name: Show Xcode version
-        run: |
-          xcodebuild -version
-          xcodebuild -showsdks
-
-      - name: Build SelfPhotos
-        run: |
-          set -euo pipefail
-          xcodebuild build \
-            -project ImmichApp.xcodeproj \
-            -scheme SelfPhotos \
-            -configuration Debug \
-            -destination 'generic/platform=iOS Simulator' \
-            CODE_SIGNING_ALLOWED=NO
+      - name: Build and test SelfPhotos
+        uses: ./.github/actions/test-ios

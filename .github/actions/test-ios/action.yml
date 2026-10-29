@@ -1,0 +1,52 @@
+name: Test iOS app
+description: Build and run SelfPhotos tests on an available iPhone simulator.
+
+runs:
+  using: composite
+  steps:
+    - name: Select iPhone simulator
+      shell: bash
+      run: |
+        set -euo pipefail
+        xcodebuild -version
+        xcrun simctl list devices available --json > "$RUNNER_TEMP/devices.json"
+        device_id=$(jq -r '[.devices | to_entries[] | select(.key | contains("SimRuntime.iOS-27-")) | .value[] | select(.isAvailable == true and (.name | startswith("iPhone")))] | .[0].udid // empty' "$RUNNER_TEMP/devices.json")
+        if [[ -z "$device_id" ]]; then
+          echo "::error::No available iPhone simulator with an iOS 27 runtime."
+          xcrun simctl list devices available
+          exit 1
+        fi
+        echo "SIMULATOR_ID=$device_id" >> "$GITHUB_ENV"
+
+    - name: Build and test
+      shell: bash
+      run: |
+        set -euo pipefail
+        test_arguments=(
+          -project ImmichApp.xcodeproj
+          -scheme SelfPhotos
+          -configuration Debug
+          -destination "platform=iOS Simulator,id=$SIMULATOR_ID"
+          -parallel-testing-enabled NO
+          -derivedDataPath "$RUNNER_TEMP/DerivedData"
+          CODE_SIGNING_ALLOWED=YES
+          CODE_SIGN_IDENTITY=-
+        )
+        xcodebuild test "${test_arguments[@]}" \
+          -testLanguage en -testRegion US \
+          -resultBundlePath "$RUNNER_TEMP/SelfPhotosTests.xcresult"
+        xcodebuild test "${test_arguments[@]}" \
+          -testLanguage fr -testRegion FR \
+          -only-testing:ImmichAppTests/SyncStatusLocalizationTests \
+          -resultBundlePath "$RUNNER_TEMP/SelfPhotosFrenchTests.xcresult"
+
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: SelfPhotos-test-results
+        path: |
+          ${{ runner.temp }}/SelfPhotosTests.xcresult
+          ${{ runner.temp }}/SelfPhotosFrenchTests.xcresult
+        if-no-files-found: ignore
+        retention-days: 7

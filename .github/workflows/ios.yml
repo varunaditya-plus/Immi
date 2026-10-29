@@ -17,41 +17,7 @@ jobs:
     timeout-minutes: 40
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Select iPhone simulator
-        shell: bash
-        run: |
-          set -euo pipefail
-          xcodebuild -version
-          xcrun simctl list devices available --json > "$RUNNER_TEMP/devices.json"
-          device_id=$(jq -r '[.devices | to_entries[] | select(.key | contains("SimRuntime.iOS-27-")) | .value[] | select(.isAvailable == true and (.name | startswith("iPhone")))] | .[0].udid // empty' "$RUNNER_TEMP/devices.json")
-          if [[ -z "$device_id" ]]; then
-            echo "::error::No available iPhone simulator with an iOS 27 runtime."
-            xcrun simctl list devices available
-            exit 1
-          fi
-          echo "SIMULATOR_ID=$device_id" >> "$GITHUB_ENV"
+        uses: actions/checkout@v7
 
       - name: Build and test
-        shell: bash
-        run: |
-          set -euo pipefail
-          xcodebuild test \
-            -project ImmichApp.xcodeproj \
-            -scheme SelfPhotos \
-            -configuration Debug \
-            -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
-            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
-            -resultBundlePath "$RUNNER_TEMP/SelfPhotosTests.xcresult" \
-            CODE_SIGNING_ALLOWED=YES \
-            CODE_SIGN_IDENTITY=-
-
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: SelfPhotos-test-results
-          path: ${{ runner.temp }}/SelfPhotosTests.xcresult
-          if-no-files-found: ignore
-          retention-days: 7
+        uses: ./.github/actions/test-ios
