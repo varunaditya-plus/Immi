@@ -153,14 +153,9 @@ struct AssetDetailView: View {
     private var isPanelDragging: Bool { panelDragStart != nil }
     private var isPanelAtMax: Bool { panelHeight >= panelMaxHeight - 1 }
 
-    /// Chrome mengikuti umur panel, bukan nilai target animasinya.
-    ///
-    /// Saat `panelHeight` dianimasikan ke 0, SwiftUI langsung menyimpan nilai
-    /// target 0 walaupun panel masih tampak bergerak selama beberapa frame.
-    /// Kalau chrome membaca `panelHeight > 0`, navigation bar dan filmstrip
-    /// muncul di frame pertama penutupan lalu bertabrakan dengan panel yang
-    /// belum selesai turun. `isPanelMounted` baru false di completion, sehingga
-    /// seluruh chrome berpindah tepat setelah transisi selesai.
+    /// Filmstrip menunggu panel selesai menutup agar tidak bertabrakan.
+    /// Navigation bar dan status bar kembali sejak awal penutupan, supaya
+    /// foto langsung memakai safe area akhirnya, termasuk setelah resize.
     private var showInfo: Bool { isPanelMounted }
 
     // Body sengaja dipecah berlapis. Sebagai satu rantai modifier utuh,
@@ -313,13 +308,13 @@ struct AssetDetailView: View {
     }
 
     private var isStatusBarHidden: Bool {
-        (!showToolbar || showInfo) && !isEditingDescription
+        (!showToolbar || panelHeight > 0) && !isEditingDescription
     }
 
     private var toolbarChrome: ToolbarChrome {
         ToolbarChrome(
             showToolbar: showToolbar,
-            showInfo: showInfo,
+            showInfo: panelHeight > 0,
             isEditing: isEditingDescription,
             usesTopToolbarOnly: usesTopToolbarOnly)
     }

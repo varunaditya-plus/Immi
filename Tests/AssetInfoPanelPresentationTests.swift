@@ -41,6 +41,24 @@ final class AssetInfoPanelPresentationTests: XCTestCase {
         XCTAssertGreaterThan(firstPanel.bounds.height, 0)
     }
 
+    func testClosingPanelWithoutResizeKeepsOneCardEndpoint() async throws {
+        try await checkClosingCard(from: nil, to: CGSize(width: 844, height: 390))
+    }
+
+    func testClosingPanelAfterResizeKeepsOneCardEndpoint() async throws {
+        try await checkClosingCard(from: CGSize(width: 390, height: 844), to: CGSize(width: 844, height: 390))
+    }
+
+    func testClosingPanelAfterResizeToPortraitKeepsOneCardEndpoint() async throws {
+        try await checkClosingCard(from: CGSize(width: 844, height: 390), to: CGSize(width: 390, height: 844),
+            ratio: 0.5)
+    }
+
+    func testClosingPanelAfterRegularWindowResizeKeepsOneCardEndpoint() async throws {
+        try await checkClosingCard(from: CGSize(width: 600, height: 900), to: CGSize(width: 900, height: 400),
+            sizeClass: .regular)
+    }
+
     func testExpandedPanelRemainsScrollableWhenCaptionReflowsAfterResize() async throws {
         let caption = "A long description of this photograph and the people and places we remember from our journey together."
         let window = try showViewer(size: CGSize(width: 1000, height: 800), sizeClass: .regular,
@@ -57,6 +75,38 @@ final class AssetInfoPanelPresentationTests: XCTestCase {
         }
         try await Task.sleep(for: .milliseconds(500))
         XCTAssertTrue(panel.isScrollEnabled, "A resized expanded panel must still allow scrolling and map interaction")
+    }
+
+    private func checkClosingCard(from initialSize: CGSize?, to finalSize: CGSize,
+                                  sizeClass: UserInterfaceSizeClass = .compact, ratio: Double = 1) async throws {
+        let window = try showViewer(size: initialSize ?? finalSize, sizeClass: sizeClass, ratio: ratio)
+        let root = try XCTUnwrap(window.rootViewController)
+        try await waitUntil("The Info action is available") {
+            self.barItems(in: root).contains { $0.accessibilityLabel == "Info" || $0.title == "Info" }
+        }
+        let item = try XCTUnwrap(barItems(in: root).first { $0.accessibilityLabel == "Info" || $0.title == "Info" })
+        _ = try await openPanel(in: window)
+        try await Task.sleep(for: .milliseconds(500))
+        if initialSize != nil {
+            resize(window, to: finalSize)
+            try await Task.sleep(for: .milliseconds(500))
+        }
+        let cell = try XCTUnwrap(descendant(of: PhotoPagerCell.self, in: window))
+        let image = try XCTUnwrap(descendant(of: UIImageView.self, in: cell.contentView))
+        let action = try XCTUnwrap(item.action)
+        XCTAssertTrue(UIApplication.shared.sendAction(action, to: item.target, from: item, for: nil))
+        var targets: [CGFloat] = []
+        for _ in 0..<100 {
+            let height = image.bounds.height
+            if height > 0 && height < finalSize.width / ratio - 1 { targets.append(height) }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertNil(panelScroll(in: window), "The panel must finish closing")
+        XCTAssertFalse(targets.isEmpty, "The closed photo must shrink to fit within the current viewport")
+        if let smallest = targets.min(), let largest = targets.max() {
+            XCTAssertLessThanOrEqual(largest - smallest, 1,
+                "Closing the panel must not refit the photo again after its first closing target")
+        }
     }
 
     private func descendant<T: UIView>(of type: T.Type, in view: UIView) -> T? {
@@ -80,7 +130,8 @@ final class AssetInfoPanelPresentationTests: XCTestCase {
         XCTAssertLessThanOrEqual(panel.bounds.height, 650 * 0.75 + 1)
     }
 
-    private func showViewer(size: CGSize, sizeClass: UserInterfaceSizeClass, caption: String? = nil) throws -> UIWindow {
+    private func showViewer(size: CGSize, sizeClass: UserInterfaceSizeClass,
+                            caption: String? = nil, ratio: Double = 1) throws -> UIWindow {
         let detail = makeTestAsset(id: UUID().uuidString, exifInfo: ExifDTO(make: nil, model: nil,
             exifImageWidth: nil, exifImageHeight: nil, orientation: nil, fileSizeInByte: nil,
             dateTimeOriginal: nil, latitude: 41.3874, longitude: 2.1686, city: nil, state: nil,
@@ -90,7 +141,7 @@ final class AssetInfoPanelPresentationTests: XCTestCase {
         LocalSnapshot.save(detail, for: LocalSnapshot.Key.assetDetail(detail.id))
         let session = MockSessionManager()
         let model = AssetDetailViewModel(repo: PanelDetailRepository(detail: detail, session: session))
-        let asset = AssetLite(detail)
+        let asset = AssetLite(id: detail.id, isVideo: false, ratio: ratio, thumbhash: nil, createdAt: .distantPast)
         let viewer = AssetDetailView(currentAsset: asset, assets: [asset], isModal: true, viewModel: model)
         let host = UIHostingController(rootView: NavigationStack { viewer }
             .environment(session as SessionManager)
