@@ -60,7 +60,11 @@ final class LocalizationCoverageTests: XCTestCase {
             "The local sync database could not be exported.",
             "The local sync database is temporarily unavailable.",
             "The previous local cache could not be opened: %@",
-            "Backup mapping protection is unavailable: %@"]
+            "Backup mapping protection is unavailable: %@",
+            "Connect to the server before running this job.",
+            "Connect to Wi-Fi before reading and hashing your photo library.",
+            "Allow Photos access to read the library on this device.",
+            "Your photo library changed. Try again."]
         for language in languages {
             let bundle = try localizedBundle(Bundle.main, language: language)
             for key in keys { assertCompiled(key, in: bundle) }

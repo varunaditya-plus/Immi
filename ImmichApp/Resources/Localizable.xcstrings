@@ -171514,6 +171514,958 @@
           }
         }
       }
+    },
+    "Connect to the server before running this job." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connect to the server before running this job."
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "اتصل بالخادم قبل تشغيل هذه المهمة."
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Свържете се със сървъра, преди да изпълните тази задача."
+          }
+        },
+        "bn" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "এই কাজটি চালানোর আগে সার্ভারের সাথে সংযোগ করুন।"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connecteu-vos al servidor abans d'executar aquesta tasca."
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Před spuštěním této úlohy se připojte k serveru."
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Opret forbindelse til serveren, før du kører dette job."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stellen Sie eine Verbindung zum Server her, bevor Sie diesen Job ausführen."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Συνδεθείτε στον διακομιστή πριν εκτελέσετε αυτήν την εργασία."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conéctese al servidor antes de ejecutar este trabajo."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "قبل از اجرای این کار به سرور متصل شوید."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Yhdistä palvelimeen ennen tämän työn suorittamista."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connectez-vous au serveur avant d'exécuter cette tâche."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "התחבר לשרת לפני הפעלת עבודה זו."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "इस कार्य को चलाने से पहले सर्वर से कनेक्ट करें।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Povežite se s poslužiteljem prije pokretanja ovog posla."
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A feladat futtatása előtt csatlakozzon a szerverhez."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hubungkan ke server sebelum menjalankan pekerjaan ini."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connettiti al server prima di eseguire questa attività."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このジョブを実行する前にサーバーに接続してください。"
+          }
+        },
+        "kk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Осы тапсырманы орындамас бұрын серверге қосылыңыз."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 작업을 실행하기 전에 서버에 연결하세요."
+          }
+        },
+        "lt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Prisijunkite prie serverio prieš vykdydami šią užduotį."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sambung ke pelayan sebelum menjalankan tugas ini."
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Koble til serveren før du kjører denne jobben."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Maak verbinding met de server voordat u deze taak uitvoert."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Połącz się z serwerem przed uruchomieniem tego zadania."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ligue-se ao servidor antes de executar esta tarefa."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conectați-vă la server înainte de a rula această lucrare."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Прежде чем запускать это задание, подключитесь к серверу."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pred spustením tejto úlohy sa pripojte k serveru."
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Povežite se s strežnikom, preden zaženete to opravilo."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anslut till servern innan du kör det här jobbet."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เชื่อมต่อกับเซิร์ฟเวอร์ก่อนที่จะรันงานนี้"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bu işi çalıştırmadan önce sunucuya bağlanın."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Перед виконанням цього завдання підключіться до сервера."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kết nối với máy chủ trước khi chạy công việc này."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在运行此作业之前连接到服务器。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在執行此作業之前連接到伺服器。"
+          }
+        }
+      }
+    },
+    "Connect to Wi-Fi before reading and hashing your photo library." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connect to Wi-Fi before reading and hashing your photo library."
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "اتصل بشبكة Wi-Fi قبل قراءة ملفات الوسائط في مكتبة الصور الخاصة بك وحساب المجموع الاختباري لها."
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Свържете се с Wi-Fi, преди да прочетете медийните файлове във вашата библиотека със снимки и да изчислите техните контролни суми."
+          }
+        },
+        "bn" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "আপনার ফটো লাইব্রেরিতে মিডিয়া ফাইলগুলি পড়ার আগে এবং তাদের চেকসামগুলি গণনা করার আগে Wi-Fi এর সাথে সংযোগ করুন৷"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connecteu-vos a la Wi-Fi abans de llegir els fitxers multimèdia de la vostra biblioteca de fotos i calcular-ne les sumes de control."
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Před čtením mediálních souborů ve vaší knihovně fotografií a výpočtem jejich kontrolních součtů se připojte k Wi-Fi."
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Opret forbindelse til Wi-Fi, før du læser mediefilerne i dit fotobibliotek og beregner deres kontrolsummer."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stellen Sie eine WLAN-Verbindung her, bevor Sie die Mediendateien in Ihrer Fotobibliothek lesen und deren Prüfsummen berechnen."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Συνδεθείτε στο Wi-Fi πριν διαβάσετε τα αρχεία πολυμέσων στη βιβλιοθήκη φωτογραφιών σας και υπολογίσετε τα αθροίσματα ελέγχου τους."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conéctese a Wi-Fi antes de leer los archivos multimedia en su biblioteca de fotos y calcular sus sumas de verificación."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "قبل از خواندن فایل‌های رسانه‌ای در کتابخانه عکس خود و محاسبه چک‌سوم‌های آنها، به Wi-Fi متصل شوید."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Yhdistä Wi-Fi-verkkoon ennen kuin luet valokuvakirjastosi mediatiedostoja ja lasket niiden tarkistussummat."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connectez-vous au Wi-Fi avant de lire les fichiers de votre photothèque et de calculer leurs empreintes."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "התחבר ל-Wi-Fi לפני קריאת קובצי המדיה בספריית התמונות שלך וחישוב סכומי הבדיקה שלהם."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "अपनी फोटो लाइब्रेरी में मीडिया फ़ाइलों को पढ़ने और उनके चेकसम की गणना करने से पहले वाई-फ़ाई से कनेक्ट करें।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spojite se na Wi-Fi prije čitanja medijskih datoteka u vašoj knjižnici fotografija i izračunavanja njihovih kontrolnih zbrojeva."
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Csatlakozzon Wi-Fi-hálózathoz, mielőtt elolvasná a fotókönyvtárában lévő médiafájlokat, és kiszámolná az ellenőrző összegeket."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hubungkan ke Wi-Fi sebelum membaca file media di pustaka foto Anda dan menghitung nilai hash file tersebut."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connettiti al Wi-Fi prima di leggere i file multimediali nella tua libreria di foto e calcolarne i checksum."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写真ライブラリ内のメディア ファイルを読み取り、チェックサムを計算する前に、Wi-Fi に接続してください。"
+          }
+        },
+        "kk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Фото кітапханаңыздағы медиа файлдарды оқып, олардың бақылау сомасын есептемес бұрын Wi-Fi желісіне қосылыңыз."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사진 라이브러리의 미디어 파일을 읽고 체크섬을 계산하기 전에 Wi-Fi에 연결하세요."
+          }
+        },
+        "lt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Prieš skaitydami savo nuotraukų bibliotekos medijos failus ir apskaičiuodami jų kontrolines sumas, prisijunkite prie „Wi-Fi“."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sambung ke Wi-Fi sebelum membaca fail media dalam pustaka foto anda dan mengira jumlah semak mereka."
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Koble til Wi-Fi før du leser mediefilene i bildebiblioteket ditt og beregner sjekksummene deres."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Maak verbinding met Wi-Fi voordat u de mediabestanden in uw fotobibliotheek leest en hun controlesommen berekent."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Przed odczytaniem plików multimedialnych w bibliotece zdjęć i obliczeniem ich sum kontrolnych połącz się z Wi-Fi."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ligue-se ao Wi-Fi antes de ler os ficheiros da fototeca e calcular as respetivas somas de verificação."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conectați-vă la Wi-Fi înainte de a citi fișierele media din fototeca dvs. și de a calcula sumele de verificare."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Подключитесь к Wi-Fi, прежде чем читать медиафайлы в своей библиотеке фотографий и вычислять их контрольные суммы."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pred čítaním mediálnych súborov vo vašej knižnici fotografií a výpočtom ich kontrolných súčtov sa pripojte k sieti Wi-Fi."
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Povežite se z Wi-Fi, preden preberete predstavnostne datoteke v knjižnici fotografij in izračunate njihove kontrolne vsote."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anslut till Wi-Fi innan du läser mediefilerna i ditt fotobibliotek och beräknar deras kontrollsummor."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "เชื่อมต่อ Wi-Fi ก่อนอ่านไฟล์สื่อในคลังรูปภาพและคำนวณค่าแฮชของไฟล์เหล่านั้น"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fotoğraf kitaplığınızdaki medya dosyalarını okumadan ve sağlama toplamlarını hesaplamadan önce Wi-Fi'ye bağlanın."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Підключіться до Wi-Fi, перш ніж читати мультимедійні файли у вашій бібліотеці фотографій і обчислювати їх контрольні суми."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kết nối với Wi-Fi trước khi đọc các tệp phương tiện trong thư viện ảnh của bạn và tính tổng kiểm tra chúng."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在读取照片库中的媒体文件并计算其校验和之前，请连接到 Wi-Fi。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在讀取照片庫中的媒體檔案並計算其校驗和之前，請連接到 Wi-Fi。"
+          }
+        }
+      }
+    },
+    "Allow Photos access to read the library on this device." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow Photos access to read the library on this device."
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "اسمح بالوصول إلى الصور لقراءة المكتبة على هذا الجهاز."
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Разрешете достъп до снимките, за да се прочете библиотеката на това устройство."
+          }
+        },
+        "bn" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "এই ডিভাইসে লাইব্রেরি পড়ার জন্য ফটো অ্যাক্সেসের অনুমতি দিন।"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Permeteu l’accés a Fotos per llegir la biblioteca en aquest dispositiu."
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Povolte přístup k fotkám pro čtení knihovny na tomto zařízení."
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillad adgang til Fotos for at læse biblioteket på denne enhed."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erlauben Sie den Zugriff auf Fotos, um die Mediathek auf diesem Gerät zu lesen."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Επιτρέψτε την πρόσβαση στις Φωτογραφίες για την ανάγνωση της βιβλιοθήκης σε αυτήν τη συσκευή."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Permita el acceso a Fotos para leer la biblioteca en este dispositivo."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "برای خواندن کتابخانه در این دستگاه، اجازه دسترسی به عکس‌ها را بدهید."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Salli pääsy Kuvat-kirjastoon, jotta tämän laitteen kirjasto voidaan lukea."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Autorisez l'accès à Photos pour lire la photothèque sur cet appareil."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "אפשר גישה לתמונות כדי לקרוא את הספרייה במכשיר זה."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "इस डिवाइस की लाइब्रेरी पढ़ने के लिए फ़ोटो तक पहुँच की अनुमति दें।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dopustite pristup fotografijama za čitanje biblioteke na ovom uređaju."
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Engedélyezze a fotók elérését az eszközön lévő könyvtár olvasásához."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Izinkan akses Foto untuk membaca pustaka foto di perangkat ini."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Consenti l'accesso a Foto per leggere la libreria su questo dispositivo."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このデバイスの写真ライブラリを読み取るには、「写真」へのアクセスを許可してください。"
+          }
+        },
+        "kk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Осы құрылғыдағы кітапхананы оқу үшін фотосуреттерге қол жеткізуге рұқсат беріңіз."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 기기의 사진 보관함을 읽으려면 사진 접근을 허용하세요."
+          }
+        },
+        "lt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Leiskite pasiekti nuotraukas, kad būtų galima skaityti biblioteką šiame įrenginyje."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Benarkan akses Foto untuk membaca pustaka pada peranti ini."
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillat tilgang til Bilder for å lese biblioteket på denne enheten."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sta toegang tot Foto's toe om de bibliotheek op dit apparaat te lezen."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zezwól na dostęp do zdjęć, aby odczytać bibliotekę na tym urządzeniu."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Permita o acesso a Fotos para ler a fototeca neste dispositivo."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Permiteți accesul la Fotografii pentru a citi biblioteca de pe acest dispozitiv."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Разрешите доступ к фото, чтобы прочитать медиатеку на этом устройстве."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Povoľte prístup k fotkám na čítanie knižnice v tomto zariadení."
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dovolite aplikaciji Photos dostop za branje knjižnice v tej napravi."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillåt åtkomst till Foton för att läsa biblioteket på den här enheten."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "อนุญาตให้เข้าถึงรูปภาพเพื่ออ่านไลบรารีบนอุปกรณ์นี้"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bu cihazdaki kitaplığı okumak için Fotoğraflar'a erişim izni verin."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Надайте доступ до фото, щоб прочитати бібліотеку на цьому пристрої."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cho phép truy cập Ảnh để đọc thư viện trên thiết bị này."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请允许访问照片，以读取此设备上的照片图库。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請允許存取照片，以讀取此裝置上的照片圖庫。"
+          }
+        }
+      }
+    },
+    "Your photo library changed. Try again." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your photo library changed. Try again."
+          }
+        },
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "تغيرت مكتبة الصور الخاصة بك. حاول ثانية."
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Вашата библиотека със снимки е променена. Опитайте отново."
+          }
+        },
+        "bn" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "আপনার ফটো লাইব্রেরি পরিবর্তিত হয়েছে. আবার চেষ্টা করুন"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La vostra biblioteca de fotos ha canviat. Torneu-ho a provar."
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaše knihovna fotek se změnila. Zkuste to znovu."
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dit fotobibliotek er ændret. Prøv igen."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ihre Fotobibliothek hat sich geändert. Versuchen Sie es erneut."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Η βιβλιοθήκη φωτογραφιών σας άλλαξε. Προσπαθήστε ξανά."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Su biblioteca de fotos ha cambiado. Inténtelo de nuevo."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "کتابخانه عکس شما تغییر کرد. دوباره امتحان کنید."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kuvakirjastosi muuttui. Yritä uudelleen."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Votre photothèque a changé. Réessayez."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ספריית התמונות שלך השתנתה. נסה שוב."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "आपकी फ़ोटो लाइब्रेरी बदल गई. पुनः प्रयास करें।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaša biblioteka fotografija je promijenjena. Pokušajte ponovo."
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A fotókönyvtár megváltozott. Próbálja újra."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pustaka foto Anda telah berubah. Coba lagi."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La tua libreria di foto è cambiata. Riprova."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写真ライブラリが変更されました。もう一度やり直してください。"
+          }
+        },
+        "kk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Фотосуреттер жинағыңыз өзгерді. Қайтадан байқап көріңіз."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사진 라이브러리가 변경되었습니다. 다시 시도해 보세요."
+          }
+        },
+        "lt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Jūsų nuotraukų biblioteka pasikeitė. Bandykite dar kartą."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pustaka foto anda telah berubah. Cuba lagi."
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bildebiblioteket ditt er endret. Prøv igjen."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uw fotobibliotheek is gewijzigd. Probeer het opnieuw."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Twoja biblioteka zdjęć uległa zmianie. Spróbuj ponownie."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A fototeca foi alterada. Tente novamente."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Biblioteca dvs. de fotografii s-a schimbat. Încercați din nou."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ваша библиотека фотографий изменилась. Попробуйте еще раз."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaša knižnica fotografií sa zmenila. Skúste to znova."
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaša knjižnica fotografij se je spremenila. Poskusite znova."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ditt fotobibliotek har ändrats. Försök igen."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "คลังภาพของคุณมีการเปลี่ยนแปลง ลองอีกครั้ง"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fotoğraf kitaplığınız değişti. Tekrar deneyin."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ваша бібліотека фотографій змінена. Спробуйте знову."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thư viện ảnh của bạn đã thay đổi. Hãy thử lại."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "您的照片库已更改。再试一次。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "您的照片庫已變更。再試一次。"
+          }
+        }
+      }
     }
   },
   "version" : "1.1"

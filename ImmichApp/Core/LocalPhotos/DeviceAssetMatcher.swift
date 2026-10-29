@@ -8,9 +8,9 @@ enum DeviceAssetSyncError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .offline:
-            "Connect to the server before running this job."
+            String(localized: "Connect to the server before running this job.")
         case .meteredNetwork:
-            "Connect to Wi-Fi before reading and hashing your photo library."
+            String(localized: "Connect to Wi-Fi before reading and hashing your photo library.")
         }
     }
 }

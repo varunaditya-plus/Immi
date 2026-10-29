@@ -39,6 +39,22 @@ final class AppFallbackLocalizationTests: XCTestCase {
         XCTAssertFalse(model.canSignInWithOIDC)
     }
 
+    func testPhotoMaintenanceAndDeletionErrorsUseTheProcessLanguage() {
+        let cases: [(any LocalizedError, String, String)] = [
+            (DeviceAssetSyncError.offline, "Connect to the server before running this job.",
+             "Connectez-vous au serveur avant d'exécuter cette tâche."),
+            (DeviceAssetSyncError.meteredNetwork, "Connect to Wi-Fi before reading and hashing your photo library.",
+             "Connectez-vous au Wi-Fi avant de lire les fichiers de votre photothèque et de calculer leurs empreintes."),
+            (LocalPhotoLibraryError.accessRequired, "Allow Photos access to read the library on this device.",
+             "Autorisez l'accès à Photos pour lire la photothèque sur cet appareil."),
+            (LocalPhotoLibraryError.libraryChanged, "Your photo library changed. Try again.",
+             "Votre photothèque a changé. Réessayez."),
+        ]
+        for (error, english, french) in cases {
+            XCTAssertEqual(error.localizedDescription, expected(english, french))
+        }
+    }
+
     func testDatabaseExportFailureUsesTheProcessLanguage() throws {
         let directory = try directory()
         do {

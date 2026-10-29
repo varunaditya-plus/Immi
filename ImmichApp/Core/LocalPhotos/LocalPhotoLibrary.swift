@@ -75,8 +75,8 @@ enum LocalPhotoLibraryError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .accessRequired: "Allow Photos access to read the library on this device."
-        case .libraryChanged: "Your photo library changed. Try again."
+        case .accessRequired: String(localized: "Allow Photos access to read the library on this device.")
+        case .libraryChanged: String(localized: "Your photo library changed. Try again.")
         }
     }
 }
