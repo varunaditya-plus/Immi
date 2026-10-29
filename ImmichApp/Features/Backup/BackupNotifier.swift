@@ -95,15 +95,6 @@ final class BackupNotifier: NSObject {
 
     // MARK: - Kemajuan
 
-    func begin(total: Int) {
-        lastPostedAt = nil
-        post(uploaded: 0, total: total, force: true)
-    }
-
-    func progress(uploaded: Int, total: Int) {
-        post(uploaded: uploaded, total: total, force: false)
-    }
-
     /// Queue dan notification memakai snapshot identik. Ini penting pada cold
     /// launch: angka tidak dibangun ulang dari variabel putaran yang sudah
     /// hilang bersama proses sebelumnya.
@@ -133,14 +124,6 @@ final class BackupNotifier: NSObject {
         post(title: presentation.title, body: presentation.body, force: force)
     }
 
-    private func post(uploaded: Int, total: Int, force: Bool) {
-        guard total > 0 else { return }
-        post(
-            title: String(localized: "Backing Up"),
-            body: String(localized: "\(uploaded) of \(total) uploaded"),
-            force: force)
-    }
-
     private func post(title: String, body: String, force: Bool) {
         guard isAuthorized else { return }
         let now = Date()
@@ -161,7 +144,7 @@ final class BackupNotifier: NSObject {
 
     // MARK: - Selesai
 
-    func finish(uploaded: Int, failed: Int) {
+    private func finish(uploaded: Int, failed: Int) {
         clearProgress()
         guard isAuthorized, uploaded > 0 || failed > 0 else { return }
 

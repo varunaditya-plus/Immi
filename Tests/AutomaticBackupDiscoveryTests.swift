@@ -25,7 +25,7 @@ final class AutomaticBackupDiscoveryTests: XCTestCase {
             let finished = try XCTUnwrap(fixture.activeTransfers.first, "Discovery must keep work available until the last photo")
             try fixture.complete(finished)
             if fixture.manager.uploadedLocalIdentifiers().count < fixture.photos.count {
-                XCTAssertTrue(fixture.queue.snapshot.hasWork, "A completed window must not look like a completed library")
+                XCTAssertGreaterThan(fixture.queue.snapshot.unfinished, 0, "A completed window must not look like a completed library")
             }
             // This is the same run invoked by the service's upload-completion
             // refill; there is no new cycle, launch, library or network event.
@@ -39,7 +39,7 @@ final class AutomaticBackupDiscoveryTests: XCTestCase {
         XCTAssertEqual(fixture.stagedIDs.count, 237, "No photo may be staged twice")
         XCTAssertEqual(fixture.queue.snapshot.completed, 237)
         XCTAssertEqual(fixture.queue.snapshot.total, 237)
-        XCTAssertFalse(fixture.queue.snapshot.hasWork)
+        XCTAssertEqual(fixture.queue.snapshot.unfinished, 0)
         XCTAssertTrue(fixture.queue.snapshot.completionNotificationPending)
         XCTAssertLessThanOrEqual(fixture.maximumRunnableWindow, 100)
         XCTAssertEqual(fixture.maximumActiveTransfers, BackupStagingPolicy.maximumActiveUploads)

@@ -109,7 +109,6 @@ struct BackupQueueSnapshot: Equatable, Sendable {
     }
 
     var unfinished: Int { queued + active + waiting }
-    var hasWork: Bool { unfinished > 0 }
     var isUploading: Bool { active > 0 }
 
     var presentation: BackupQueuePresentation? {

@@ -163,7 +163,6 @@ final class BackupService {
     private(set) var failures: [String] = []
     /// Alasan kegagalan TERAKHIR, apa adanya dari server atau sistem.
     private(set) var lastError: String?
-    private(set) var lastRunAt: Date?
     private(set) var waitingForNetwork = 0
     private(set) var waitingForICloud = 0
     private(set) var waitingForAuthentication = 0
@@ -805,7 +804,6 @@ final class BackupService {
         failures = []
         lastError = nil
         lastQueueError = nil
-        lastRunAt = nil
         waitingForNetwork = 0
         waitingForICloud = 0
         waitingForAuthentication = 0
@@ -1839,7 +1837,6 @@ final class BackupService {
             else { BackupScheduler.schedule() }
             return
         }
-        lastRunAt = Date()
         applyQueueSnapshot()
         if state.waiting > 0 { BackupScheduler.schedule() }
     }
