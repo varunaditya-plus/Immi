@@ -214,6 +214,35 @@ final class SettingsVersionFreshnessTests: XCTestCase {
         if case .idle = model.serverPhase {} else { XCTFail("Cancellation must leave a nonloading, nonerror phase") }
     }
 
+    func testAccountChangeBeforeTuplePublicationCannotPublishPreviousServerInformation() async throws {
+        let repository = repository()
+        let model = SettingsViewModel(repo: repository)
+        await model.loadServerInfo()
+        XCTAssertEqual(model.serverInfo?.version, "v3.1.0")
+        let held = FreshVersionGate()
+        repository.statsGate = held
+        repository.currentVersion = "v3.3.0"
+        repository.availableVersion = "v3.4.0"
+        repository.storageLabel = "previous-account-storage"
+        repository.statsTotal = 42
+        let aboutRead = expectation(description: "Previous account's required response completed")
+        repository.onAboutRead = { aboutRead.fulfill() }
+        let refresh = Task { await model.loadServerInfo() }
+        addTeardownBlock { await held.release(); await refresh.value }
+        await fulfillment(of: [held.started, aboutRead], timeout: 2)
+
+        LocalSnapshot.clearAll()
+        held.release()
+        await refresh.value
+
+        XCTAssertEqual(model.serverInfo?.version, "v3.1.0")
+        XCTAssertEqual(model.storage?.diskUse, "previous-storage")
+        XCTAssertEqual(model.assetStats?.total, 1)
+        XCTAssertNil(model.latestVersion)
+        XCTAssertFalse(model.isUpdateAvailable)
+        XCTAssertNil(model.serverPhase.errorMessage)
+    }
+
     func testAnOlderFailureCannotReplaceANewerLoadedVersionWithAnError() async throws {
         let repository = repository()
         let model = SettingsViewModel(repo: repository)

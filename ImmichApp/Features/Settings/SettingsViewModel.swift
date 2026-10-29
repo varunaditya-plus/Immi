@@ -113,6 +113,7 @@ final class SettingsViewModel {
     func loadServerInfo() async {
         guard !Task.isCancelled else { return }
         let requestID = UUID()
+        let accountGeneration = LocalSnapshot.generation
         serverRequestID = requestID
         serverPhase = .loading
         latestVersion = nil
@@ -130,6 +131,7 @@ final class SettingsViewModel {
             let (storage, server, stats, version) = try await (storageTask, serverTask, statsTask, versionTask)
             guard serverRequestID == requestID else { return }
             try Task.checkCancellation()
+            guard accountGeneration == LocalSnapshot.generation else { throw CancellationError() }
 
             self.storage = storage
             self.serverInfo = server
@@ -139,7 +141,8 @@ final class SettingsViewModel {
             serverPhase = .loaded(())
         } catch {
             guard serverRequestID == requestID else { return }
-            guard !Task.isCancelled, !(error is CancellationError) else {
+            guard accountGeneration == LocalSnapshot.generation,
+                  !Task.isCancelled, !(error is CancellationError) else {
                 serverPhase = .idle
                 return
             }
