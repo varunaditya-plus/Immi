@@ -84,7 +84,6 @@ final class AssetInfoPanelPresentationTests: XCTestCase {
         try await waitUntil("The Info action is available") {
             self.barItems(in: root).contains { $0.accessibilityLabel == "Info" || $0.title == "Info" }
         }
-        let item = try XCTUnwrap(barItems(in: root).first { $0.accessibilityLabel == "Info" || $0.title == "Info" })
         _ = try await openPanel(in: window)
         try await Task.sleep(for: .milliseconds(500))
         if initialSize != nil {
@@ -93,6 +92,9 @@ final class AssetInfoPanelPresentationTests: XCTestCase {
         }
         let cell = try XCTUnwrap(descendant(of: PhotoPagerCell.self, in: window))
         let image = try XCTUnwrap(descendant(of: UIImageView.self, in: cell.contentView))
+        let item = try XCTUnwrap(barItems(in: root).first {
+            ($0.accessibilityLabel == "Info" || $0.title == "Info") && $0.isEnabled
+        })
         let action = try XCTUnwrap(item.action)
         XCTAssertTrue(UIApplication.shared.sendAction(action, to: item.target, from: item, for: nil))
         var targets: [CGFloat] = []
