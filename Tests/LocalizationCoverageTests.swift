@@ -97,6 +97,14 @@ final class LocalizationCoverageTests: XCTestCase {
         XCTAssertEqual(String(localized: "\(5) items", bundle: polish, locale: Locale(identifier: "pl")).lowercased(), "5 elementów")
     }
 
+    func testBackedUpCountsUseRussianFewAndManyForms() throws {
+        let russian = try localizedBundle(Bundle.main, language: "ru")
+        XCTAssertEqual(String(localized: "\(2) items backed up", bundle: russian, locale: Locale(identifier: "ru")),
+            "2 элемента сохранены в резервной копии")
+        XCTAssertEqual(String(localized: "\(5) items backed up", bundle: russian, locale: Locale(identifier: "ru")),
+            "5 элементов сохранено в резервной копии")
+    }
+
     func testCutoffPresetsUseCompleteLocalizedDurations() {
         XCTAssertEqual(FreeUpSpaceView.cutoffLabel(amount: 1, days: false, locale: Locale(identifier: "en")), "1 year")
         XCTAssertEqual(FreeUpSpaceView.cutoffLabel(amount: 2, days: false, locale: Locale(identifier: "en")), "2 years")

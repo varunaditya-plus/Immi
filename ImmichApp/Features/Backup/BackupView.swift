@@ -199,7 +199,7 @@ struct BackupView: View {
     }
 
     private func countRow(
-        title: String, caption: String, value: Int, tint: Color
+        title: LocalizedStringKey, caption: LocalizedStringKey, value: Int, tint: Color
     ) -> some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 2) {
