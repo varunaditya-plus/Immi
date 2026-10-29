@@ -28,7 +28,6 @@ final class ManualBackupQueueTests: XCTestCase {
         let restored = fixture.reopen()
         let item = try XCTUnwrap(restored.item(id: "legacy"))
 
-        XCTAssertNil(restored.persistenceWarning)
         XCTAssertNil(item.intent)
         XCTAssertFalse(item.isUserRequested)
         XCTAssertFalse(item.allowsCellularOverride)
@@ -308,7 +307,6 @@ final class ManualBackupQueueTests: XCTestCase {
         XCTAssertEqual(queue.snapshot, snapshot)
         XCTAssertFalse(queue.hasPendingUserRequests)
         XCTAssertNil(queue.item(id: "new"))
-        XCTAssertNotNil(queue.persistenceWarning)
         XCTAssertEqual(BackupQueueStore(fileURL: saved).items, original)
     }
 

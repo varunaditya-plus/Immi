@@ -283,7 +283,6 @@ final class BackupQueuePersistenceTests: XCTestCase {
         XCTAssertEqual(queue.ownership, ownership, file: file, line: line)
         XCTAssertEqual(queue.items, items, file: file, line: line)
         XCTAssertEqual(queue.snapshot, snapshot, file: file, line: line)
-        XCTAssertNotNil(queue.persistenceWarning, file: file, line: line)
         XCTAssertEqual(try? Data(contentsOf: fixture.url), saved, file: file, line: line)
         let failedReopen = fixture.reopen()
         XCTAssertEqual(failedReopen.owner, owner, file: file, line: line)
@@ -294,7 +293,6 @@ final class BackupQueuePersistenceTests: XCTestCase {
         fixture.fileManager.failOnAttempt = nil
         try action()
 
-        XCTAssertNil(queue.persistenceWarning, file: file, line: line)
         let reopened = fixture.reopen()
         XCTAssertEqual(reopened.owner, queue.owner, file: file, line: line)
         XCTAssertEqual(reopened.ownership, queue.ownership, file: file, line: line)

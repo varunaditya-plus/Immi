@@ -178,7 +178,6 @@ final class BackupAlbumIntentTests: XCTestCase {
         try Data(legacy.utf8).write(to: fixture.url)
         let reopened = BackupQueueStore(fileURL: fixture.url)
         let item = try XCTUnwrap(reopened.item(id: "legacy"))
-        XCTAssertNil(reopened.persistenceWarning)
         XCTAssertNil(item.sourceAlbumName)
         XCTAssertEqual(item.phase, .livePhotoMotion)
         XCTAssertEqual(item.motionAssetID, "saved-motion")

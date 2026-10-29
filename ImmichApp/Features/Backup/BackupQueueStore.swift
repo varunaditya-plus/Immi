@@ -212,7 +212,6 @@ final class BackupQueueStore {
     }
 
     private(set) var snapshot: BackupQueueSnapshot
-    private(set) var persistenceWarning: String?
 
     private var ledger: Ledger
     private let fileURL: URL
@@ -226,7 +225,6 @@ final class BackupQueueStore {
         let resolvedURL = fileURL ?? defaultURL
         self.fileURL = resolvedURL
         let loadedLedger: Ledger
-        let loadedWarning: String?
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -234,12 +232,8 @@ final class BackupQueueStore {
            let decoded = try? decoder.decode(Ledger.self, from: data),
            decoded.version == 1 {
             loadedLedger = decoded
-            loadedWarning = nil
         } else {
             loadedLedger = Ledger()
-            loadedWarning = fileManager.fileExists(atPath: resolvedURL.path)
-                ? String(localized: "The previous background queue was unreadable and will be rebuilt.")
-                : nil
             if fileManager.fileExists(atPath: resolvedURL.path) {
                 let quarantine = resolvedURL.deletingLastPathComponent()
                     .appendingPathComponent(
@@ -248,7 +242,6 @@ final class BackupQueueStore {
             }
         }
         ledger = loadedLedger
-        persistenceWarning = loadedWarning
         snapshot = Self.makeSnapshot(from: loadedLedger)
     }
 
@@ -773,13 +766,10 @@ final class BackupQueueStore {
             try data.write(to: fileURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
             var mutableFile = fileURL
             try? mutableFile.setResourceValues(values)
-            persistenceWarning = nil
             ledger = proposed
             snapshot = Self.makeSnapshot(from: proposed)
         } catch {
-            let message = error.localizedDescription
-            persistenceWarning = message
-            throw BackupQueueStoreError.unavailable(message)
+            throw BackupQueueStoreError.unavailable(error.localizedDescription)
         }
     }
 

@@ -292,11 +292,17 @@ final class BackgroundUploadQueueTests: XCTestCase {
 
         let queue = BackupQueueStore(fileURL: fixture.queueURL)
 
-        XCTAssertNotNil(queue.persistenceWarning)
         XCTAssertEqual(queue.snapshot.total, 0)
         XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.queueURL.path))
+        let quarantined = try FileManager.default.contentsOfDirectory(
+            at: fixture.directory, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.hasPrefix("BackgroundBackupQueue-corrupt-") }
+        XCTAssertEqual(quarantined.count, 1)
+        let quarantine = try XCTUnwrap(quarantined.first)
+        XCTAssertEqual(try Data(contentsOf: quarantine), Data("not-json".utf8))
         try queue.enqueue(["rediscovered"])
         XCTAssertEqual(queue.snapshot.queued, 1)
+        XCTAssertEqual(BackupQueueStore(fileURL: fixture.queueURL).items.map(\.id), ["rediscovered"])
     }
 
     private struct Fixture {

@@ -222,7 +222,6 @@ final class BackupAlbumPlacementJournalTests: XCTestCase {
 
         let reopened = fixture.reopen()
 
-        XCTAssertNil(reopened.persistenceWarning)
         XCTAssertEqual(reopened.items, originalItems)
         XCTAssertEqual(reopened.ownership, ownership)
         XCTAssertTrue(reopened.pendingAlbumPlacements.isEmpty)
