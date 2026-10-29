@@ -5,6 +5,9 @@ import XCTest
 @MainActor
 final class LocalizationCoverageTests: XCTestCase {
     private let argumentExpression = try! NSRegularExpression(pattern: #"%%|%(?:(\d+)\$)?(lld|llu|ld|lu|@|d|u|f|s)"#)
+    private let languages = ["ar", "bg", "bn", "ca", "cs", "da", "de", "el", "es", "fa", "fi", "fr",
+        "he", "hi", "hr", "hu", "id", "it", "ja", "kk", "ko", "lt", "ms", "nb", "nl", "pl",
+        "pt", "ro", "ru", "sk", "sl", "sv", "th", "tr", "uk", "vi", "zh-Hans", "zh-Hant"]
 
     func testSettingsCountsChooseEnglishAndRussianPluralForms() throws {
         let english = try localizedBundle(Bundle.main, language: "en")
@@ -52,6 +55,14 @@ final class LocalizationCoverageTests: XCTestCase {
         }
     }
 
+    func testRemovalCountsUseSingularEnglishForms() throws {
+        let english = try localizedBundle(Bundle.main, language: "en")
+        XCTAssertEqual(String(localized: "Move \(1) Items to Recently Deleted", bundle: english,
+            locale: Locale(identifier: "en")), "Move 1 Item to Recently Deleted")
+        XCTAssertEqual(String(localized: "\(1) items moved to Recently Deleted", bundle: english,
+            locale: Locale(identifier: "en")), "1 item moved to Recently Deleted")
+    }
+
     func testMemoryAgesUseRussianFewAndManyForms() throws {
         let russian = try localizedBundle(Bundle.main, language: "ru")
         XCTAssertEqual(String(localized: "\(2) years ago", bundle: russian,
@@ -75,6 +86,26 @@ final class LocalizationCoverageTests: XCTestCase {
         let polish = try localizedBundle(Bundle.main, language: "pl")
         XCTAssertEqual(String(localized: "\(2) items", bundle: polish, locale: Locale(identifier: "pl")).lowercased(), "2 elementy")
         XCTAssertEqual(String(localized: "\(5) items", bundle: polish, locale: Locale(identifier: "pl")).lowercased(), "5 elementów")
+    }
+
+    func testCutoffPresetsUseCompleteLocalizedDurations() {
+        XCTAssertEqual(FreeUpSpaceView.cutoffLabel(amount: 1, days: false, locale: Locale(identifier: "en")), "1 year")
+        XCTAssertEqual(FreeUpSpaceView.cutoffLabel(amount: 2, days: false, locale: Locale(identifier: "en")), "2 years")
+        XCTAssertEqual(FreeUpSpaceView.cutoffLabel(amount: 5, days: false, locale: Locale(identifier: "en")), "5 years")
+        XCTAssertEqual(FreeUpSpaceView.cutoffLabel(amount: 30, days: true, locale: Locale(identifier: "ru")), "30 дней")
+        XCTAssertEqual(FreeUpSpaceView.cutoffLabel(amount: 1, days: false, locale: Locale(identifier: "ru")), "1 год")
+        XCTAssertEqual(FreeUpSpaceView.cutoffLabel(amount: 2, days: false, locale: Locale(identifier: "ru")), "2 года")
+        XCTAssertEqual(FreeUpSpaceView.cutoffLabel(amount: 5, days: false, locale: Locale(identifier: "ru")), "5 лет")
+        for language in languages {
+            let locale = Locale(identifier: language)
+            for (amount, days) in [(30, true), (60, true), (90, true), (1, false), (2, false), (3, false)] {
+                let value = FreeUpSpaceView.cutoffLabel(amount: amount, days: days, locale: locale)
+                XCTAssertFalse(value.isEmpty, "\(language): \(amount)")
+                if ["ar", "ru", "zh-Hans", "zh-Hant"].contains(language) {
+                    XCTAssertFalse(value.contains("year") || value.contains("day"), "\(language): \(value)")
+                }
+            }
+        }
     }
 
     func testArgumentValidationAllowsReorderingButRejectsLostOrWrongSlots() {

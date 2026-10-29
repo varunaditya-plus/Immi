@@ -14,9 +14,9 @@ struct FreeUpSpaceView: View {
 
         var title: String {
             switch self {
-            case .none: "None"
-            case .photos: "Photos"
-            case .videos: "Videos"
+            case .none: String(localized: "None")
+            case .photos: String(localized: "Photos")
+            case .videos: String(localized: "Videos")
             }
         }
 
@@ -39,36 +39,44 @@ struct FreeUpSpaceView: View {
 
         var id: Self { self }
 
-        var value: String {
+        var amount: Int {
             switch self {
-            case .days30: "30"
-            case .days60: "60"
-            case .days90: "90"
-            case .year1: "1"
-            case .years2: "2"
-            case .years3: "3"
+            case .days30: 30
+            case .days60: 60
+            case .days90: 90
+            case .year1: 1
+            case .years2: 2
+            case .years3: 3
             }
         }
 
-        var unit: String {
+        var localizedDuration: String {
             switch self {
-            case .days30, .days60, .days90: "days"
-            case .year1: "year"
-            case .years2, .years3: "years"
+            case .days30, .days60, .days90: FreeUpSpaceView.cutoffLabel(amount: amount, days: true)
+            case .year1, .years2, .years3: FreeUpSpaceView.cutoffLabel(amount: amount, days: false)
             }
         }
 
         func date(from now: Date = .now) -> Date {
             let calendar = Calendar.current
             switch self {
-            case .days30: return calendar.date(byAdding: .day, value: -30, to: now) ?? now
-            case .days60: return calendar.date(byAdding: .day, value: -60, to: now) ?? now
-            case .days90: return calendar.date(byAdding: .day, value: -90, to: now) ?? now
-            case .year1: return calendar.date(byAdding: .year, value: -1, to: now) ?? now
-            case .years2: return calendar.date(byAdding: .year, value: -2, to: now) ?? now
-            case .years3: return calendar.date(byAdding: .year, value: -3, to: now) ?? now
+            case .days30, .days60, .days90:
+                return calendar.date(byAdding: .day, value: -amount, to: now) ?? now
+            case .year1, .years2, .years3:
+                return calendar.date(byAdding: .year, value: -amount, to: now) ?? now
             }
         }
+    }
+
+    static func cutoffLabel(amount: Int, days: Bool, locale: Locale = .current) -> String {
+        let formatter = DateComponentsFormatter()
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = locale
+        formatter.calendar = calendar
+        formatter.allowedUnits = days ? .day : .year
+        formatter.unitsStyle = .full
+        let components = days ? DateComponents(day: amount) : DateComponents(year: amount)
+        return formatter.string(from: components) ?? ""
     }
 
     @State private var library = LocalPhotoLibrary.shared
@@ -313,7 +321,7 @@ struct FreeUpSpaceView: View {
                         moveToRecentlyDeleted()
                     } label: {
                         Label(
-                            "Move \(candidates.count.formatted()) Items to Recently Deleted",
+                            "Move \(candidates.count) Items to Recently Deleted",
                             systemImage: "trash")
                             .frame(maxWidth: .infinity)
                     }
@@ -332,7 +340,7 @@ struct FreeUpSpaceView: View {
                 }
             case .complete:
                 Label {
-                    Text("\(removedCount.formatted()) items moved to Recently Deleted")
+                    Text("\(removedCount) items moved to Recently Deleted")
                 } icon: {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(.green)
@@ -354,23 +362,21 @@ struct FreeUpSpaceView: View {
             usesCustomDate = false
             invalidateResults()
         } label: {
-            VStack(spacing: 2) {
-                Text(preset.value)
-                    .font(.title2.bold())
-                Text(preset.unit)
-                    .font(.caption)
-            }
-            .foregroundStyle(selected ? Color.white : Color.primary)
-            .frame(maxWidth: .infinity, minHeight: 68)
-            .background(
-                selected ? Color.accentColor : Color.secondary.opacity(0.12),
-                in: .rect(cornerRadius: 14))
-            .contentShape(.rect)
+            Text(preset.localizedDuration)
+                .font(.headline)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 4)
+                .foregroundStyle(selected ? Color.white : Color.primary)
+                .frame(maxWidth: .infinity, minHeight: 68)
+                .background(
+                    selected ? Color.accentColor : Color.secondary.opacity(0.12),
+                    in: .rect(cornerRadius: 14))
+                .contentShape(.rect)
         }
         .buttonStyle(.plain)
     }
 
-    private func stepHeader(_ number: Int, title: String, active: Bool) -> some View {
+    func stepHeader(_ number: Int, title: LocalizedStringKey, active: Bool) -> some View {
         HStack(spacing: 10) {
             Text(number.formatted())
                 .font(.caption.bold())
@@ -393,20 +399,21 @@ struct FreeUpSpaceView: View {
 
     private var keepSummary: String {
         var values: [String] = []
-        if keepFavorites { values.append("Favorites") }
+        if keepFavorites { values.append(String(localized: "Favorites")) }
         if !keepAlbumIDs.isEmpty {
-            values.append(keepAlbumIDs.count == 1 ? "1 Album" : "\(keepAlbumIDs.count) Albums")
+            values.append(String(localized: "\(keepAlbumIDs.count) Albums"))
         }
         if alwaysKeepMedia != .none { values.append(alwaysKeepMedia.title) }
-        return values.isEmpty ? "Nothing selected" : "Keeping: \(values.joined(separator: ", "))"
+        return values.isEmpty ? String(localized: "Nothing selected")
+            : String(localized: "Keeping: \(values.formatted(.list(type: .and)))")
     }
 
     private var candidateSummary: String {
         let photos = candidates.lazy.filter { !$0.isVideo }.count
         let videos = candidates.count - photos
-        let photoText = photos == 1 ? "1 photo" : "\(photos) photos"
-        let videoText = videos == 1 ? "1 video" : "\(videos) videos"
-        return "Found \(photoText) and \(videoText)"
+        let photoText = String(localized: "\(photos) photos")
+        let videoText = String(localized: "\(videos) videos")
+        return String(localized: "Found \(photoText) and \(videoText)")
     }
 
     private func loadAlbums() async {
