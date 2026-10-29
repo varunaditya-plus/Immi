@@ -181,6 +181,114 @@ final class SyncStatusLocalAccessTests: XCTestCase {
         }
     }
 
+    func testMaintenanceJobsRejectALibraryChangeDuringPhotoEnumeration() async throws {
+        try await assertMaintenanceRejectsObsoletePhotos(status: .authorized)
+    }
+
+    func testMaintenanceJobsRejectALimitedSubsetChangeDuringPhotoEnumeration() async throws {
+        try await assertMaintenanceRejectsObsoletePhotos(status: .limited)
+    }
+
+    func testCloudIDMatchingRejectsAPhotosChangeAfterEnumeration() async throws {
+        try await assertCloudMatchingRejectsChangedAccess(revoked: false)
+    }
+
+    func testCloudIDMatchingRejectsPhotosRevocationAfterEnumeration() async throws {
+        try await assertCloudMatchingRejectsChangedAccess(revoked: true)
+    }
+
+    func testCloudIDMatchingSucceedsWhilePhotosRemainCurrent() async throws {
+        let started = expectation(description: "Cloud ID matching is waiting for the server")
+        let gate = SyncStatusOperationGate(started: started)
+        let api = HeldCloudIDsAPI(session: MockSessionManager(), gate: gate)
+        let fixture = try fixture(status: .authorized, api: api)
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let photo = LocalPhoto(id: UUID().uuidString, createdAt: now, modifiedAt: now,
+            isVideo: false, isLivePhoto: false, duration: nil, ratio: 1)
+        fixture.access.onAllPhotosRead = { [photo] }
+        try fixture.dataManager.storeChecksums([(localIdentifier: photo.id, checksum: "known-checksum")])
+        let task = Task { await fixture.model.run(.syncCloudIDs, appSync: nil) }
+        await fulfillment(of: [started], timeout: 2)
+
+        gate.resolve()
+        await task.value
+
+        guard case .succeeded(_, let message) = fixture.model.state(for: .syncCloudIDs) else {
+            return XCTFail("A current readable Photos scope must still complete matching")
+        }
+        XCTAssertEqual(message, "Cloud IDs are up to date")
+        XCTAssertEqual(fixture.model.completionFeedback, 1)
+        XCTAssertNil(fixture.model.runningJob)
+        XCTAssertEqual(fixture.dataManager.storedChecksums()[photo.id], "known-checksum")
+        XCTAssertTrue(fixture.dataManager.uploadedLocalIdentifiers().isEmpty)
+    }
+
+    private func assertCloudMatchingRejectsChangedAccess(revoked: Bool) async throws {
+        let started = expectation(description: "Cloud ID matching is waiting for the server")
+        let gate = SyncStatusOperationGate(started: started)
+        let api = HeldCloudIDsAPI(session: MockSessionManager(), gate: gate)
+        let fixture = try fixture(status: .authorized, api: api)
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let photo = LocalPhoto(id: UUID().uuidString, createdAt: now, modifiedAt: now,
+            isVideo: false, isLivePhoto: false, duration: nil, ratio: 1)
+        fixture.access.onAllPhotosRead = { [photo] }
+        try fixture.dataManager.storeChecksums([(localIdentifier: photo.id, checksum: "known-checksum")])
+        let checksums = fixture.dataManager.storedChecksums()
+        let mappings = fixture.dataManager.uploadedLocalIdentifiers()
+        let task = Task { await fixture.model.run(.syncCloudIDs, appSync: nil) }
+        await fulfillment(of: [started], timeout: 2)
+        XCTAssertEqual(fixture.model.state(for: .syncCloudIDs), .running)
+
+        if revoked { fixture.access.status = .denied }
+        else { fixture.library.libraryDidChange() }
+        gate.resolve()
+        await task.value
+
+        guard case .failed(let message) = fixture.model.state(for: .syncCloudIDs) else {
+            return XCTFail("Matching must not report success after its Photos scope stopped being current")
+        }
+        if revoked { XCTAssertTrue(message.contains("Photos access")) }
+        else { XCTAssertEqual(message, "Your photo library changed. Try again.") }
+        XCTAssertEqual(fixture.model.completionFeedback, 0)
+        XCTAssertNil(fixture.model.runningJob)
+        XCTAssertEqual(fixture.dataManager.storedChecksums(), checksums)
+        XCTAssertEqual(fixture.dataManager.uploadedLocalIdentifiers(), mappings)
+    }
+
+    private func assertMaintenanceRejectsObsoletePhotos(status: PHAuthorizationStatus) async throws {
+        for job in [SyncStatusJob.hashAssets, .syncCloudIDs] {
+            let fixture = try fixture(status: status)
+            let started = expectation(description: "The \(job.rawValue) photo enumeration is suspended")
+            let gate = SyncStatusOperationGate(started: started)
+            let now = Date(timeIntervalSince1970: 1_700_000_000)
+            let photo = LocalPhoto(id: UUID().uuidString, createdAt: now, modifiedAt: now,
+                isVideo: false, isLivePhoto: false, duration: nil, ratio: 1)
+            fixture.access.onAllPhotosRead = {
+                await gate.wait()
+                return [photo]
+            }
+            let previousChecksums = fixture.dataManager.storedChecksums()
+            let previousMappings = fixture.dataManager.uploadedLocalIdentifiers()
+            let task = Task { await fixture.model.run(job, appSync: nil) }
+            await fulfillment(of: [started], timeout: 2)
+            XCTAssertEqual(fixture.model.state(for: job), .running)
+
+            fixture.library.libraryDidChange()
+            gate.resolve()
+            await task.value
+
+            guard case .failed(let message) = fixture.model.state(for: job) else {
+                XCTFail("An obsolete Photos read must fail \(job.rawValue), not report an empty successful scan")
+                continue
+            }
+            XCTAssertEqual(message, "Your photo library changed. Try again.")
+            XCTAssertEqual(fixture.model.completionFeedback, 0)
+            XCTAssertNil(fixture.model.runningJob)
+            XCTAssertEqual(fixture.dataManager.storedChecksums(), previousChecksums)
+            XCTAssertEqual(fixture.dataManager.uploadedLocalIdentifiers(), previousMappings)
+        }
+    }
+
     private func assertFailed(
         _ model: SyncStatusViewModel, file: StaticString = #filePath, line: UInt = #line
     ) {
@@ -193,7 +301,8 @@ final class SyncStatusLocalAccessTests: XCTestCase {
     }
 
     private func fixture(status: PHAuthorizationStatus, api: APIClient? = nil) throws -> (
-        model: SyncStatusViewModel, library: LocalPhotoLibrary, access: SyncStatusPhotosAccess
+        model: SyncStatusViewModel, library: LocalPhotoLibrary, access: SyncStatusPhotosAccess,
+        dataManager: SwiftDataManager
     ) {
         let name = "sync-local-access-\(UUID())"
         defaultsNames.append(name)
@@ -217,7 +326,8 @@ final class SyncStatusLocalAccessTests: XCTestCase {
                 access.countReads += 1
                 access.onCountRead?()
                 return access.counts
-            }))
+            },
+            allPhotos: { await access.onAllPhotosRead?() ?? [] }))
         let model = SyncStatusViewModel(
             session: api?.session ?? MockSessionManager(), library: library,
             dataManager: dataManager, api: api,
@@ -225,7 +335,7 @@ final class SyncStatusLocalAccessTests: XCTestCase {
                 access.preparations += 1
                 await access.onPrepare?()
             })
-        return (model, library, access)
+        return (model, library, access, dataManager)
     }
 }
 
@@ -240,6 +350,7 @@ private final class SyncStatusPhotosAccess {
     var onPrepare: (() async -> Void)?
     var onCountRead: (() -> Void)?
     var onPermissionRequest: (() async -> Void)?
+    var onAllPhotosRead: (() async -> [LocalPhoto])?
 
     init(status: PHAuthorizationStatus) { self.status = status }
 }
@@ -279,5 +390,21 @@ private final class HeldSyncStatusAPI: APIClient {
     override func send<T: Decodable>(_ endpoint: Endpoint) async throws -> T {
         await gate.wait()
         throw APIError.notConnected
+    }
+}
+
+@MainActor
+private final class HeldCloudIDsAPI: APIClient {
+    private let gate: SyncStatusOperationGate
+
+    init(session: SessionManager, gate: SyncStatusOperationGate) {
+        self.gate = gate
+        super.init(session: session)
+    }
+
+    override func send<T: Decodable>(_ endpoint: Endpoint) async throws -> T {
+        guard endpoint.path == "/assets/bulk-upload-check" else { throw APIError.notConnected }
+        await gate.wait()
+        return try JSONDecoder().decode(T.self, from: Data(#"{"results":[]}"#.utf8))
     }
 }

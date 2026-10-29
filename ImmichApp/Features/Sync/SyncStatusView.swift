@@ -188,27 +188,31 @@ final class SyncStatusViewModel {
                 }
                 result = String(localized: "Remote library is up to date")
 
-            case .syncCloudIDs:
-                let photos = await library.allPhotosForSync()
-                guard library.isAuthorized else {
-                    throw SyncStatusJobError(
-                        message: String(localized: "Allow Photos access before syncing cloud IDs."))
+            case .syncCloudIDs, .hashAssets:
+                let photos: [LocalPhoto]
+                do {
+                    photos = try await library.allPhotosForSync()
+                } catch LocalPhotoLibraryError.accessRequired {
+                    throw SyncStatusJobError(message: job == .syncCloudIDs
+                        ? String(localized: "Allow Photos access before syncing cloud IDs.")
+                        : String(localized: "Allow Photos access before hashing assets."))
                 }
-                let linked = try await matcher.matchNow(photos)
-                result = linked == 0
-                    ? String(localized: "Cloud IDs are up to date")
-                    : String(localized: "Matched \(linked) cloud IDs")
-
-            case .hashAssets:
-                let photos = await library.allPhotosForSync()
-                guard library.isAuthorized else {
-                    throw SyncStatusJobError(
-                        message: String(localized: "Allow Photos access before hashing assets."))
+                let revision = library.revision
+                if job == .syncCloudIDs {
+                    let linked = try await matcher.matchNow(photos)
+                    result = linked == 0
+                        ? String(localized: "Cloud IDs are up to date")
+                        : String(localized: "Matched \(linked) cloud IDs")
+                } else {
+                    let hashed = try await matcher.hashNow(photos)
+                    result = hashed == 0
+                        ? String(localized: "All available assets are hashed")
+                        : String(localized: "Hashed \(hashed) assets")
                 }
-                let hashed = try await matcher.hashNow(photos)
-                result = hashed == 0
-                    ? String(localized: "All available assets are hashed")
-                    : String(localized: "Hashed \(hashed) assets")
+                try Task.checkCancellation()
+                library.refreshAuthorizationStatus()
+                guard library.isAuthorized else { throw LocalPhotoLibraryError.accessRequired }
+                guard revision == library.revision else { throw LocalPhotoLibraryError.libraryChanged }
             }
 
             jobStates[job] = .succeeded(.now, result)

@@ -304,17 +304,23 @@ final class LocalPhotoLibraryLifecycleTests: XCTestCase {
             await library.load()
             let albums = await library.albums()
             let photos = await library.photos(inAlbum: "album")
-            let allPhotos = await library.allPhotosForSync()
             XCTAssertTrue(albums.isEmpty)
             XCTAssertTrue(photos.isEmpty)
-            XCTAssertTrue(allPhotos.isEmpty)
             if status == .authorized || status == .limited {
+                let allPhotos = try await library.allPhotosForSync()
+                XCTAssertTrue(allPhotos.isEmpty)
                 let counts = try await library.statusCounts()
                 XCTAssertEqual(counts.assets, 0)
                 XCTAssertEqual(counts.albums, 0)
                 XCTAssertEqual(reads, 5)
                 XCTAssertTrue(library.isAuthorized)
             } else {
+                do {
+                    _ = try await library.allPhotosForSync()
+                    XCTFail("Unavailable access cannot be reported as an empty photo list")
+                } catch LocalPhotoLibraryError.accessRequired {} catch {
+                    XCTFail("Unexpected error: \(error)")
+                }
                 do {
                     _ = try await library.statusCounts()
                     XCTFail("Unavailable access cannot be reported as an empty library")
@@ -380,7 +386,7 @@ final class LocalPhotoLibraryLifecycleTests: XCTestCase {
         XCTAssertTrue(library.isAuthorized)
     }
 
-    func testRevocationDuringEachMetadataReadDiscardsThePayloadAndAllowsReadableRetry() async {
+    func testRevocationDuringEachMetadataReadDiscardsThePayloadAndAllowsReadableRetry() async throws {
         for kind in 0..<3 {
             let access = Access(.authorized)
             let photoRead = heldScan()
@@ -398,24 +404,34 @@ final class LocalPhotoLibraryLifecycleTests: XCTestCase {
                 reads += 1
                 return reads == 1 ? await photoRead.value().photos : current.photos
             })
-            let read: () async -> [String] = {
+            let read: () async throws -> [String] = {
                 switch kind {
                 case 0: return await library.albums().map(\.id)
                 case 1: return await library.photos(inAlbum: "album").map(\.id)
-                default: return await library.allPhotosForSync().map(\.id)
+                default: return try await library.allPhotosForSync().map(\.id)
                 }
             }
-            let pending = Task { await read() }
+            let pending = Task { try await read() }
             await fulfillment(of: [kind == 0 ? albumRead.started : photoRead.started], timeout: 2)
             access.status = .denied
             albumRead.complete([LocalAlbum(id: "old-album", title: "Old", count: 100)])
             photoRead.complete(scan("old-photo"))
-            let rejected = await pending.value
-            XCTAssertTrue(rejected.isEmpty, "Read kind \(kind) must discard data from revoked access")
+            do {
+                let rejected = try await pending.value
+                if kind == 2 {
+                    XCTFail("Revoked maintenance access must fail instead of returning an empty photo list")
+                } else {
+                    XCTAssertTrue(rejected.isEmpty, "Read kind \(kind) must discard data from revoked access")
+                }
+            } catch LocalPhotoLibraryError.accessRequired {
+                XCTAssertEqual(kind, 2)
+            } catch {
+                XCTFail("Unexpected error: \(error)")
+            }
             XCTAssertFalse(library.isAuthorized)
 
             access.status = .limited
-            let retried = await read()
+            let retried = try await read()
             XCTAssertEqual(retried, kind == 0 ? ["current-album"] : ["current-photo"])
             XCTAssertTrue(library.isAuthorized)
             XCTAssertEqual(reads, 2)
@@ -441,6 +457,30 @@ final class LocalPhotoLibraryLifecycleTests: XCTestCase {
 
         await library.load()
         XCTAssertEqual(library.photos.map(\.id), ["retry"])
+        XCTAssertEqual(calls, 2)
+    }
+
+    func testCancelledMaintenanceReadThrowsAndFreshRetryStillWorks() async throws {
+        let access = Access(.authorized)
+        let held = heldScan()
+        var calls = 0
+        let library = library(access: access, allPhotos: {
+            calls += 1
+            return calls == 1 ? await held.value().photos : self.scan("retry").photos
+        })
+        let cancelled = Task { try await library.allPhotosForSync() }
+        await fulfillment(of: [held.started], timeout: 2)
+        cancelled.cancel()
+        held.complete(scan("cancelled"))
+        do {
+            _ = try await cancelled.value
+            XCTFail("Cancelled maintenance must not report an empty or stale successful read")
+        } catch is CancellationError {} catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        let retried = try await library.allPhotosForSync()
+        XCTAssertEqual(retried.map(\.id), ["retry"])
         XCTAssertEqual(calls, 2)
     }
 

@@ -281,10 +281,10 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
     /// Metadata seluruh foto/video yang dapat diakses, untuk job manual
     /// pencocokan cloud id dan hash. Tidak mengubah pilihan album backup dan
     /// tidak menimpa `photos` yang sedang dipakai linimasa.
-    func allPhotosForSync() async -> [LocalPhoto] {
-        guard let context = try? await readContext() else { return [] }
+    func allPhotosForSync() async throws -> [LocalPhoto] {
+        let context = try await readContext()
         let result = await reader.allPhotos()
-        guard (try? validateRead(context)) != nil else { return [] }
+        try validateRead(context)
         return result
     }
 
