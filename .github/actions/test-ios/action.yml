@@ -22,6 +22,19 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+        verify_results() {
+          local bundle="$1"
+          local summary="${bundle}.summary.json"
+          if ! xcrun xcresulttool get test-results summary --path "$bundle" > "$summary"; then
+            echo "::error::Could not read test results from $bundle."
+            return 1
+          fi
+          if ! jq -e '.result == "Passed" and (.passedTests | type == "number") and .passedTests > 0 and .failedTests == 0' "$summary" > /dev/null; then
+            echo "::error::Test results must report a passed run with executed tests and no failures: $bundle."
+            cat "$summary"
+            return 1
+          fi
+        }
         test_arguments=(
           -project ImmichApp.xcodeproj
           -scheme SelfPhotos
@@ -35,10 +48,15 @@ runs:
         xcodebuild test "${test_arguments[@]}" \
           -testLanguage en -testRegion US \
           -resultBundlePath "$RUNNER_TEMP/SelfPhotosTests.xcresult"
-        xcodebuild test "${test_arguments[@]}" \
-          -testLanguage fr -testRegion FR \
-          -only-testing:ImmichAppTests/SyncStatusLocalizationTests \
-          -resultBundlePath "$RUNNER_TEMP/SelfPhotosFrenchTests.xcresult"
+        verify_results "$RUNNER_TEMP/SelfPhotosTests.xcresult"
+        for suite in SyncStatusLocalizationTests AppFallbackLocalizationTests; do
+          result_bundle="$RUNNER_TEMP/SelfPhotosFrench-${suite}.xcresult"
+          xcodebuild test "${test_arguments[@]}" \
+            -testLanguage fr -testRegion FR \
+            -only-testing:"ImmichAppTests/$suite" \
+            -resultBundlePath "$result_bundle"
+          verify_results "$result_bundle"
+        done
 
     - name: Upload test results
       if: always()
@@ -47,6 +65,6 @@ runs:
         name: SelfPhotos-test-results
         path: |
           ${{ runner.temp }}/SelfPhotosTests.xcresult
-          ${{ runner.temp }}/SelfPhotosFrenchTests.xcresult
+          ${{ runner.temp }}/SelfPhotosFrench-*.xcresult
         if-no-files-found: ignore
         retention-days: 7
