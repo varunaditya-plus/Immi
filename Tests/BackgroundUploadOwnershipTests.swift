@@ -133,7 +133,12 @@ final class BackgroundUploadOwnershipTests: XCTestCase {
         fixture.session.uploadAuthHeaders = ["Authorization": "Bearer renewed-token"]
         fixture.service.configure(session: fixture.session)
         try requests.requestUploads(["local-a"], uploadedIDs: [])
+        try fixture.queue.reconcile(activeTasks: [BackupActiveTask(
+            taskIdentifier: 42, context: context, isSuspended: false)])
         XCTAssertEqual(context.ownership, fixture.queue.ownership)
+        XCTAssertEqual(fixture.queue.item(id: "local-a")?.state, .uploading)
+        XCTAssertEqual(BackupQueueStore(fileURL: fixture.queueURL).item(id: "local-a")?.state, .uploading)
+        XCTAssertTrue(requests.readyItems(automaticEnabled: false).isEmpty)
         let unexpectedExpiration = expectation(description: "Renewed session must remain signed in")
         unexpectedExpiration.isInverted = true
         fixture.session.onExpire = { unexpectedExpiration.fulfill() }
