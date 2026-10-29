@@ -129,23 +129,13 @@ struct TimelineModePicker: View {
 @Observable
 final class VisibleMonthTracker {
     private(set) var title = ""
-    /// `startIndex` section yang sedang tampil; dipakai membandingkan urutan
-    /// tanpa memindai daftar.
-    private var currentStart = 0
-
     /// Bulan yang sedang berada di tepi atas layar.
     ///
     /// Sekarang cukup satu arah: collection view sendiri yang memberi tahu
     /// section mana yang paling atas, jadi tidak perlu lagi menyimpulkannya dari
     /// arah gerak probe geometri.
     func show(_ section: TimelineSection) {
-        currentStart = section.startIndex
         setTitle(section.title)
-    }
-
-    func reset() {
-        currentStart = 0
-        title = ""
     }
 
     /// Hanya ditulis kalau benar-benar berbeda: probe memanggil ini berkali-kali

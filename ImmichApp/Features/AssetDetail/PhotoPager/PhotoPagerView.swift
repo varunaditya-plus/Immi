@@ -111,10 +111,6 @@ final class PhotoPagerController: UIViewController {
     /// Penjaga supaya lompatan ke halaman awal hanya sekali, dan hanya setelah
     /// ukurannya nyata.
     private var hasPositioned = false
-    /// true selagi kita sendiri yang menggeser halaman, supaya perpindahan itu
-    /// tidak dilaporkan balik sebagai usapan pengguna.
-    private var isProgrammaticScroll = false
-
     var onPageChanged: ((AssetLite) -> Void)?
     var onZoomChanged: ((Bool) -> Void)?
     var onTap: (() -> Void)?
@@ -314,11 +310,9 @@ final class PhotoPagerController: UIViewController {
         // `setContentOffset`, bukan `scrollToItem`: yang kedua bisa mendarat di
         // tengah halaman kalau layoutnya belum sempat diperbarui, dan pada pager
         // itu berarti dua foto terlihat separuh-separuh.
-        isProgrammaticScroll = true
         let offset = CGPoint(
             x: CGFloat(currentIndex) * collectionView.bounds.width, y: 0)
         collectionView.setContentOffset(offset, animated: animated)
-        if !animated { isProgrammaticScroll = false }
     }
 
     private func reportPageIfChanged() {
@@ -507,7 +501,6 @@ extension PhotoPagerController: UICollectionViewDelegate {
     }
 
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
-        isProgrammaticScroll = false
         reportPageIfChanged()
         settleVisiblePages()
     }
