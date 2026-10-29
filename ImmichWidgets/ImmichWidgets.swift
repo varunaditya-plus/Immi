@@ -128,7 +128,7 @@ struct AlbumWidgetConfigurationIntent: WidgetConfigurationIntent {
 
 private struct AlbumEntry: TimelineEntry {
     let date: Date
-    let album: WidgetSnapshot.Album?
+    let album: WidgetSnapshot.Album
     let imageName: String?
 }
 
@@ -227,21 +227,17 @@ private struct AlbumWidgetView: View {
                     .textCase(.uppercase)
                     .opacity(0.82)
                 Group {
-                    if entry.album?.id == widgetFavoritesID {
+                    if entry.album.id == widgetFavoritesID {
                         Text("Favorites")
-                    } else if let album = entry.album {
-                        Text(verbatim: album.name)
                     } else {
-                        Text("Open SelfPhotos")
+                        Text(verbatim: entry.album.name)
                     }
                 }
                     .font(family == .systemSmall ? .headline : .title3.bold())
                     .lineLimit(2)
-                if let count = entry.album?.assetCount {
-                    Text("\(count) photos")
-                        .font(.caption)
-                        .opacity(0.82)
-                }
+                Text("\(entry.album.assetCount) photos")
+                    .font(.caption)
+                    .opacity(0.82)
             }
             .foregroundStyle(.white)
             .padding()
@@ -251,7 +247,7 @@ private struct AlbumWidgetView: View {
     }
 
     private var albumURL: URL? {
-        guard let id = entry.album?.id else { return URL(string: "selfphotos://favorites") }
+        let id = entry.album.id
         if id == widgetFavoritesID { return URL(string: "selfphotos://favorites") }
         return URL(string: "selfphotos://album/\(id)")
     }
