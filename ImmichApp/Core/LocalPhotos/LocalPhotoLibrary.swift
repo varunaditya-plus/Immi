@@ -889,18 +889,15 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
         for id: String,
         allowsNetworkFallback: Bool = true
     ) async -> (url: URL, filename: String)? {
+        guard !Task.isCancelled else { return nil }
         guard let resource = await Task.detached(priority: .utility, operation: {
             guard let asset = Self.fetchAsset(id) else { return PHAssetResource?.none }
             return Self.primaryResource(for: asset)
         }).value else { return nil }
 
-        if let localURL = await Self.writeTemporaryFile(resource, allowsNetwork: false) {
-            return (localURL, resource.originalFilename)
-        }
-        guard allowsNetworkFallback,
-              let remoteURL = await Self.writeTemporaryFile(resource, allowsNetwork: true)
+        guard let url = await Self.writeTemporaryFile(resource, allowsNetworkFallback: allowsNetworkFallback)
         else { return nil }
-        return (remoteURL, resource.originalFilename)
+        return (url, resource.originalFilename)
     }
 
     /// Motion resource pasangan Live Photo.
@@ -913,6 +910,7 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
         for id: String,
         allowsNetworkFallback: Bool = true
     ) async -> (url: URL, filename: String)? {
+        guard !Task.isCancelled else { return nil }
         guard let resource = await Task.detached(priority: .utility, operation: {
             guard let asset = Self.fetchAsset(id),
                   asset.mediaSubtypes.contains(.photoLive)
@@ -920,13 +918,9 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
             return Self.uploadResources(for: asset).motion
         }).value else { return nil }
 
-        if let localURL = await Self.writeTemporaryFile(resource, allowsNetwork: false) {
-            return (localURL, resource.originalFilename)
-        }
-        guard allowsNetworkFallback,
-              let remoteURL = await Self.writeTemporaryFile(resource, allowsNetwork: true)
+        guard let url = await Self.writeTemporaryFile(resource, allowsNetworkFallback: allowsNetworkFallback)
         else { return nil }
-        return (remoteURL, resource.originalFilename)
+        return (url, resource.originalFilename)
     }
 
     /// Membaca metadata satu asset langsung dari PhotoKit. Dipakai saat iOS
@@ -965,29 +959,18 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
 
     private nonisolated static func writeTemporaryFile(
         _ resource: PHAssetResource,
-        allowsNetwork: Bool
+        allowsNetworkFallback: Bool
     ) async -> URL? {
-        let ext = URL(fileURLWithPath: resource.originalFilename).pathExtension
-        let suffix = ext.isEmpty ? "" : ".\(ext)"
-        let destination = FileManager.default.temporaryDirectory
-            .appendingPathComponent("backup-source-\(UUID().uuidString)\(suffix)")
-        let options = PHAssetResourceRequestOptions()
-        options.isNetworkAccessAllowed = allowsNetwork
-
-        return await withCheckedContinuation { continuation in
-            PHAssetResourceManager.default().writeData(
-                for: resource,
-                toFile: destination,
-                options: options
-            ) { error in
-                if error != nil {
-                    try? FileManager.default.removeItem(at: destination)
-                    continuation.resume(returning: nil)
-                } else {
-                    continuation.resume(returning: destination)
-                }
-            }
-        }
+        let manager = PHAssetResourceManager.default()
+        return await LocalPhotoResourceFile.export(
+            filename: resource.originalFilename, allowsNetworkFallback: allowsNetworkFallback,
+            request: { allowsNetwork, data, completion in
+                let options = PHAssetResourceRequestOptions()
+                options.isNetworkAccessAllowed = allowsNetwork
+                return manager.requestData(for: resource, options: options,
+                    dataReceivedHandler: data, completionHandler: completion)
+            },
+            cancel: { manager.cancelDataRequest($0) })
     }
 
     /// Menyimpan hasil download server ke pustaka perangkat dan mengembalikan
