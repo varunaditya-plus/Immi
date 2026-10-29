@@ -31,13 +31,15 @@ struct AddPhotosToAlbumSheet: View {
                     }
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Add") {
-                            onAdd(Array(selectedIDs))
-                            dismiss()
+                            if let vm, addSelection(selectedIDs, using: vm) { dismiss() }
                         }
                         .disabled(selectedIDs.isEmpty)
                     }
                 }
                 .task { await load() }
+                .onChange(of: assets.map(\.id)) { _, ids in
+                    selectedIDs.formIntersection(ids)
+                }
         }
     }
 
@@ -110,6 +112,13 @@ struct AddPhotosToAlbumSheet: View {
         } else {
             selectedIDs.insert(asset.id)
         }
+    }
+
+    func addSelection(_ selection: Set<String>, using model: AlbumPhotoPickerViewModel) -> Bool {
+        let ids = model.assets.filter { selection.contains($0.id) }.map(\.id)
+        guard !ids.isEmpty else { return false }
+        onAdd(ids)
+        return true
     }
 
     private func load() async {

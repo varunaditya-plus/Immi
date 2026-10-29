@@ -172,6 +172,94 @@ final class AlbumPhotoPickerTests: XCTestCase {
         assertLoaded(vm)
     }
 
+    func testHeldPickerResultUsesCurrentPrivacyAndKeepsOtherPhotosAvailable() async throws {
+        let held = HeldPickerSearch()
+        let vm = AlbumPhotoPickerViewModel(repo: held, existingIDs: [])
+        let privateID = UUID().uuidString
+        let publicID = UUID().uuidString
+        let store = SwiftDataManager.shared
+        defer { try? store.setAssetVisibility([privateID], to: "timeline") }
+        let work = Task { await vm.load() }
+        defer { work.cancel(); held.cancelIfWaiting() }
+        await fulfillment(of: [held.started], timeout: 2)
+        try store.setAssetVisibility([privateID], to: "locked")
+
+        held.resolve([makeTestAsset(id: privateID), makeTestAsset(id: publicID)])
+        await work.value
+
+        XCTAssertEqual(vm.assets.map(\.id), [publicID])
+        assertLoaded(vm)
+        try store.setAssetVisibility([privateID], to: "timeline")
+        XCTAssertEqual(vm.assets.map(\.id), [privateID, publicID])
+        XCTAssertEqual(held.calls, 1)
+    }
+
+    func testLoadedPickerDropsNewlyPrivateAndRemovedPhotosWithoutAnotherRequest() async throws {
+        let held = HeldPickerSearch()
+        let privateID = UUID().uuidString
+        let removedID = UUID().uuidString
+        let publicID = UUID().uuidString
+        held.result = [privateID, removedID, publicID].map { makeTestAsset(id: $0) }
+        let vm = AlbumPhotoPickerViewModel(repo: held, existingIDs: [])
+        let store = SwiftDataManager.shared
+        defer {
+            try? store.setAssetVisibility([privateID], to: "timeline")
+            RemovedAssets.shared.restore([removedID])
+        }
+        await vm.load()
+        XCTAssertEqual(vm.assets.map(\.id), [privateID, removedID, publicID])
+
+        try store.setAssetVisibility([privateID], to: "locked")
+        RemovedAssets.shared.remove([removedID])
+
+        XCTAssertEqual(vm.assets.map(\.id), [publicID])
+        XCTAssertEqual(held.calls, 1)
+    }
+
+    func testAccountChangeRejectsHeldPickerResultsAndRetiresFurtherLoads() async throws {
+        let held = HeldPickerSearch()
+        let vm = AlbumPhotoPickerViewModel(repo: held, existingIDs: [])
+        let work = Task { await vm.load() }
+        defer { work.cancel(); held.cancelIfWaiting() }
+        await fulfillment(of: [held.started], timeout: 2)
+
+        LocalSnapshot.clearAll()
+        held.resolve([makeTestAsset(id: UUID().uuidString)])
+        await work.value
+
+        XCTAssertTrue(vm.assets.isEmpty)
+        await vm.load()
+        XCTAssertEqual(held.calls, 1)
+    }
+
+    func testAddActionRevalidatesRetainedSelectionAndRejectsHiddenOrUnknownIDs() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("picker-selection-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = SwiftDataManager(storeURL: directory.appendingPathComponent("test.store"),
+            backupJournalURL: directory.appendingPathComponent("journal.json"))
+        let held = HeldPickerSearch()
+        let privateID = UUID().uuidString
+        let removedID = UUID().uuidString
+        let publicID = UUID().uuidString
+        held.result = [privateID, removedID, publicID].map { makeTestAsset(id: $0) }
+        let vm = AlbumPhotoPickerViewModel(repo: held, existingIDs: [], dataManager: store)
+        await vm.load()
+        let staleSelection: Set<String> = [privateID, removedID, publicID, "not-in-the-picker"]
+        var additions: [[String]] = []
+        let sheet = AddPhotosToAlbumSheet(existingIDs: [], onAdd: { additions.append($0) })
+        defer { RemovedAssets.shared.restore([removedID]) }
+        try store.setAssetVisibility([privateID], to: "locked")
+        RemovedAssets.shared.remove([removedID])
+
+        XCTAssertTrue(sheet.addSelection(staleSelection, using: vm))
+        XCTAssertEqual(additions, [[publicID]])
+
+        try store.setAssetVisibility([publicID], to: "locked")
+        XCTAssertFalse(sheet.addSelection(staleSelection, using: vm))
+        XCTAssertEqual(additions, [[publicID]], "An empty admissible selection must not invoke the album action")
+        XCTAssertEqual(held.calls, 1)
+    }
+
     private func assertLoaded(_ vm: AlbumPhotoPickerViewModel, file: StaticString = #filePath, line: UInt = #line) {
         guard case .loaded = vm.phase else {
             return XCTFail("Expected the complete picker to be loaded", file: file, line: line)
