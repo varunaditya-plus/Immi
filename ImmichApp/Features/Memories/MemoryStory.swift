@@ -36,9 +36,12 @@ struct MemoryStory: Identifiable {
     ///   untuk rentang beberapa hari sekaligus — server menyiapkannya lebih awal
     ///   supaya klien bisa memuatnya di muka. Menampilkan semuanya membuat baris
     ///   "On This Day" berisi tanggal yang bukan hari ini.
-    static func build(from memories: [MemoryDTO], limit: Int, now: Date = Date()) -> [MemoryStory] {
-        let calendar = Calendar.current
-        let today = calendar.dateComponents([.month, .day], from: now)
+    static func build(from memories: [MemoryDTO], limit: Int, now: Date = Date(),
+                      calendar: Calendar = .current) -> [MemoryStory] {
+        // Server anniversaries use Gregorian dates; keep the user's timezone.
+        var anniversaryCalendar = Calendar(identifier: .gregorian)
+        anniversaryCalendar.timeZone = calendar.timeZone
+        let today = anniversaryCalendar.dateComponents([.month, .day], from: now)
 
         return Array(memories
             .filter { isToday($0.memoryAt, today) }
@@ -46,9 +49,10 @@ struct MemoryStory: Identifiable {
             .compactMap { memory -> MemoryStory? in
                 let visibleAssets = memory.assets.filter(\.isTimelineVisible)
                 guard !visibleAssets.isEmpty else { return nil }
+                let years = yearsAgo(for: memory, now: now, calendar: anniversaryCalendar)
                 return MemoryStory(
                     id: memory.id,
-                    title: yearsAgoTitle(for: memory, now: now, calendar: calendar),
+                    title: title(yearsAgo: years),
                     subtitle: dateFormatter.string(from: memory.memoryAt),
                     assets: visibleAssets.map(AssetLite.init))
             }
@@ -85,11 +89,11 @@ struct MemoryStory: Identifiable {
     /// dalam hari selalu sedikit kurang dari kelipatan 365 — dibagi 365 hasilnya
     /// meleset satu tahun ke bawah di tahun kabisat. Komponen tahun tidak punya
     /// masalah itu.
-    private static func yearsAgoTitle(
+    private static func yearsAgo(
         for memory: MemoryDTO,
         now: Date,
         calendar: Calendar
-    ) -> String {
+    ) -> Int {
         // `data.year` dipakai lebih dulu kalau ada: itu angka yang dipakai
         // server saat menyusun kenangannya, jadi labelnya tidak akan berbeda
         // dari aplikasi lain yang membaca kebun yang sama.
@@ -99,8 +103,10 @@ struct MemoryStory: Identifiable {
         // sebagai 31 Desember tahun sebelumnya.
         let memoryYear = memory.data?.year
             ?? Self.utcCalendar.component(.year, from: memory.memoryAt)
-        let years = calendar.component(.year, from: now) - memoryYear
+        return max(0, calendar.component(.year, from: now) - memoryYear)
+    }
 
+    private static func title(yearsAgo years: Int) -> String {
         guard years > 0 else { return String(localized: "This year") }
         return years == 1
             ? String(localized: "1 year ago")
