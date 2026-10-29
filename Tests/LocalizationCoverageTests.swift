@@ -6,6 +6,52 @@ import XCTest
 final class LocalizationCoverageTests: XCTestCase {
     private let argumentExpression = try! NSRegularExpression(pattern: #"%%|%(?:(\d+)\$)?(lld|llu|ld|lu|@|d|u|f|s)"#)
 
+    func testSettingsCountsChooseEnglishAndRussianPluralForms() throws {
+        let english = try localizedBundle(Bundle.main, language: "en")
+        XCTAssertEqual(SettingsView.assetCounts(images: 1, videos: 2, bundle: english,
+            locale: Locale(identifier: "en")), "1 Photo, 2 Videos")
+        let russian = try localizedBundle(Bundle.main, language: "ru")
+        for (amount, expected) in [(1, "1 Фото"), (2, "2 Фото"), (5, "5 Фото")] {
+            let value = SettingsView.assetCounts(images: amount, videos: 1, bundle: russian,
+                locale: Locale(identifier: "ru"))
+            XCTAssertTrue(value.localizedCaseInsensitiveContains(expected), value)
+            XCTAssertTrue(value.localizedCaseInsensitiveContains("1 Видео"), value)
+            XCTAssertFalse(value.contains("Photos") || value.contains("Videos"), value)
+        }
+    }
+
+    func testSettingsCountsUsePolishSingularFewAndManyForms() throws {
+        let polish = try localizedBundle(Bundle.main, language: "pl")
+        for (amount, word) in [(1, "zdjęcie"), (2, "zdjęcia"), (5, "zdjęć")] {
+            let value = SettingsView.assetCounts(images: amount, videos: 1, bundle: polish,
+                locale: Locale(identifier: "pl"))
+            XCTAssertTrue(value.localizedCaseInsensitiveContains(word), value)
+            XCTAssertTrue(value.contains(String(amount)), value)
+        }
+    }
+
+    func testSettingsCountsUseArabicDualForms() throws {
+        let arabic = try localizedBundle(Bundle.main, language: "ar")
+        let value = SettingsView.assetCounts(images: 2, videos: 2, bundle: arabic,
+            locale: Locale(identifier: "ar"))
+        XCTAssertTrue(value.contains("صورتان"), value)
+        XCTAssertTrue(value.contains("مقطعا فيديو"), value)
+    }
+
+    func testStorageCaptionsPreserveUsedAndTotalWhenArgumentsChangeOrder() throws {
+        for (language, expected) in [
+            ("hi", "100 GB में से 42 GB का उपयोग हुआ"),
+            ("ja", "100 GB 中 42 GB を使用"),
+            ("ko", "100 GB 중 42 GB 사용됨"),
+            ("zh-Hans", "已使用 42 GB，共 100 GB"),
+            ("zh-Hant", "已使用 42 GB，共 100 GB")
+        ] {
+            let bundle = try localizedBundle(Bundle.main, language: language)
+            XCTAssertEqual(SettingsView.storageCaption(used: "42 GB", total: "100 GB", bundle: bundle,
+                locale: Locale(identifier: language)), expected)
+        }
+    }
+
     func testMemoryAgesUseRussianFewAndManyForms() throws {
         let russian = try localizedBundle(Bundle.main, language: "ru")
         XCTAssertEqual(String(localized: "\(2) years ago", bundle: russian,

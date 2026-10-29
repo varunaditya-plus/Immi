@@ -141,14 +141,16 @@ struct SettingsView: View {
         }
     }
 
-    /// Jamaknya ditulis sendiri, bukan lewat penanda `^[...](inflect:)`: penanda
-    /// itu hanya diterjemahkan kalau string-nya melewati katalog lokalisasi, dan
-    /// proyek ini belum punya — hasilnya tampil apa adanya di layar.
     private var assetCounts: String? {
         guard let stats = vm.assetStats else { return nil }
-        let photos = stats.images == 1 ? "1 Photo" : "\(stats.images) Photos"
-        let videos = stats.videos == 1 ? "1 Video" : "\(stats.videos) Videos"
-        return "\(photos), \(videos)"
+        return Self.assetCounts(images: stats.images, videos: stats.videos)
+    }
+
+    static func assetCounts(images: Int, videos: Int, bundle: Bundle = .main,
+                            locale: Locale = .current) -> String {
+        let photos = String(localized: "\(images) Photos", bundle: bundle, locale: locale)
+        let videos = String(localized: "\(videos) Videos", bundle: bundle, locale: locale)
+        return String(localized: "\(photos), \(videos)", bundle: bundle, locale: locale)
     }
 
     private var backupBadge: some View {
@@ -457,7 +459,12 @@ struct SettingsView: View {
     private func storageCaption(_ storage: ServerStorageDTO) -> String {
         let used = storage.diskUse ?? formatBytes(storage.diskUseRaw ?? 0)
         let total = storage.diskSize ?? formatBytes(storage.diskSizeRaw ?? 0)
-        return "\(used) of \(total) used"
+        return Self.storageCaption(used: used, total: total)
+    }
+
+    static func storageCaption(used: String, total: String, bundle: Bundle = .main,
+                               locale: Locale = .current) -> String {
+        String(localized: "\(used) of \(total) used", bundle: bundle, locale: locale)
     }
 
     /// Perawatan penyimpanan dikelompokkan di sini. Cache berada di Sync Status

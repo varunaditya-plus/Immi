@@ -139,7 +139,7 @@ struct ServerCompatibilityView: View {
 
     private struct Capability: Identifiable {
         let id: String
-        let title: String
+        let title: LocalizedStringKey
         let symbol: String
         let enabled: Bool
     }
