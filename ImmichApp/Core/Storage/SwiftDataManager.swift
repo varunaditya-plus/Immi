@@ -10,9 +10,9 @@ enum LocalDatabaseMaintenanceError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .exportFailed:
-            "The local sync database could not be exported."
+            String(localized: "The local sync database could not be exported.")
         case .persistentStoreUnavailable:
-            "The local sync database is temporarily unavailable."
+            String(localized: "The local sync database is temporarily unavailable.")
         }
     }
 }
@@ -161,7 +161,7 @@ final class SwiftDataManager {
                     state: .recovered(
                         quarantinedStore: quarantinedStore,
                         restoredBackupRecords: 0,
-                        warning: "The previous local cache could not be opened: \(openingError)"))
+                        warning: String(localized: "The previous local cache could not be opened: \(openingError)")))
             } catch {
                 // A broken disk store must not crash application launch. The
                 // in-memory container keeps read-only/cache UI usable, while
@@ -911,7 +911,7 @@ final class SwiftDataManager {
                 nonTimelineAssetIDs.formUnion(mappedIDs)
                 if !newlyHidden.isEmpty { WidgetSnapshotExporter.clear() }
             }
-            let message = "Backup mapping protection is unavailable: \(error.localizedDescription)"
+            let message = String(localized: "Backup mapping protection is unavailable: \(error.localizedDescription)")
             if case let .recovered(quarantinedStore, restoredCount, warning) = startupState {
                 startupState = .recovered(
                     quarantinedStore: quarantinedStore,
@@ -1004,7 +1004,7 @@ final class SwiftDataManager {
             try writeBackupRecordJournal(currentBackupRecordSnapshots())
         } catch {
             startupState = .protectionUnavailable(
-                "Backup mapping protection is unavailable: \(error.localizedDescription)")
+                String(localized: "Backup mapping protection is unavailable: \(error.localizedDescription)"))
         }
         backupMappingRevision = UUID()
     }

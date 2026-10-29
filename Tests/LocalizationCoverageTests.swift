@@ -41,12 +41,26 @@ final class LocalizationCoverageTests: XCTestCase {
     }
 
     func testRecentUserFacingErrorsAndPaginationAreInCompiledAppResources() throws {
-        let keys = ["Load More", "Loading More…", "Failed to load more photos",
-            "Search returned an incomplete page. Please try again.", "Selects this item.",
-            "Deselects this item.", "Opens the viewer.", "Shows this item in the viewer.",
-            "Unable to play video. Try again.", "Unable to play Live Photo. Touch and hold to try again.",
-            "Automatic Backup Off", "Accessible Photos Backed Up", "Shared Uploads", "Upload Details",
-            "Sign In with OAuth"]
+        let keys = [
+            "Load More",
+            "Loading More…",
+            "Failed to load more photos",
+            "Search returned an incomplete page. Please try again.",
+            "Selects this item.",
+            "Deselects this item.",
+            "Opens the viewer.",
+            "Shows this item in the viewer.",
+            "Unable to play video. Try again.",
+            "Unable to play Live Photo. Touch and hold to try again.",
+            "Automatic Backup Off",
+            "Accessible Photos Backed Up",
+            "Shared Uploads",
+            "Upload Details",
+            "Sign In with OAuth",
+            "The local sync database could not be exported.",
+            "The local sync database is temporarily unavailable.",
+            "The previous local cache could not be opened: %@",
+            "Backup mapping protection is unavailable: %@"]
         for language in languages {
             let bundle = try localizedBundle(Bundle.main, language: language)
             for key in keys { assertCompiled(key, in: bundle) }
