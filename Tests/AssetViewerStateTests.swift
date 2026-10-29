@@ -141,6 +141,28 @@ final class AssetViewerStateTests: XCTestCase {
         XCTAssertFalse(state.isPreparing(.editor))
     }
 
+    func testHeldCompletionKeepsTheSameVisitsDuplicatePreparationGuard() async throws {
+        let state = viewer([asset("A")])
+        let target = state.target(serverID: "A", detail: nil)
+        let completion = HeldViewerResult<Bool>()
+        var completions = 0
+        let task = try XCTUnwrap(state.prepare(target, kind: .share, operation: { "ready original" }) { value in
+            XCTAssertEqual(value, "ready original")
+            completions += 1
+            _ = await completion.value()
+        })
+        await fulfillment(of: [completion.started], timeout: 2)
+
+        XCTAssertTrue(state.isPreparing(.share))
+        XCTAssertNil(state.prepare(target, kind: .share,
+            operation: { XCTFail("A held completion must still reject duplicate original preparation"); return "duplicate" },
+            completion: { _ in XCTFail("A duplicate activity must not be presented") }))
+        XCTAssertEqual(completions, 1)
+        completion.resolve(true)
+        await task.value
+        XCTAssertFalse(state.isPreparing(.share))
+    }
+
     func testLeavingViewerRejectsLatePresentationEvenWhenSamePageIsVisibleAgain() async throws {
         let state = viewer([asset("A")])
         let held = HeldViewerResult<String?>()
@@ -157,6 +179,58 @@ final class AssetViewerStateTests: XCTestCase {
         XCTAssertFalse(state.isCurrent(target))
     }
 
+    func testChangingPagesCancelsHeldPresentationPreparation() async throws {
+        try await assertPreparationIsCancelled { XCTAssertTrue($0.select("B")) }
+    }
+
+    func testLeavingViewerCancelsHeldPresentationPreparation() async throws {
+        try await assertPreparationIsCancelled { $0.deactivate() }
+    }
+
+    func testRemovingTheCurrentPageCancelsHeldPresentationPreparation() async throws {
+        try await assertPreparationIsCancelled { XCTAssertTrue($0.removePage("A")) }
+    }
+
+    func testLosingLocalAccessCancelsHeldPresentationPreparation() async throws {
+        try await assertPreparationIsCancelled(local: true) { state in
+            XCTAssertTrue(state.refreshLocalAccess(hasReadAccess: false, existingLocalIDs: { _ in [] },
+                serverIDsByLocalIdentifier: [:]))
+        }
+    }
+
+    private func assertPreparationIsCancelled(
+        local: Bool = false, changeVisit: (AssetViewerState) -> Void
+    ) async throws {
+        for kind in [AssetViewerState.Preparation.share, .editor, .sharedLink] {
+            let id = local ? LocalPhotoLibrary.assetID(for: "A") : "A"
+            let state = viewer([asset(id, origin: local ? .device : .server), asset("B")])
+            let held = HeldViewerResult<URL?>()
+            let cancellation = ViewerPreparationCancellation()
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try Data("late prepared original".utf8).write(to: file)
+            defer { try? FileManager.default.removeItem(at: file) }
+            let target = state.target(serverID: local ? nil : "A", detail: nil)
+            let task = try XCTUnwrap(state.prepare(target, kind: kind,
+                operation: {
+                    await withTaskCancellationHandler {
+                        await held.value()
+                    } onCancel: {
+                        cancellation.mark()
+                    }
+                }, discard: { try? FileManager.default.removeItem(at: $0) },
+                completion: { _ in XCTFail("An obsolete viewer must not present prepared content") }))
+            await fulfillment(of: [held.started], timeout: 2)
+
+            changeVisit(state)
+
+            XCTAssertTrue(cancellation.wasCancelled, "\(kind) must stop expensive work as soon as its visit ends")
+            held.resolve(file)
+            await task.value
+            XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+            XCTAssertFalse(state.isPreparing(kind))
+        }
+    }
+
     func testPresentingEditorRejectsPendingShareAndRestoresPresentationsOnReturn() async throws {
         let state = viewer([asset("A")])
         let target = state.target(serverID: "A", detail: makeTestAsset(id: "A"))
@@ -168,7 +242,10 @@ final class AssetViewerStateTests: XCTestCase {
             completion: { presented.append($0) }))
         await fulfillment(of: [held.started], timeout: 2)
         var editorPresented = false
-        let editor = try XCTUnwrap(state.prepareEditor(target, operation: { "edits" }) { _ in editorPresented = true })
+        let editor = try XCTUnwrap(state.prepareEditor(target, operation: { "edits" }) { _ in
+            XCTAssertFalse(Task.isCancelled, "Presenting the ready editor must not cancel its own completion")
+            editorPresented = true
+        })
         await editor.value
         XCTAssertTrue(editorPresented)
         held.resolve("old share")
@@ -412,6 +489,13 @@ final class AssetViewerStateTests: XCTestCase {
     private func asset(_ id: String, origin: AssetOrigin = .server) -> AssetLite {
         AssetLite(id: id, isVideo: false, ratio: 1, thumbhash: nil, createdAt: .distantPast, origin: origin)
     }
+}
+
+private final class ViewerPreparationCancellation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+    var wasCancelled: Bool { lock.withLock { cancelled } }
+    func mark() { lock.withLock { cancelled = true } }
 }
 
 @MainActor

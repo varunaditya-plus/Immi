@@ -27,7 +27,7 @@ final class AssetViewerState {
     private var storage: PageStorage
     private var selection: Selection
     private var isActive = true
-    private var preparations: [Preparation: Set<UUID>] = [:]
+    private var preparations: [Preparation: [UUID: (id: UUID, task: Task<Void, Never>)]] = [:]
     private var downloadingIDs: Set<String> = []
     private var uploadingIDs: Set<String> = []
     private var removingIDs: Set<String> = []
@@ -65,6 +65,7 @@ final class AssetViewerState {
     func select(_ id: String) -> Bool {
         guard let index = storage.assets.firstIndex(where: { $0.id == id }) else { return false }
         guard currentAsset.id != id else { return true }
+        cancelPreparations()
         selection = Selection(index: index, fallback: storage.assets[index])
         return true
     }
@@ -73,11 +74,12 @@ final class AssetViewerState {
 
     func deactivate() {
         isActive = false
+        cancelPreparations()
         selection.visit = UUID()
     }
 
     func isPreparing(_ kind: Preparation) -> Bool {
-        preparations[kind]?.contains(selection.visit) == true
+        preparations[kind]?[selection.visit] != nil
     }
 
     func isRemoving(_ id: String) -> Bool { removingIDs.contains(id) }
@@ -89,10 +91,10 @@ final class AssetViewerState {
         discard: @escaping @MainActor (Value) -> Void = { _ in },
         completion: @escaping @MainActor (Value) async -> Void
     ) -> Task<Void, Never>? {
-        guard isCurrent(target), preparations[kind]?.contains(target.visit) != true else { return nil }
-        preparations[kind, default: []].insert(target.visit)
-        return Task {
-            defer { preparations[kind]?.remove(target.visit) }
+        guard isCurrent(target), preparations[kind]?[target.visit] == nil else { return nil }
+        let id = UUID()
+        let task = Task {
+            defer { finishPreparation(kind, visit: target.visit, id: id) }
             guard isCurrent(target), !Task.isCancelled else { return }
             guard let value = await operation() else { return }
             guard isCurrent(target), !Task.isCancelled else {
@@ -101,6 +103,19 @@ final class AssetViewerState {
             }
             await completion(value)
         }
+        preparations[kind, default: [:]][target.visit] = (id, task)
+        return task
+    }
+
+    private func finishPreparation(_ kind: Preparation, visit: UUID, id: UUID) {
+        guard preparations[kind]?[visit]?.id == id else { return }
+        preparations[kind]?[visit] = nil
+    }
+
+    private func cancelPreparations() {
+        let tasks = preparations.values.flatMap { $0.values.map { $0.task } }
+        preparations.removeAll()
+        tasks.forEach { $0.cancel() }
     }
 
     @discardableResult
@@ -110,6 +125,8 @@ final class AssetViewerState {
         completion: @escaping @MainActor (Value) async -> Void
     ) -> Task<Void, Never>? {
         prepare(target, kind: .editor, operation: operation) { value in
+            // The ready editor must not cancel itself when covering the viewer.
+            self.preparations[.editor]?[target.visit] = nil
             self.deactivate()
             await completion(value)
         }
@@ -136,6 +153,7 @@ final class AssetViewerState {
         guard let removedIndex = storage.assets.firstIndex(where: { $0.id == id }) else { return false }
         let selected = currentAsset
         storage.assets.removeAll { $0.id == id }
+        if selected.id == id { cancelPreparations() }
         if storage.assets.isEmpty {
             selection = Selection(index: 0, fallback: selected)
         } else if selected.id == id {
@@ -203,6 +221,7 @@ final class AssetViewerState {
             }
         }
         guard changed else { return false }
+        let previousVisit = selection.visit
         storage.assets = updated
         if let index = updated.firstIndex(where: { $0.id == selectedID }) {
             if selectedID == selected.id { selection.index = index }
@@ -213,6 +232,7 @@ final class AssetViewerState {
         } else {
             selection = Selection(index: 0, fallback: selected)
         }
+        if selection.visit != previousVisit { cancelPreparations() }
         return true
     }
 
