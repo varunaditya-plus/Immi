@@ -316,6 +316,10 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
         return result
     }
 
+    nonisolated static func displayAlbumTitle(_ title: String?) -> String {
+        title ?? String(localized: "Untitled")
+    }
+
     private nonisolated static func fetchAlbums() -> [LocalAlbum] {
         var result: [LocalAlbum] = []
 
@@ -325,7 +329,7 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
                 guard assets.count > 0 else { return }
                 result.append(LocalAlbum(
                     id: collection.localIdentifier,
-                    title: collection.localizedTitle ?? "Untitled",
+                    title: Self.displayAlbumTitle(collection.localizedTitle),
                     count: assets.count,
                     // Foto TERAKHIR, bukan yang pertama.
                     //

@@ -21,6 +21,11 @@ struct AssistiveAccessSettingsView: View {
             repo: AlbumRepository(api: api)))
     }
 
+    var selectedAlbumLabel: String {
+        selectedAlbumID.isEmpty || selectedAlbumName.isEmpty
+            ? String(localized: "None") : selectedAlbumName
+    }
+
     var body: some View {
         Form {
             Section {
@@ -41,7 +46,7 @@ struct AssistiveAccessSettingsView: View {
                         selectedAlbumName: $selectedAlbumName)
                 } label: {
                     LabeledContent {
-                        Text(selectedAlbumName.isEmpty ? "None" : selectedAlbumName)
+                        Text(selectedAlbumLabel)
                             .foregroundStyle(.secondary)
                     } label: {
                         Label("Album", systemImage: "rectangle.stack")
@@ -72,7 +77,7 @@ private struct AssistiveAccessAlbumPicker: View {
 
     var body: some View {
         List {
-            selectionRow(id: "", name: "None", systemImage: "nosign")
+            selectionRow(id: "", name: String(localized: "None"), systemImage: "nosign")
 
             if viewModel.phase.isLoading, viewModel.albums.isEmpty {
                 HStack {

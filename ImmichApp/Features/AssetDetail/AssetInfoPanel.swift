@@ -419,13 +419,14 @@ struct AssetInfoPanel: View {
             span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01))
     }
 
-    private var placeName: String {
+    var placeName: String {
         let parts = [detail.exifInfo?.city, detail.exifInfo?.state]
             .compactMap { $0 }
-            .filter { !$0.isEmpty }
-        return parts.isEmpty
-            ? (detail.exifInfo?.country ?? "Unknown Location")
-            : parts.joined(separator: " - ")
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        if !parts.isEmpty { return parts.joined(separator: " - ") }
+        if let country = detail.exifInfo?.country,
+           !country.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return country }
+        return String(localized: "Unknown Location")
     }
 
     // MARK: - Teks turunan

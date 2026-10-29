@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import XCTest
 @testable import ImmichApp
 
@@ -114,6 +115,73 @@ final class AppFallbackLocalizationTests: XCTestCase {
         XCTAssertGreaterThan(message.count, prefix.count, "The underlying journal error must remain visible")
     }
 
+    func testMissingAlbumTitleIsLocalizedAndPhotoLibraryTitlesRemainVerbatim() {
+        XCTAssertEqual(LocalPhotoLibrary.displayAlbumTitle(nil), expected("Untitled", "Sans titre"))
+        for title in ["Untitled", "Family photos", "", "休暇"] {
+            XCTAssertEqual(LocalPhotoLibrary.displayAlbumTitle(title), title,
+                "A nonnil title belongs to the photo library, even if it matches the fallback")
+        }
+    }
+
+    func testAssistiveAlbumFallbackUsesTheSelectionIDAndPreservesAlbumNames() {
+        let defaults = UserDefaults.standard
+        let keys = [AssistiveAccessPreferences.albumIDKey, AssistiveAccessPreferences.albumNameKey]
+        let previous = keys.map { ($0, defaults.object(forKey: $0)) }
+        defer {
+            for (key, value) in previous {
+                if let value { defaults.set(value, forKey: key) }
+                else { defaults.removeObject(forKey: key) }
+            }
+        }
+        for (id, name, label) in [
+            ("", "", expected("None", "Aucun")),
+            ("", "A stale album name", expected("None", "Aucun")),
+            ("selected-album", "", expected("None", "Aucun")),
+            ("selected-album", "None", "None"),
+            ("selected-album", "Family photos", "Family photos")
+        ] {
+            defaults.set(id, forKey: AssistiveAccessPreferences.albumIDKey)
+            defaults.set(name, forKey: AssistiveAccessPreferences.albumNameKey)
+            let view = AssistiveAccessSettingsView(session: MockSessionManager())
+            XCTAssertEqual(view.selectedAlbumLabel, label)
+            XCTAssertEqual(defaults.string(forKey: AssistiveAccessPreferences.albumIDKey), id)
+            XCTAssertEqual(defaults.string(forKey: AssistiveAccessPreferences.albumNameKey), name,
+                "Drawing a fallback must not rewrite a stored selection or album name")
+        }
+    }
+
+    func testMissingPlaceNameIsLocalizedAndServerMetadataRemainsVerbatim() throws {
+        let fallback = expected("Unknown Location", "Lieu inconnu")
+        let cases: [(String?, String?, String?, String)] = [
+            (nil, nil, nil, fallback),
+            ("", "", "", fallback),
+            (" \n ", "\t", " \n ", fallback),
+            (nil, nil, "Unknown Location", "Unknown Location"),
+            (nil, nil, "France", "France"),
+            ("Paris", "Île-de-France", "France", "Paris - Île-de-France"),
+            (" \n ", "Catalonia", "Spain", "Catalonia")
+        ]
+        let blank = try render(Color.clear)
+        for (city, state, country, label) in cases {
+            let detail = makeTestAsset(id: "place-name", exifInfo: ExifDTO(make: nil, model: nil,
+                exifImageWidth: nil, exifImageHeight: nil, orientation: nil, fileSizeInByte: nil,
+                dateTimeOriginal: nil, latitude: 0, longitude: 0, city: city, state: state,
+                country: country, lensModel: nil, fNumber: nil, focalLength: nil, iso: nil,
+                exposureTime: nil, description: nil))
+            let expectedImage = try render(Text(verbatim: label))
+            XCTAssertNotEqual(expectedImage, blank, "The comparison must render nonempty text")
+            XCTAssertEqual(try render(FallbackPlaceNameFixture(detail: detail)), expectedImage,
+                "The map label must use localized fallback text while preserving geographic metadata")
+        }
+    }
+
+    private func render<Content: View>(_ content: Content) throws -> Data {
+        let renderer = ImageRenderer(content: content.font(.body).foregroundStyle(.black)
+            .frame(width: 500, height: 60).background(Color.white))
+        renderer.scale = 1
+        return try XCTUnwrap(renderer.uiImage?.pngData())
+    }
+
     private func expected(_ english: String, _ french: String) -> String {
         Bundle.main.preferredLocalizations.first?.hasPrefix("fr") == true ? french : english
     }
@@ -123,5 +191,16 @@ final class AppFallbackLocalizationTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         directories.append(directory)
         return directory
+    }
+}
+
+private struct FallbackPlaceNameFixture: View {
+    let detail: AssetResponseDTO
+    @State private var description = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        Text(verbatim: AssetInfoPanel(detail: detail, descriptionDraft: $description,
+            descriptionFocus: $focused).placeName)
     }
 }
