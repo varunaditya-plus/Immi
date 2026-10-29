@@ -334,22 +334,6 @@ final class AlbumDetailViewModel {
         self.dataManager = dataManager ?? .shared
     }
 
-    func updateAlbum(_ id: String, name: String, description: String) async -> String? {
-        let context = albumContext
-        guard canWork else { return nil }
-        do {
-            try await albumRepo.update(
-                id,
-                name: name,
-                description: .some(description.isEmpty ? nil : description))
-            return nil
-        } catch {
-            guard accepts(context), !(error is CancellationError) else { return nil }
-            return (error as? APIError)?.errorDescription
-                ?? String(localized: "Failed to update album")
-        }
-    }
-
     @discardableResult
     func addUsers(_ userIDs: [String], to albumId: String) async -> Bool {
         let context = albumContext

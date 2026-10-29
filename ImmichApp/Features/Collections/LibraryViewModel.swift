@@ -8,7 +8,6 @@ final class LibraryViewModel {
     private var loadRequest = UUID()
     private var albumRequest = UUID()
     private var peopleRequest = UUID()
-    private var albumUpdates: [String: UUID] = [:]
     private var actionErrorID = UUID()
     private var restoredSnapshots = false
 
@@ -183,48 +182,12 @@ final class LibraryViewModel {
 
     // MARK: - Aksi album
 
-    /// - Returns: pesan kesalahan; nil berarti perubahan sudah dikonfirmasi.
-    func updateAlbum(_ id: String, name: String, description: String) async -> String? {
-        guard canPublish else { return nil }
-        let trimmed = name.trimmingCharacters(in: .whitespaces)
-        let trimmedDescription = description.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return nil }
-        let action = UUID()
-        albumUpdates[id] = action
-        defer { finishAlbumUpdate(id, action: action) }
-
-        do {
-            try await albumRepo.update(
-                id,
-                name: trimmed,
-                description: .some(trimmedDescription.isEmpty ? nil : trimmedDescription))
-            guard isCurrentAlbumUpdate(id, action: action) else { return nil }
-            albumRequest = UUID()
-            // Kartu diperbarui di tempat, bukan lewat muat ulang: sampul album
-            // tidak berubah karena namanya berubah, dan memuat ulang seluruh
-            // baris hanya membuatnya berkedip.
-            if let index = albums.firstIndex(where: { $0.id == id }) {
-                var updated = albums[index]
-                updated.albumName = trimmed
-                updated.description = trimmedDescription.isEmpty ? nil : trimmedDescription
-                updated.updatedAt = Date()
-                applyAlbumUpdate(updated)
-            }
-            return nil
-        } catch {
-            guard isCurrentAlbumUpdate(id, action: action), !(error is CancellationError) else { return nil }
-            return (error as? APIError)?.errorDescription
-                ?? String(localized: "Failed to update album")
-        }
-    }
-
     /// Detail/daftar album hidup dengan view model sendiri. Metadata hasil edit
     /// dikirim kembali lewat metode ini supaya kartu Library tidak menunggu
     /// refresh jaringan berikutnya.
     func applyAlbumUpdate(_ updated: AlbumResponseDTO) {
         guard canPublish else { return }
         albumRequest = UUID()
-        albumUpdates[updated.id] = nil
         guard let index = albums.firstIndex(where: { $0.id == updated.id }) else { return }
         var merged = albums[index]
         merged.albumName = updated.albumName
@@ -290,7 +253,6 @@ final class LibraryViewModel {
     func removeDeletedAlbum(_ id: String) {
         guard canPublish else { return }
         albumRequest = UUID()
-        albumUpdates[id] = nil
         albums.removeAll { $0.id == id }
         LocalSnapshot.save(albums, for: LocalSnapshot.Key.libraryAlbums, expectedGeneration: snapshotGeneration)
         LocalSnapshot.remove(LocalSnapshot.Key.album(id), expectedGeneration: snapshotGeneration)
@@ -339,14 +301,6 @@ final class LibraryViewModel {
         let fetched = await fetchAlbums()
         guard canPublish, albumRequest == request else { return }
         apply(fetched, to: \.albums, key: LocalSnapshot.Key.libraryAlbums)
-    }
-
-    private func isCurrentAlbumUpdate(_ id: String, action: UUID) -> Bool {
-        canPublish && albumUpdates[id] == action
-    }
-
-    private func finishAlbumUpdate(_ id: String, action: UUID) {
-        if albumUpdates[id] == action { albumUpdates[id] = nil }
     }
 
     func applyPersonRename(_ id: String, to name: String) {

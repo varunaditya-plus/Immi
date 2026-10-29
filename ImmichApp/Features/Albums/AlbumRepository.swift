@@ -128,10 +128,6 @@ class AlbumRepository {
         }
     }
 
-    func rename(_ id: String, to name: String) async throws {
-        try await update(id, name: name, description: nil)
-    }
-
     /// `description` opsional supaya field yang tidak diisi tidak ikut terkirim
     /// dan menimpa nilai yang sudah ada dengan string kosong.
     func update(_ id: String, name: String?, description: String??) async throws {

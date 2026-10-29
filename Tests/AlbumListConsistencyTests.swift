@@ -211,7 +211,7 @@ final class AlbumListConsistencyTests: XCTestCase {
         XCTAssertEqual(cached().map(\.id), ["original", "new"])
     }
 
-    func testCreateAndRenameEachInvalidateAPreviousListResponse() async {
+    func testCreateAndMetadataCallbackEachInvalidateAPreviousListResponse() async {
         for create in [false, true] {
             LocalSnapshot.clearAll()
             let driver = AlbumListDriver()
@@ -223,13 +223,17 @@ final class AlbumListConsistencyTests: XCTestCase {
             let load = Task { await model.loadAlbums() }
             addTeardownBlock { await held.complete(.failure(CancellationError())); await load.value }
             await fulfillment(of: [held.started], timeout: 2)
-            let error: String?
-            if create { error = await model.createAlbum(name: "Created", description: "", assetIds: []) }
-            else { error = await model.update("existing", name: " Renamed ", description: " Saved ") }
+            if create {
+                let error = await model.createAlbum(name: "Created", description: "", assetIds: [])
+                XCTAssertNil(error)
+            } else {
+                var updated = album("existing", name: "Renamed")
+                updated.description = "Saved"
+                model.applyAlbumUpdate(updated)
+            }
             held.complete(.success([album("existing", name: "Old")]))
             await load.value
 
-            XCTAssertNil(error)
             XCTAssertEqual(model.albums.map(\.albumName), create ? ["Old", "Created"] : ["Renamed"])
             XCTAssertEqual(cached().map(\.albumName), model.albums.map(\.albumName))
             if !create { XCTAssertEqual(model.albums.first?.description, "Saved") }
@@ -392,24 +396,17 @@ final class AlbumListConsistencyTests: XCTestCase {
         XCTAssertEqual(driver.listCalls, 0)
     }
 
-    func testLateEditsCannotOverwriteANewerEditOrResurrectADeletedAlbum() async {
-        for delete in [false, true] {
-            let driver = AlbumListDriver()
-            let old = ConsistencyGate<Void>()
-            driver.update = { _, name, _ in if name == "Old submitted" { try await old.value() } }
-            let model = model(driver)
-            model.albums = [album("album")]
-            let edit = Task { await model.update("album", name: "Old submitted", description: "") }
-            addTeardownBlock { await old.complete(.failure(CancellationError())); _ = await edit.value }
-            await fulfillment(of: [old.started], timeout: 2)
-            if delete { await model.deleteAlbum("album") }
-            else { _ = await model.update("album", name: "Latest", description: "") }
-            old.complete(.success(()))
-            _ = await edit.value
+    func testMetadataCallbackCannotResurrectADeletedAlbum() async {
+        let driver = AlbumListDriver()
+        let model = model(driver)
+        model.albums = [album("deleted"), album("kept")]
+        let deleted = await model.deleteAlbum("deleted")
+        XCTAssertTrue(deleted)
 
-            XCTAssertEqual(model.albums.map(\.albumName), delete ? [] : ["Latest"])
-            XCTAssertEqual(cached().map(\.albumName), model.albums.map(\.albumName))
-        }
+        model.applyAlbumUpdate(album("deleted", name: "Late edit"))
+
+        XCTAssertEqual(model.albums.map(\.id), ["kept"])
+        XCTAssertEqual(cached().map(\.id), ["kept"])
     }
 
     func testAccountChangesRejectHeldLoadsAndActionResults() async {
@@ -459,7 +456,6 @@ final class AlbumListConsistencyTests: XCTestCase {
 private final class AlbumListDriver {
     var list: @MainActor () async throws -> [AlbumResponseDTO] = { [] }
     var create: @MainActor () async throws -> AlbumResponseDTO = { throw APIError.unknown }
-    var update: @MainActor (String, String?, String??) async throws -> Void = { _, _, _ in }
     var delete: @MainActor (String) async throws -> Void = { _ in }
     var addUsers: @MainActor () async throws -> Void = {}
     private(set) var listCalls = 0
@@ -477,9 +473,6 @@ private final class ConsistencyAlbumRepository: AlbumRepository {
     override func all() async throws -> [AlbumResponseDTO] { try await driver.all() }
     override func create(name: String, description: String?, assetIds: [String]) async throws -> AlbumResponseDTO {
         try await driver.create()
-    }
-    override func update(_ id: String, name: String?, description: String??) async throws {
-        try await driver.update(id, name, description)
     }
     override func delete(_ id: String) async throws { try await driver.delete(id) }
     override func addUsers(_ userIds: [String], to albumId: String) async throws { try await driver.addUsers() }

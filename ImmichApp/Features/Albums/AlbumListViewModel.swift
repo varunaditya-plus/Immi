@@ -18,7 +18,6 @@ final class AlbumListViewModel {
     private var loadID = UUID()
     private var restoredSnapshot = false
     private var phaseBeforeLoad: LoadingPhase<Void> = .idle
-    private var updateIDs: [String: UUID] = [:]
     private var actionErrorID = UUID()
 
     init(repo: AlbumRepository) {
@@ -91,10 +90,6 @@ final class AlbumListViewModel {
         phaseBeforeLoad = phase
     }
 
-    private func finishUpdate(_ id: String, requestID: UUID) {
-        if updateIDs[id] == requestID { updateIDs[id] = nil }
-    }
-
     /// Potretnya ikut ditulis ulang setiap daftarnya berubah di sini.
     ///
     /// Tanpa ini, album yang dihapus muncul lagi — dengan nama lamanya — saat
@@ -133,46 +128,11 @@ final class AlbumListViewModel {
         }
     }
 
-    /// - Returns: pesan kesalahan; nil berarti perubahan sudah dikonfirmasi.
-    func update(_ id: String, name: String, description: String) async -> String? {
-        let trimmedName = name.trimmingCharacters(in: .whitespaces)
-        let trimmedDescription = description.trimmingCharacters(in: .whitespaces)
-        guard canPublish, !trimmedName.isEmpty else { return nil }
-        let requestID = UUID()
-        updateIDs[id] = requestID
-        defer { finishUpdate(id, requestID: requestID) }
-
-        do {
-            try await repo.update(
-                id,
-                name: trimmedName,
-                description: .some(trimmedDescription.isEmpty ? nil : trimmedDescription))
-            guard canPublish, updateIDs[id] == requestID else { return nil }
-            invalidateLoads()
-            if let index = albums.firstIndex(where: { $0.id == id }) {
-                // Ganti NILAI elemennya secara utuh. Mutasi field bersarang
-                // tidak selalu memicu registrar Observation milik array,
-                // sehingga List/LazyVGrid dapat tetap menampilkan nama lama.
-                var updated = albums[index]
-                updated.albumName = trimmedName
-                updated.description = trimmedDescription.isEmpty ? nil : trimmedDescription
-                updated.updatedAt = Date()
-                applyAlbumUpdate(updated)
-            }
-            return nil
-        } catch {
-            guard canPublish, updateIDs[id] == requestID else { return nil }
-            return (error as? APIError)?.errorDescription
-                ?? String(localized: "Failed to update album")
-        }
-    }
-
     /// Dipakai detail album untuk mengirim metadata yang baru disimpan kembali
     /// ke list/grid/sidebar yang membukanya.
     func applyAlbumUpdate(_ updated: AlbumResponseDTO) {
         guard canPublish else { return }
         invalidateLoads()
-        updateIDs[updated.id] = nil
         guard let index = albums.firstIndex(where: { $0.id == updated.id }) else { return }
         var merged = albums[index]
         merged.albumName = updated.albumName
@@ -267,7 +227,6 @@ final class AlbumListViewModel {
     func removeDeletedAlbum(_ id: String) {
         guard canPublish else { return }
         invalidateLoads()
-        updateIDs[id] = nil
         albums.removeAll { $0.id == id }
         persist()
         LocalSnapshot.remove(LocalSnapshot.Key.album(id), expectedGeneration: snapshotGeneration)

@@ -38,7 +38,6 @@ final class AlbumDetailLifetimeTests: XCTestCase {
         let shared = await fixture.model.addUsers(["friend"], to: fixture.id)
         let link = await fixture.model.createSharedLink(albumId: fixture.id)
         let shareFiles = await fixture.model.shareURLs(for: [fixture.photos[0].id])
-        _ = await fixture.model.updateAlbum(fixture.id, name: "Old edit", description: "")
         _ = await fixture.model.addToOtherAlbum([fixture.photos[0].id], album: fixture.album)
         let deletedAgain = await fixture.model.deleteAlbum(fixture.id)
 
@@ -357,9 +356,6 @@ private final class AlbumLifetimeAlbums: AlbumRepository {
     override func removeAssets(_ ids: [String], from albumId: String) async throws { try await driver.perform("remove") }
     override func addAssets(_ ids: [String], to albumId: String) async throws -> [String] {
         try await driver.perform("add"); return []
-    }
-    override func update(_ id: String, name: String?, description: String??) async throws {
-        try await driver.perform("update")
     }
     override func addUsers(_ userIds: [String], to albumId: String) async throws { try await driver.perform("addUsers") }
     override func createSharedLink(albumId: String) async throws -> SharedLinkDTO {
