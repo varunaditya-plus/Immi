@@ -219,16 +219,24 @@ actor SharedUploadStore {
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles])
 
-        return directories.compactMap { directory in
+        var batches: [SharedUploadBatch] = []
+        for directory in directories {
+            guard let id = UUID(uuidString: directory.lastPathComponent),
+                  directory.lastPathComponent == id.uuidString else { continue }
             let manifest = directory.appendingPathComponent("manifest.json")
-            guard let data = try? Data(contentsOf: manifest),
-                  let batch = try? decoder.decode(SharedUploadBatch.self, from: data),
-                  batch.version == 1,
-                  batch.owner == owner
-            else { return nil }
-            return batch
+            let data: Data
+            do {
+                data = try Data(contentsOf: manifest)
+            } catch let error as CocoaError where Self.isMissing(error) {
+                continue
+            }
+            let batch = try decoder.decode(SharedUploadBatch.self, from: data)
+            guard batch.id == id else { throw CocoaError(.fileReadCorruptFile) }
+            guard batch.owner == owner else { continue }
+            guard batch.version == 1 else { throw CocoaError(.fileReadCorruptFile) }
+            batches.append(batch)
         }
-        .sorted { $0.createdAt < $1.createdAt }
+        return batches.sorted { $0.createdAt < $1.createdAt }
     }
 
     func fileURL(for item: SharedUploadItem, batchID: UUID) throws -> URL {

@@ -39,6 +39,60 @@ final class SharedUploadStatusFreshnessTests: XCTestCase {
         XCTAssertNil(fixture.service.lastError)
     }
 
+    func testCorruptManifestCannotCertifyAnEmptyInboxOrEraseKnownRows() async throws {
+        for hasPreviousSnapshot in [false, true] {
+            let fixture = try fixture()
+            let batch = try await fixture.seed()
+            let savedDirectory = try await fixture.store.existingBatchDirectory(id: batch.id)
+            let directory = try XCTUnwrap(savedDirectory)
+            let manifest = directory.appendingPathComponent("manifest.json")
+            let originalManifest = try Data(contentsOf: manifest)
+            let source = directory.appendingPathComponent(batch.items[0].relativePath)
+            let originalSource = try Data(contentsOf: source)
+            if hasPreviousSnapshot { await fixture.service.refreshPending(session: fixture.session) }
+            let knownRows = fixture.service.items
+            let corrupted = Data("{ incomplete manifest".utf8)
+            try corrupted.write(to: manifest, options: .atomic)
+
+            await fixture.service.refreshPending(session: fixture.session)
+
+            XCTAssertFalse(fixture.service.hasCurrentSnapshot)
+            XCTAssertNotNil(fixture.service.lastError)
+            XCTAssertEqual(fixture.service.items, knownRows)
+            XCTAssertEqual(try Data(contentsOf: manifest), corrupted)
+            XCTAssertEqual(try Data(contentsOf: source), originalSource)
+
+            try originalManifest.write(to: manifest, options: .atomic)
+            await fixture.service.refreshPending(session: fixture.session)
+
+            XCTAssertTrue(fixture.service.hasCurrentSnapshot)
+            XCTAssertNil(fixture.service.lastError)
+            XCTAssertEqual(fixture.service.items.map(\.item), batch.items)
+        }
+    }
+
+    func testUnsupportedOrMismatchedManifestCannotCertifyAnEmptyInbox() async throws {
+        for (field, value) in [("version", 2 as Any), ("id", UUID().uuidString as Any)] {
+            let fixture = try fixture()
+            let batch = try await fixture.seed()
+            let savedDirectory = try await fixture.store.existingBatchDirectory(id: batch.id)
+            let directory = try XCTUnwrap(savedDirectory)
+            let manifest = directory.appendingPathComponent("manifest.json")
+            let original = try Data(contentsOf: manifest)
+            var document = try XCTUnwrap(JSONSerialization.jsonObject(with: original) as? [String: Any])
+            document[field] = value
+            let changed = try JSONSerialization.data(withJSONObject: document)
+            try changed.write(to: manifest, options: .atomic)
+
+            await fixture.service.refreshPending(session: fixture.session)
+
+            XCTAssertFalse(fixture.service.hasCurrentSnapshot)
+            XCTAssertNotNil(fixture.service.lastError)
+            XCTAssertEqual(try Data(contentsOf: manifest), changed)
+            XCTAssertEqual(try Data(contentsOf: directory.appendingPathComponent("shared.jpg")), Data("original".utf8))
+        }
+    }
+
     func testRefreshingInvalidatesProofBeforeListingWithoutDroppingKnownRows() async throws {
         let files = FreshnessFiles()
         let fixture = try fixture(files: files)
