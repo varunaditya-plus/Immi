@@ -116,6 +116,17 @@ extension AssetResponseDTO {
         }
     }
 
+    mutating func setLocation(latitude: Double, longitude: Double) {
+        let previous = exifInfo
+        exifInfo = ExifDTO(make: previous?.make, model: previous?.model,
+            exifImageWidth: previous?.exifImageWidth, exifImageHeight: previous?.exifImageHeight,
+            orientation: previous?.orientation, fileSizeInByte: previous?.fileSizeInByte,
+            dateTimeOriginal: previous?.dateTimeOriginal, latitude: latitude, longitude: longitude,
+            city: nil, state: nil, country: nil, lensModel: previous?.lensModel,
+            fNumber: previous?.fNumber, focalLength: previous?.focalLength, iso: previous?.iso,
+            exposureTime: previous?.exposureTime, description: previous?.description)
+    }
+
     init(
         id: String,
         type: String,

@@ -324,7 +324,9 @@ final class AssetDetailViewModel {
     func updateLocation(_ id: String, latitude: Double, longitude: Double) async -> Bool {
         let mutation = beginMutation(id, kind: .location)
         do {
-            let accepted = try await performMutation(mutation) {
+            let accepted = try await performMutation(mutation, patch: {
+                $0.setLocation(latitude: latitude, longitude: longitude)
+            }, invalidatesSnapshot: true) {
                 try await self.repo.updateLocation(id, latitude: latitude, longitude: longitude)
             }
             if accepted, let selected = selection, selected.id == id {
@@ -471,6 +473,7 @@ final class AssetDetailViewModel {
     private func performMutation(
         _ mutation: MutationContext,
         patch: ((inout AssetResponseDTO) -> Void)? = nil,
+        invalidatesSnapshot: Bool = false,
         operation: @escaping () async throws -> Void
     ) async throws -> Bool {
         let previous = mutationTasks[mutation.key]?.task
@@ -480,7 +483,7 @@ final class AssetDetailViewModel {
             guard self.snapshotGeneration == LocalSnapshot.generation,
                   self.latestMutations[mutation.key] != nil else { return false }
             try await operation()
-            return self.completeMutation(mutation, patch: patch)
+            return self.completeMutation(mutation, patch: patch, invalidatesSnapshot: invalidatesSnapshot)
         }
         mutationTasks[mutation.key] = (mutation.revision, task)
         defer {
@@ -505,7 +508,8 @@ final class AssetDetailViewModel {
 
     @discardableResult
     private func completeMutation(
-        _ mutation: MutationContext, patch: ((inout AssetResponseDTO) -> Void)? = nil
+        _ mutation: MutationContext, patch: ((inout AssetResponseDTO) -> Void)? = nil,
+        invalidatesSnapshot: Bool = false
     ) -> Bool {
         guard snapshotGeneration == LocalSnapshot.generation,
               let latest = latestMutations[mutation.key] else { return false }
@@ -513,6 +517,12 @@ final class AssetDetailViewModel {
         if isLatest { latestMutations[mutation.key] = nil }
         let id = mutation.key.id
         mutationVersions[id, default: 0] &+= 1
+        if patch == nil || invalidatesSnapshot {
+            // A confirmed patch can update the display while server-derived
+            // metadata still requires a fresh detail response.
+            invalidatedSnapshots.insert(id)
+            LocalSnapshot.remove(LocalSnapshot.Key.assetDetail(id), expectedGeneration: snapshotGeneration)
+        }
         if let patch, var updated = detail?.id == id ? detail : (cachedDetail(for: id) ?? mutation.originalDetail) {
             patch(&updated)
             // A different field may have changed server-derived metadata since
@@ -521,11 +531,6 @@ final class AssetDetailViewModel {
                 LocalSnapshot.save(updated, for: LocalSnapshot.Key.assetDetail(id), expectedGeneration: snapshotGeneration)
             }
             if selection?.id == id || (selection == nil && detail?.id == id) { detail = updated }
-        } else if patch == nil {
-            // Date, location, edits and visibility affect server-derived fields.
-            // An off-page success must not leave an obsolete offline snapshot.
-            invalidatedSnapshots.insert(id)
-            LocalSnapshot.remove(LocalSnapshot.Key.assetDetail(id), expectedGeneration: snapshotGeneration)
         }
         return isLatest
     }

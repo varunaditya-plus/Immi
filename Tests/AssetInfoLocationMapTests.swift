@@ -73,6 +73,46 @@ final class AssetInfoLocationMapTests: XCTestCase {
         }
     }
 
+    func testConfirmedLocationSurvivesFailedRefreshWithoutStalePlaceNames() async throws {
+        let id = UUID().uuidString
+        snapshotIDs.append(id)
+        let repository = LocationMapRepository()
+        var original = photo(id, at: barcelona, city: "Barcelona", state: "Catalonia", country: "Spain")
+        original.setDescription("A caption to preserve")
+        var fetches = 0
+        repository.fetch = { _ in
+            fetches += 1
+            guard fetches == 1 else { throw APIError.notConnected }
+            return original
+        }
+        repository.save = { [self] savedID, latitude, longitude in
+            XCTAssertEqual(savedID, id)
+            XCTAssertEqual(latitude, jakarta.latitude)
+            XCTAssertEqual(longitude, jakarta.longitude)
+        }
+        let model = AssetDetailViewModel(repo: repository)
+        await model.load(id)
+        try mount(detail: { model.detail })
+        let map = try await mountedMap(at: barcelona)
+
+        let saved = await model.updateLocation(id, latitude: jakarta.latitude, longitude: jakarta.longitude)
+
+        XCTAssertTrue(saved, "A failed refresh must not undo the accepted location save")
+        XCTAssertEqual(fetches, 2, "The editor must still request the server's derived metadata")
+        XCTAssertEqual(model.detail?.exifInfo?.latitude, jakarta.latitude)
+        XCTAssertEqual(model.detail?.exifInfo?.longitude, jakarta.longitude)
+        XCTAssertNil(model.detail?.exifInfo?.city)
+        XCTAssertNil(model.detail?.exifInfo?.state)
+        XCTAssertNil(model.detail?.exifInfo?.country)
+        XCTAssertEqual(model.detail?.exifInfo?.description, "A caption to preserve")
+        XCTAssertNil(LocalSnapshot.load(AssetResponseDTO.self, for: LocalSnapshot.Key.assetDetail(id)),
+            "Server-derived metadata must stay invalidated until a fresh detail read succeeds")
+        if case .failed = model.phase { } else { XCTFail("The refresh failure must remain represented separately") }
+        try await waitUntil("The confirmed location reaches the mounted map despite the failed refresh") {
+            self.isCentered(map, at: self.jakarta) && self.hasAnnotation(map, at: self.jakarta)
+        }
+    }
+
     func testUnrelatedMetadataPreservesPanAndAnotherPhotoRecentersEvenAtTheSameLocation() async throws {
         let input = LocationPanelInput(detail: photo("first", at: barcelona))
         try mount(detail: { input.detail })
