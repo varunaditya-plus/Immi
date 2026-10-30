@@ -113,6 +113,8 @@ struct PhotoCollectionScreen<Options: View>: View {
     /// Detail album di iPad tetap membutuhkan sidebar sebagai jalan kembali ke
     /// All Albums. Di compact/iPhone, tab bar tetap disembunyikan seperti biasa.
     var keepsTabBarVisibleOnRegularWidth = false
+    var keepsTabBarVisible = false
+    var onSelectionChanged: (Bool) -> Void = { _ in }
     /// Aksi tambahan di menu elipsis, dirakit dari id yang sedang terpilih.
     var selectionMenu: ((Set<String>) -> [SelectionMenuAction])? = nil
     /// Confirmation milik menu opsi. Binding-nya berasal dari pemanggil, tetapi
@@ -210,7 +212,7 @@ struct PhotoCollectionScreen<Options: View>: View {
                 isSelecting && !isShowingUnavailableScreen ? .visible : .hidden,
                 for: .bottomBar)
             .toolbarVisibility(
-                keepsTabBarVisibleOnRegularWidth && horizontalSizeClass == .regular
+                keepsTabBarVisible || (keepsTabBarVisibleOnRegularWidth && horizontalSizeClass == .regular)
                     ? .visible
                     : .hidden,
                 for: .tabBar)
@@ -276,6 +278,7 @@ struct PhotoCollectionScreen<Options: View>: View {
                 if let id = deviceDeleteID, !visibilityPolicy.allows(id: id) { deviceDeleteID = nil }
             }
             .onDisappear { sharePreparation.cancel() }
+            .onChange(of: isSelecting, initial: true) { _, value in onSelectionChanged(value) }
     }
 
     // MARK: - Grid
@@ -1199,6 +1202,8 @@ extension PhotoCollectionScreen where Options == EmptyView {
         visibilityScope: AssetVisibilityPolicy.Scope = .collection,
         canPerformServerActions: @escaping (AssetLite) -> Bool = { _ in true },
         facePersonID: String? = nil,
+        keepsTabBarVisible: Bool = false,
+        onSelectionChanged: @escaping (Bool) -> Void = { _ in },
         selectionMenu: ((Set<String>) -> [SelectionMenuAction])? = nil
     ) {
         self.init(
@@ -1230,6 +1235,8 @@ extension PhotoCollectionScreen where Options == EmptyView {
             visibilityScope: visibilityScope,
             canPerformServerActions: canPerformServerActions,
             facePersonID: facePersonID,
+            keepsTabBarVisible: keepsTabBarVisible,
+            onSelectionChanged: onSelectionChanged,
             selectionMenu: selectionMenu,
             options: { EmptyView() })
     }

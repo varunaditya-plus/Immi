@@ -6,6 +6,12 @@ struct DerivedCollectionView: View {
     var dateInterval: DateInterval? = nil
     var refreshSources: @MainActor @Sendable () -> Void = {}
     var dayLoader: (@MainActor @Sendable (DateInterval) async throws -> [AssetLite])? = nil
+    var assetLoader: (@MainActor @Sendable () async throws -> [AssetLite])? = nil
+    var layout: PhotoCollectionLayout = .hero
+    var keepsTabBarVisible = false
+    var onSelectionChanged: (Bool) -> Void = { _ in }
+    var dataManager: SwiftDataManager? = nil
+    var localPhotos: @MainActor () -> [LocalPhoto] = { LocalPhotoLibrary.shared.photos }
 
     @Environment(SessionManager.self) private var session
     @State private var model: TimelineViewModel?
@@ -40,17 +46,17 @@ struct DerivedCollectionView: View {
             }
             .task(id: session.accountGeneration) { await load() }
             .onChange(of: SourceSnapshot(assets: assets())) { _, _ in
-                if dateInterval == nil { seed(assets()) }
+                if dateInterval == nil && assetLoader == nil { seed(assets()) }
                 else { Task { await load() } }
             }
-            .onChange(of: LocalPhotoLibrary.shared.photos) { _, _ in Task { await load() } }
+            .onChange(of: localPhotos()) { _, _ in Task { await load() } }
             .onDisappear { request = UUID() }
     }
 
     private var displayedAssets: [AssetLite] {
         guard generation == LocalSnapshot.generation else { return [] }
-        let selected = Set(LocalPhotoLibrary.shared.photos.map(\.id))
-        return AssetVisibilityPolicy(scope: .timeline).filter(model?.libraryAssets ?? []).filter {
+        let selected = Set(localPhotos().map(\.id))
+        return AssetVisibilityPolicy(scope: .timeline, dataManager: store).filter(model?.libraryAssets ?? []).filter {
             !LocalPhotoLibrary.isLocal($0.id) || selected.contains(LocalPhotoLibrary.localIdentifier(from: $0.id))
         }
     }
@@ -58,6 +64,7 @@ struct DerivedCollectionView: View {
     private var collection: some View {
         PhotoCollectionScreen(
             title: title,
+            layout: layout,
             assets: displayedAssets,
             phase: phase,
             actionError: Binding(get: { model?.actionError }, set: { model?.actionError = $0 }),
@@ -70,7 +77,9 @@ struct DerivedCollectionView: View {
             onArchiveSelection: { _ = await model?.archiveSelected($0) },
             onMoveToLocked: { _ = await model?.lockSelected($0) },
             visibilityScope: .timeline,
-            canPerformServerActions: { AssetServerIdentity.resolve($0, using: SwiftDataManager.shared) != nil })
+            canPerformServerActions: { AssetServerIdentity.resolve($0, using: store) != nil },
+            keepsTabBarVisible: keepsTabBarVisible,
+            onSelectionChanged: onSelectionChanged)
     }
 
     private func seed(_ items: [AssetLite]) {
@@ -78,36 +87,50 @@ struct DerivedCollectionView: View {
         model?.sections = [TimelineSection(id: "derived", title: "", assets: items, count: items.count)]
     }
 
-    private func load() async {
+    private var store: SwiftDataManager { dataManager ?? .shared }
+
+    private func load(retryCanceledSource: Bool = true) async {
         let id = UUID()
         request = id
         if generation != session.accountGeneration {
             generation = session.accountGeneration
             let api = APIClient(session: session)
-            model = TimelineViewModel(dataManager: .shared, assetRepo: AssetDetailRepository(api: api), albumRepo: AlbumRepository(api: api))
+            model = TimelineViewModel(dataManager: store, assetRepo: AssetDetailRepository(api: api), albumRepo: AlbumRepository(api: api),
+                localPhotos: localPhotos)
         }
         loadError = nil
         refreshSources()
-        if dateInterval == nil || model?.libraryAssets.isEmpty != false { seed(assets()) }
-        guard let dateInterval else {
+        if (dateInterval == nil && assetLoader == nil) || model?.libraryAssets.isEmpty != false { seed(assets()) }
+        guard dateInterval != nil || assetLoader != nil else {
             phase = .loaded(())
             return
         }
         if displayedAssets.isEmpty { phase = .loading }
         do {
             let loaded: [AssetLite]
-            if let dayLoader {
+            if let assetLoader {
+                loaded = try await assetLoader()
+            } else if let dateInterval, let dayLoader {
                 loaded = try await dayLoader(dateInterval)
-            } else {
+            } else if let dateInterval {
                 let api = APIClient(session: session)
                 let repository = RecentDayRepository(repository: SearchRepository(api: api))
                 loaded = try await repository.assets(in: dateInterval)
+            } else {
+                return
             }
             guard !Task.isCancelled, request == id, generation == LocalSnapshot.generation else { return }
             seed(loaded)
             phase = .loaded(())
         } catch is CancellationError {
-            return
+            guard !Task.isCancelled, request == id, generation == LocalSnapshot.generation else { return }
+            if retryCanceledSource {
+                await load(retryCanceledSource: false)
+            } else {
+                let message = String(localized: "Your photo library changed. Try again.")
+                loadError = message
+                phase = displayedAssets.isEmpty ? .failed(message) : .loaded(())
+            }
         } catch {
             guard !Task.isCancelled, request == id, generation == LocalSnapshot.generation else { return }
             let message = (error as? APIError)?.errorDescription ?? String(localized: "Failed to load photos")
