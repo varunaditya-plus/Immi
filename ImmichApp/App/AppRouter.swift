@@ -185,19 +185,15 @@ struct MainTabView: View {
     /// iPhone dan jendela iPad yang sempit tetap memakai tab bar ringkas.
     private var compactTabView: some View {
         TabView(selection: tabSelection) {
-            Tab("Photos", systemImage: "photo.fill.on.rectangle.fill", value: TabID.photos) {
+            Tab("Library", systemImage: "photo.on.rectangle.angled", value: TabID.photos) {
                 TimelineView(
-                    resetScrollRequest: photosResetRequest,
-                    isActive: selectedDestination == .photos)
+                    resetScrollRequest: photosResetRequest)
             }
 
             Tab(value: TabID.library) {
                 LibraryView(isActive: selectedDestination == .library)
             } label: {
-                Label(
-                    "Library",
-                    image: "immiches.tortoise.rectangle.stack.fill"
-                )
+                Label("Collections", systemImage: "rectangle.stack.fill")
             }
 
             // Role Search dipertahankan agar transisi ke kolom pencarian dan
@@ -231,13 +227,12 @@ struct MainTabView: View {
     /// memastikan album dinamis tidak membanjiri tab bar.
     private var sidebarTabView: some View {
         TabView(selection: sidebarSelection) {
-            Tab("Photos", systemImage: "photo.on.rectangle.angled", value: Destination.photos) {
+            Tab("Library", systemImage: "photo.on.rectangle.angled", value: Destination.photos) {
                 TimelineView(
-                    resetScrollRequest: photosResetRequest,
-                    isActive: selectedDestination == .photos)
+                    resetScrollRequest: photosResetRequest)
             }
 
-            Tab("Library", systemImage: "photo.stack", value: Destination.library) {
+            Tab("Collections", systemImage: "rectangle.stack.fill", value: Destination.library) {
                 LibraryView(isActive: selectedDestination == .library)
             }
 

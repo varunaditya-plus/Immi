@@ -25,6 +25,7 @@ struct TimelineBrowserView<Grid: View>: View {
     let navigation: TimelineNavigationState
     let gridController: PhotoGridController?
     var resetScrollRequest = 0
+    var onRemoveFilters: () -> Void
     @ViewBuilder var grid: () -> Grid
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -57,6 +58,17 @@ struct TimelineBrowserView<Grid: View>: View {
                 }
             }
         }
+        .overlay {
+            if viewModel.librarySections.isEmpty, !viewModel.libraryOptions.filters.isEmpty {
+                ContentUnavailableView {
+                    Label("No Photos or Videos", systemImage: "line.3.horizontal.decrease.circle")
+                } description: {
+                    Text("Try removing filters to see more photos and videos.")
+                } actions: {
+                    Button("Remove Filter", action: onRemoveFilters)
+                }
+            }
+        }
         .onChange(of: navigation.mode, initial: true) { _, mode in
             guard transitionDestination != mode else { return }
             changeMode(to: mode)
@@ -81,7 +93,7 @@ struct TimelineBrowserView<Grid: View>: View {
                 // while its hidden scroll view is still being positioned.
                 let position = navigation.mode == .months ? monthsPosition : yearsPosition
                 let items = navigation.mode == .months
-                    ? viewModel.monthNavigationItems : viewModel.yearNavigationItems
+                    ? viewModel.libraryMonthNavigationItems : viewModel.libraryYearNavigationItems
                 position.itemID = items.last?.id
             }
         }
@@ -104,7 +116,7 @@ struct TimelineBrowserView<Grid: View>: View {
             TimelineNavigatorView(
                 mode: mode,
                 items: mode == .months
-                    ? viewModel.monthNavigationItems : viewModel.yearNavigationItems,
+                    ? viewModel.libraryMonthNavigationItems : viewModel.libraryYearNavigationItems,
                 position: mode == .months ? monthsPosition : yearsPosition,
                 isActive: navigation.mode == mode,
                 returnToNewestRequest: navigation.returnToNewestRequest,
@@ -142,7 +154,7 @@ struct TimelineBrowserView<Grid: View>: View {
 
         let position = displayedMode == .months ? monthsPosition : yearsPosition
         let items = displayedMode == .months
-            ? viewModel.monthNavigationItems : viewModel.yearNavigationItems
+            ? viewModel.libraryMonthNavigationItems : viewModel.libraryYearNavigationItems
         let visibleAssetID = position.centeredAssetID
         let item = items.first { item in
             item.cover.id == visibleAssetID

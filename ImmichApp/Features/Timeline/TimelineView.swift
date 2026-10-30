@@ -13,10 +13,6 @@ struct TimelineView: View {
     /// Naik satu setiap tab Photos ditekan ulang; memicu kembali ke posisi
     /// default, yaitu paling bawah (foto terbaru).
     var resetScrollRequest = 0
-    /// Mencegah tab yang sedang tidak terlihat ikut mempresentasikan coach mark
-    /// dari toolbar yang mungkin sudah dibangun lebih dulu oleh TabView.
-    var isActive = true
-
     @Environment(SessionManager.self) private var session
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     /// Linimasa merender dari hasil sync, jadi ia perlu tahu kapan sync selesai.
@@ -29,7 +25,6 @@ struct TimelineView: View {
     @State private var assetToDelete: AssetLite?
     @State private var deviceDeleteID: String?
     /// Aset yang sedang dipilihkan album lewat sheet.
-    @State private var showSettings = false
     @State private var albumPickerAsset: AssetLite?
     @State private var selectedIDs: Set<String> = []
     @State private var sharePreparation = SharePreparation()
@@ -47,17 +42,9 @@ struct TimelineView: View {
     /// Seleksi yang sedang dipilihkan album; nil berarti sheet-nya tertutup.
     @State private var albumPickerSelection: SelectedAssets?
     @State private var selectionLink: SharedLinkPresentation?
-    /// Bulan yang sedang tampil, DI LUAR state milik view ini.
-    ///
-    /// Sebagai `@State`, setiap perubahannya menginvalidasi seluruh body —
-    /// termasuk grid berisi puluhan ribu sel — padahal yang berubah cuma sebaris
-    /// teks di toolbar. Dan probe-nya menulis terus selama jari bergerak.
-    ///
-    /// Sebagai objek `@Observable`, hanya view yang benar-benar MEMBACA judulnya
-    /// yang ikut digambar ulang.
-    @State private var monthTracker = VisibleMonthTracker()
     @AppStorage(SettingsViewModel.gridColumnsKey)
     private var gridColumns = SettingsViewModel.defaultGridColumns
+    @AppStorage("library.aspectRatioGrid") private var aspectRatioGrid = false
     /// Pegangan ke controller grid, untuk perintah yang datang dari luar —
     /// ketukan kedua tab Photos, misalnya.
     @State private var gridController: PhotoGridController?
@@ -65,7 +52,7 @@ struct TimelineView: View {
     /// menambahkan aset terbaru dan memindahkannya lagi ke bawah.
     @State private var initialNewestContentReady = false
     @State private var isFinishingInitialTimelineLoad = false
-    @State private var backupSetupJourney = BackupSetupJourney.shared
+    @State private var libraryOptionsTask: Task<Void, Never>?
 
     /// Mode pilih dibagi dengan AppRouter karena picker compact iPhone hidup
     /// sebagai overlay di luar TimelineView.
@@ -79,17 +66,6 @@ struct TimelineView: View {
 
     var body: some View {
         screen
-        .onChange(of: showSettings) { _, isPresented in
-            if isPresented {
-                backupSetupJourney.advanceToBackupRow()
-            } else {
-                backupSetupJourney.beginReturningToProfile(
-                    request: backupSetupJourney.presentationRequest)
-            }
-        }
-        .task(id: returnToProfileTaskID) {
-            await returnToProfileAfterDismissal()
-        }
         .task {
             if vm == nil {
                 let api = APIClient(session: session)
@@ -99,7 +75,8 @@ struct TimelineView: View {
                     albumRepo: AlbumRepository(api: api),
                     matcher: DeviceAssetMatcher(
                         repo: BackupRepository(api: api),
-                        dataManager: SwiftDataManager.shared)
+                        dataManager: SwiftDataManager.shared),
+                    libraryMetadataRepository: LibraryMetadataRepository(api: api, dataManager: SwiftDataManager.shared)
                 )
             }
             await vm?.loadTimelineIfNeeded()
@@ -142,7 +119,7 @@ struct TimelineView: View {
             guard let vm else { return }
             returnToNewest(vm)
         }
-        .onDisappear { sharePreparation.cancel() }
+        .onDisappear { sharePreparation.cancel(); libraryOptionsTask?.cancel() }
     }
 
     private var screen: some View {
@@ -157,7 +134,7 @@ struct TimelineView: View {
                 .toolbar { timelineToolbar }
                 // Years dan Months adalah navigator visual penuh. Sembunyikan
                 // navigation bar-nya sebagai satu kesatuan agar judul, Select,
-                // dan Profile hilang sekaligus tanpa menyisakan ruang kosong.
+                // hilang sekaligus tanpa menyisakan ruang kosong.
                 .toolbar(
                     timelineNavigation.mode == .all ? .visible : .hidden,
                     for: .navigationBar)
@@ -177,7 +154,6 @@ struct TimelineView: View {
                     .padding(.bottom, 18)
             }
         }
-        .sheet(isPresented: $showSettings) { settingsSheet }
         .sheet(isPresented: $isSharePresented, onDismiss: {
             shareFileURL = nil
             sharedAssetIDs.removeAll()
@@ -290,12 +266,12 @@ struct TimelineView: View {
                 }
 
             case .loaded:
-                if vm.sections.isEmpty, !initialNewestContentReady {
+                if vm.librarySections.isEmpty, vm.libraryOptions.filters.isEmpty, !initialNewestContentReady {
                     // Cache kosong belum tentu benar-benar kosong: sync pembuka
                     // mungkin sedang mengisinya. Hindari empty state berkedip
                     // lalu mendadak berubah menjadi ribuan foto.
                     Color.clear
-                } else if vm.sections.isEmpty {
+                } else if vm.librarySections.isEmpty, vm.libraryOptions.filters.isEmpty {
                     emptyState
                 } else {
                     timelineContent(vm)
@@ -317,40 +293,40 @@ struct TimelineView: View {
             viewModel: vm,
             navigation: timelineNavigation,
             gridController: gridController,
-            resetScrollRequest: resetScrollRequest
+            resetScrollRequest: resetScrollRequest,
+            onRemoveFilters: { updateLibraryOptions { $0.filters.removeAll() } }
         ) {
             timelineGrid(vm)
+        }
+        .onChange(of: vm.libraryOptions) { _, _ in
+            selectedIDs.formIntersection(Set(vm.libraryAssets.map(\.id)))
         }
     }
 
     private func timelineGrid(_ vm: TimelineViewModel) -> some View {
         PhotoGridView(
-            sections: vm.sections,
+            sections: vm.librarySections,
             configuration: PhotoGridConfiguration(
+                layoutStyle: aspectRatioGrid ? .justified : .square,
                 columns: max(gridColumns, 1),
-                // TANPA judul bulan menempel di grid.
-                //
-                // Bulan yang sedang tampil sudah tertulis di bawah "Photos" di
-                // toolbar, jadi judul kedua di dalam grid cuma mengulang. Dan
-                // begitu judulnya tidak ada, memecah grid per bulan pun tidak
-                // punya alasan lagi — barisnya mengalir terus melewati pergantian
-                // bulan, tanpa petak kosong di ujung tiap bulan.
+                allowsDensityZoom: true,
                 showsSectionHeaders: false,
                 startsAtNewest: true,
                 // Linimasa dibaca dari bawah, jadi baris bolongnya ditaruh di
                 // puncak — tempat yang hampir tidak pernah dilihat.
-                padsFirstRow: true),
+                padsFirstRow: !aspectRatioGrid),
             isSelecting: isSelectingBinding,
             selectedIDs: $selectedIDs,
             onOpen: { _ in sharePreparation.cancel() },
             detailScreen: { id in detailScreen(for: id, vm) },
-            onVisibleSectionChanged: { monthTracker.show($0) },
             menuActions: { id in menuActions(for: id, vm) },
             initialContentReady: initialNewestContentReady,
             onInitialContentDisplayed: {
                 AppLaunchState.shared.markReady()
             },
             onControllerReady: { gridController = $0 },
+            onDensityChanged: { gridColumns = $0 },
+            visibilityPolicy: AssetVisibilityPolicy(scope: .timeline),
             session: session)
         // Grid adalah bidang visual yang benar-benar menempel pada safe area
         // sidebar iPad. Efek dipasang di sini agar sistem dapat mencerminkan dan
@@ -482,46 +458,103 @@ struct TimelineView: View {
                 Text("Select")
             }
         }
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
     }
 
-    /// Judul + bulan yang sedang di layar, keduanya di dalam satu toolbar item.
-    ///
-    /// Sengaja TANPA foregroundStyle: warna bawaan item toolbar sudah vibrant
-    /// terhadap apa yang lewat di belakangnya — mekanisme yang sama dengan
-    /// label tombol Select. Menyetelnya justru mengunci warnanya.
     private var titleStack: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Photos")
-                .font(.largeTitle.bold())
+        TimelineLibraryHeader(count: libraryCount, itemCount: vm?.libraryAssets.count ?? 0,
+            mode: timelineNavigation.mode)
+    }
 
-            if timelineNavigation.mode == .all {
-                VisibleMonthLabel(tracker: monthTracker)
-            } else {
-                Text(timelineNavigation.mode.title)
-                    .font(.headline.bold())
+    private var libraryCount: String {
+        let assets = vm?.libraryAssets ?? []
+        let videos = vm?.libraryVideoCount ?? 0
+        let photos = assets.count - videos
+        if photos == 1, videos == 0 { return String(localized: "1 Photo") }
+        if videos == 1, photos == 0 { return String(localized: "1 Video") }
+        if videos == 0 { return String(localized: "\(photos) Photos") }
+        if photos == 0 { return String(localized: "\(videos) Videos") }
+        return SettingsView.assetCounts(images: photos, videos: videos)
+    }
+
+    private func updateLibraryOptions(_ update: (inout LibraryBrowseOptions) -> Void) {
+        guard let vm else { return }
+        var options = vm.libraryOptions
+        update(&options)
+        libraryOptionsTask?.cancel()
+        libraryOptionsTask = Task { await vm.updateLibraryOptions(options) }
+    }
+
+    private var libraryMenu: some View {
+        Menu {
+            Section {
+                ForEach(LibrarySort.allCases, id: \.self) { sort in
+                    Button {
+                        updateLibraryOptions { $0.sort = sort }
+                    } label: {
+                        if vm?.libraryOptions.sort == sort {
+                            Label(sort.title, systemImage: "checkmark")
+                        } else {
+                            Text(sort.title)
+                        }
+                    }
+                }
+            }
+            Menu {
+                Button {
+                    updateLibraryOptions { $0.filters.removeAll() }
+                } label: {
+                    if vm?.libraryOptions.filters.isEmpty == true {
+                        Label("All Items", systemImage: "checkmark")
+                    } else {
+                        Text("All Items")
+                    }
+                }
+                ForEach(LibraryFilter.allCases.filter { $0 != .screenshots || vm?.supportsScreenshotFilter == true }) { filter in
+                    Button {
+                        updateLibraryOptions { $0.toggle(filter) }
+                    } label: {
+                        Label(filter.title, systemImage: vm?.libraryOptions.filters.contains(filter) == true ? "checkmark" : filter.symbol)
+                    }
+                }
+            } label: {
+                Label("Filter", systemImage: "line.3.horizontal.decrease")
+            }
+            Menu {
+                Button("Zoom In", systemImage: "plus.magnifyingglass") { gridController?.zoomDensity(in: true) }
+                    .disabled(PhotoGridDensity.next(columns: gridColumns, zoomingIn: true) == nil)
+                Button("Zoom Out", systemImage: "minus.magnifyingglass") { gridController?.zoomDensity(in: false) }
+                    .disabled(PhotoGridDensity.next(columns: gridColumns, zoomingIn: false) == nil)
+                Toggle("Aspect Ratio Grid", isOn: $aspectRatioGrid)
+                if vm?.supportsScreenshotFilter == true {
+                    Toggle("Screenshots", isOn: Binding(
+                        get: { vm?.libraryOptions.showsScreenshots ?? true },
+                        set: { value in updateLibraryOptions { $0.showsScreenshots = value } }))
+                }
+            } label: {
+                Label("View Options", systemImage: "square.grid.3x3")
+            }
+            if vm?.libraryOptions.filters.isEmpty == false {
+                Button("Remove Filter", systemImage: "xmark.circle") {
+                    updateLibraryOptions { $0.filters.removeAll() }
+                }
+            }
+        } label: {
+            ZStack(alignment: .topTrailing) {
+                if vm?.isUpdatingLibraryOptions == true { ProgressView() }
+                else { Image(systemName: "line.3.horizontal.decrease") }
+                if let count = vm?.libraryOptions.filters.count, count > 0 {
+                    Text(count, format: .number)
+                        .font(.caption2.bold())
+                        .foregroundStyle(.white)
+                        .padding(3)
+                        .background(.blue, in: .circle)
+                        .offset(x: 9, y: -9)
+                }
             }
         }
-        .lineLimit(1)
-        // WAJIB: tanpa ini toolbar menyempitkan item sampai selebar ikon dan
-        // judulnya tersisa jadi "…".
-        .fixedSize()
-    }
-    
-    private var settingsSheet: some View {
-        SettingsSheetView(session: session)
-    }
-
-    private var returnToProfileTaskID: String {
-        "\(backupSetupJourney.presentationRequest)-\(isActive)-\(showSettings)"
-    }
-
-    private func returnToProfileAfterDismissal() async {
-        guard isActive, !showSettings,
-              backupSetupJourney.step == .returningToProfile else { return }
-        let request = backupSetupJourney.presentationRequest
-        try? await Task.sleep(for: .milliseconds(450))
-        guard !Task.isCancelled, !showSettings else { return }
-        backupSetupJourney.returnToProfileIfNeeded(request: request)
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+        .accessibilityLabel("Sort and Filter")
     }
 
     // MARK: - Sel grid
@@ -537,7 +570,7 @@ struct TimelineView: View {
             NavigationStack {
                 AssetDetailView(
                     currentAsset: asset,
-                    assets: vm.allAssets,
+                    assets: vm.libraryAssets,
                     isModal: true,
                     // Menutupnya harus mengecil ke foto yang SEDANG dilihat,
                     // bukan yang pertama dibuka.
@@ -580,17 +613,11 @@ struct TimelineView: View {
         // Pada iPad bar tetap terlihat di Years/Months supaya segmented control
         // dapat dipakai, tetapi aksi milik grid All tidak ikut ditampilkan.
         if timelineNavigation.mode == .all {
-            ToolbarItem(placement: .topBarTrailing) { selectButton }
             if !isSelecting {
-                ToolbarItem(placement: .topBarTrailing) {
-                    JourneyProfileButton(isActive: isActive && !showSettings) {
-                        showSettings = true
-                    }
-                }
-                // Avatarnya sudah bulat penuh; kapsul kaca bawaan toolbar hanya
-                // menambah lingkaran kedua yang lebih besar di belakangnya.
-                .sharedBackgroundVisibility(.hidden)
+                ToolbarItem(placement: .topBarTrailing) { libraryMenu }
+                ToolbarSpacer(.fixed, placement: .topBarTrailing)
             }
+            ToolbarItem(placement: .topBarTrailing) { selectButton }
         }
         if isSelecting {
             // Jumlahnya pindah ke bar ATAS: bar bawah sekarang penuh aksi, dan
@@ -690,7 +717,7 @@ struct TimelineView: View {
             if await work() {
                 exitSelection()
             } else {
-                selectedIDs.formIntersection(Set(vm?.allAssets.map(\.id) ?? []))
+                selectedIDs.formIntersection(Set(vm?.libraryAssets.map(\.id) ?? []))
             }
         }
     }
@@ -864,6 +891,36 @@ struct TimelineView: View {
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.background)
+    }
+}
+
+struct TimelineLibraryHeader: View {
+    let count: String
+    let itemCount: Int
+    var mode: TimelineMode = .all
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Library")
+                .font(.largeTitle.bold())
+                .minimumScaleFactor(0.6)
+            if mode == .all {
+                ViewThatFits(in: .horizontal) {
+                    Text(count).fixedSize(horizontal: true, vertical: false)
+                    Text("^[\(itemCount) item](inflect: true)")
+                        .minimumScaleFactor(0.75)
+                }
+                .font(.headline.weight(.semibold))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(count)
+            } else {
+                Text(mode.title).font(.headline.bold()).minimumScaleFactor(0.75)
+            }
+        }
+        .lineLimit(1)
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+        .frame(minWidth: 88, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
