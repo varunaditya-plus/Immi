@@ -154,6 +154,7 @@ final class AlbumActivityViewModel {
             guard generation == LocalSnapshot.generation, !Task.isCancelled else { return }
             requestID = UUID()
             loadedItems.removeAll { $0.activity.id == activityID }
+            loadingPhase = .loaded(())
         } catch {
             guard generation == LocalSnapshot.generation, !Task.isCancelled, !(error is CancellationError) else { return }
             mutationError = (error as? APIError)?.errorDescription ?? String(localized: "Failed to update activity")

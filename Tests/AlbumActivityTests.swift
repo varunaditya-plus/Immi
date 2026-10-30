@@ -75,6 +75,32 @@ final class AlbumActivityTests: XCTestCase {
         XCTAssertNil(model.actionError)
     }
 
+    func testConfirmedDeletionSettlesTheSupersededRefreshWithoutRestoringDeletedActivity() async {
+        let repository = ActivityTestRepository(api: makeStubAPIClient())
+        let existing = activity("existing")
+        repository.read = { _ in [existing] }
+        let model = AlbumActivityViewModel(repository: repository)
+        let album = album("album")
+        await model.load(albums: [album])
+        let gate = ActivityTestGate<[AlbumActivityDTO]>()
+        repository.read = { _ in try await gate.wait() }
+        let refreshing = Task { await model.load(albums: [album]) }
+        addTeardownBlock { await gate.finish(.success([])); await refreshing.value }
+        await fulfillment(of: [gate.started], timeout: 2)
+        XCTAssertTrue(model.phase.isLoading)
+        XCTAssertEqual(model.items.map(\.activity.id), ["existing"])
+
+        await model.delete("existing")
+
+        XCTAssertTrue(model.items.isEmpty)
+        XCTAssertNotNil(model.phase.value, "The accepted deletion must not leave an empty feed loading forever")
+        gate.finish(.success([existing]))
+        await refreshing.value
+        XCTAssertTrue(model.items.isEmpty, "The older refresh must not resurrect the confirmed deletion")
+        XCTAssertNotNil(model.phase.value)
+        XCTAssertNil(model.actionError)
+    }
+
     func testAccountChangeHidesPublishedEventsAndRejectsLateCommentResults() async {
         let repository = ActivityTestRepository(api: makeStubAPIClient())
         repository.read = { _ in [self.activity("old-account")] }
