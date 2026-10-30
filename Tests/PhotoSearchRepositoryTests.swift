@@ -89,7 +89,7 @@ final class PhotoSearchRepositoryTests: XCTestCase {
             XCTAssertEqual(body["takenAfter"] as? String, request.takenAfter)
             XCTAssertEqual(body["takenBefore"] as? String, request.takenBefore)
             XCTAssertEqual(body["visibility"] as? String, "timeline")
-            XCTAssertEqual(body["withExif"] as? Bool, true)
+            XCTAssertEqual(body["withExif"] as? Bool, false)
             XCTAssertEqual(body["size"] as? Int, entry.path.hasSuffix("/smart") ? PhotoSearchRepository.semanticResultLimit : 1_000)
             XCTAssertNil(body["exclusiveTakenBefore"])
             XCTAssertNil(body["filter"], "The adapter must retain the compatible legacy request shape")
@@ -135,6 +135,34 @@ final class PhotoSearchRepositoryTests: XCTestCase {
             XCTAssertEqual(entries.compactMap { $0.body["originalFileName"] as? String }, [escaped])
             XCTAssertEqual(entries.compactMap { $0.body["query"] as? String }, [query])
             XCTAssertEqual(entries.compactMap { $0.body["ocr"] as? String }, [query])
+        }
+    }
+
+    func testSearchKeepsAuthorizedPhotosWithoutExifRowsForTextAndFilterOnlyQueries() async throws {
+        let api = try api()
+        let repository = PhotoSearchRepository(api: api, dataManager: store)
+        let indexed = asset("with-exif", captured: 1, added: 2, edited: true)
+        let awaitingExif = asset("without-exif", captured: 2, added: 3, edited: true)
+        for query in [nil, "receipt"] as [String?] {
+            let log = PhotoSearchRequestLog()
+            PhotoSearchURLProtocol.handler = { request, bytes in
+                let body = try log.record(request, data: bytes)
+                if body["query"] != nil || body["description"] != nil || body["ocr"] != nil {
+                    return try Self.data([])
+                }
+                // The legacy server omits the second asset only when an EXIF row is required.
+                return try Self.data(body["withExif"] as? Bool == true ? [indexed] : [indexed, awaitingExif])
+            }
+
+            let result = try await repository.search(SearchRequestDTO(query: query),
+                options: .init(sortOrder: .recentlyAdded, editedOnly: true))
+
+            XCTAssertEqual(result.assets.items.map(\.id), [awaitingExif.id, indexed.id])
+            XCTAssertEqual(result.assets.total, 2)
+            XCTAssertNil(result.incompleteSources)
+            XCTAssertTrue(result.assets.items.allSatisfy { $0.exifInfo == nil })
+            XCTAssertEqual(log.entries.count, query == nil ? 1 : 4)
+            XCTAssertTrue(log.entries.allSatisfy { $0.body["withExif"] as? Bool == false })
         }
     }
 

@@ -136,7 +136,8 @@ final class PhotoSearchRepository: SearchRepository {
         request.page = 1
         request.size = source == .smart ? Self.semanticResultLimit : 1_000
         request.visibility = "timeline"
-        request.withExif = true
+        // Legacy withExif uses an inner join and omits photos awaiting EXIF extraction.
+        request.withExif = false
         if let text = request.query {
             // Legacy caption and filename fields are ILIKE patterns, while typed text is literal.
             let pattern = text.replacingOccurrences(of: "\\", with: "\\\\")
