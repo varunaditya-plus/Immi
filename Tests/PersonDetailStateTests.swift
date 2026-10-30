@@ -37,9 +37,11 @@ final class PersonDetailStateTests: XCTestCase {
         let changed = expectation(description: "The actual detail title publishes the accepted name")
         withObservationTracking { _ = state.person } onChange: { changed.fulfill() }
         let save = worker {
-            await state.saveRename(request, using: repository) { id, name in
-                list.applyRename(id, to: name)
-                published.append((id, name))
+            let result = await state.saveRename(request, using: repository)
+            XCTAssertEqual(result, .saved)
+            if result == .saved {
+                list.applyPersonUpdate(PersonUpdate(person: state.person, fields: [.name]))
+                published.append((state.person.id, state.person.name))
             }
         }
         await fulfillment(of: [held.started], timeout: 2)
@@ -68,9 +70,11 @@ final class PersonDetailStateTests: XCTestCase {
         let second = try XCTUnwrap(state.prepareRename())
         let repository = PeopleStateRepository(driver: driver)
 
-        await state.saveRename(first, using: repository)
-        await state.saveRename(second, using: repository)
+        let discarded = await state.saveRename(first, using: repository)
+        let accepted = await state.saveRename(second, using: repository)
 
+        XCTAssertNil(discarded)
+        XCTAssertEqual(accepted, .saved)
         XCTAssertEqual(state.person.name, "Second")
         XCTAssertEqual(driver.renames.map(\.name), ["Second"])
     }
@@ -84,12 +88,18 @@ final class PersonDetailStateTests: XCTestCase {
         state.renameDraft = "First"
         let first = try XCTUnwrap(state.prepareRename())
         var published: [String] = []
-        let old = worker { await state.saveRename(first, using: repository) { _, name in published.append(name) } }
+        let old = worker {
+            let result = await state.saveRename(first, using: repository)
+            XCTAssertNil(result)
+            if result == .saved { published.append(state.person.name) }
+        }
         await fulfillment(of: [held.started], timeout: 2)
         state.renameDraft = "Second"
         let second = try XCTUnwrap(state.prepareRename())
 
-        await state.saveRename(second, using: repository) { _, name in published.append(name) }
+        let result = await state.saveRename(second, using: repository)
+        XCTAssertEqual(result, .saved)
+        if result == .saved { published.append(state.person.name) }
         held.complete(.success(()))
         await old.value
 
@@ -122,15 +132,18 @@ final class PersonDetailStateTests: XCTestCase {
         let driver = PeopleStateDriver()
         driver.rename = { _, _ in throw APIError.notConnected }
         let state = PersonDetailState(person: makePeopleStatePerson())
+        state.actionError = "Unrelated favorite failure"
         state.renameDraft = "Rejected"
         let request = try XCTUnwrap(state.prepareRename())
         var callbacks = 0
 
-        await state.saveRename(request, using: PeopleStateRepository(driver: driver)) { _, _ in callbacks += 1 }
+        let result = await state.saveRename(request, using: PeopleStateRepository(driver: driver))
+        if result == .saved { callbacks += 1 }
 
         XCTAssertEqual(state.person.name, "Original")
         XCTAssertEqual(state.renameDraft, "Rejected")
-        XCTAssertNotNil(state.actionError)
+        XCTAssertEqual(result, .failed(APIError.notConnected.errorDescription ?? APIError.notConnected.localizedDescription))
+        XCTAssertEqual(state.actionError, "Unrelated favorite failure")
         XCTAssertEqual(callbacks, 0)
         XCTAssertEqual(driver.renames.map(\.name), ["Rejected"])
     }
@@ -141,8 +154,9 @@ final class PersonDetailStateTests: XCTestCase {
         let state = PersonDetailState(person: makePeopleStatePerson())
         let request = try XCTUnwrap(state.prepareRename())
 
-        await state.saveRename(request, using: PeopleStateRepository(driver: driver))
+        let result = await state.saveRename(request, using: PeopleStateRepository(driver: driver))
 
+        XCTAssertNil(result)
         XCTAssertEqual(state.person.name, "Original")
         XCTAssertNil(state.actionError)
         XCTAssertEqual(driver.renames.count, 1)
@@ -157,7 +171,11 @@ final class PersonDetailStateTests: XCTestCase {
         let request = try XCTUnwrap(state.prepareRename())
         let repository = PeopleStateRepository(driver: driver)
         var callbacks = 0
-        let save = worker { await state.saveRename(request, using: repository) { _, _ in callbacks += 1 } }
+        let save = worker {
+            let result = await state.saveRename(request, using: repository)
+            XCTAssertNil(result)
+            if result == .saved { callbacks += 1 }
+        }
         await fulfillment(of: [held.started], timeout: 2)
         save.cancel()
         held.complete(.success(()))
@@ -205,7 +223,11 @@ final class PersonDetailStateTests: XCTestCase {
         let request = try XCTUnwrap(state.prepareRename())
         let repository = PeopleStateRepository(driver: driver)
         var callbacks = 0
-        let old = worker { await state.saveRename(request, using: repository) { _, _ in callbacks += 1 } }
+        let old = worker {
+            let result = await state.saveRename(request, using: repository)
+            XCTAssertNil(result)
+            if result == .saved { callbacks += 1 }
+        }
         await fulfillment(of: [held.started], timeout: 2)
         LocalSnapshot.clearAll()
         let next = [makePeopleStatePerson(name: "Next account")]

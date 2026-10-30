@@ -250,9 +250,10 @@ final class PeopleBrowsingTests: XCTestCase {
         await model.setFavorite(original.id, to: true)
         editor.renameDraft = "Accepted editor name"
         let rename = try XCTUnwrap(editor.prepareRename())
-        await editor.saveRename(rename, using: repository) { _, _ in
-            model.applyPersonUpdate(PersonUpdate(person: editor.person, fields: [.name]))
-        }
+        let renamed = await editor.saveRename(rename, using: repository)
+        XCTAssertEqual(renamed, .saved)
+        guard renamed == .saved else { return }
+        model.applyPersonUpdate(PersonUpdate(person: editor.person, fields: [.name]))
         XCTAssertEqual(model.people.first?.name, "Accepted editor name")
         XCTAssertEqual(model.people.first?.isFavorite, true)
 

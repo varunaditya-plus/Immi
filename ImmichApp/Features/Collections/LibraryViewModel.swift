@@ -8,6 +8,7 @@ final class LibraryViewModel {
     private var loadRequest = UUID()
     private var albumRequest = UUID()
     private var peopleRequest = UUID()
+    private var mergedPeopleIDs: Set<String> = []
     private var actionErrorID = UUID()
     private var restoredSnapshots = false
 
@@ -363,13 +364,28 @@ final class LibraryViewModel {
         LocalSnapshot.save(albums, for: LocalSnapshot.Key.libraryAlbums, expectedGeneration: snapshotGeneration)
     }
 
-    func applyPersonRename(_ id: String, to name: String) {
-        guard canPublish else { return }
+    func applyPersonUpdate(_ update: PersonUpdate) {
+        guard canPublish, !mergedPeopleIDs.contains(update.person.id) else { return }
         peopleRequest = UUID()
-        guard let index = people.firstIndex(where: { $0.id == id }) else { return }
-        var updated = people[index]
-        updated.name = name
-        people[index] = updated
+        if let index = people.firstIndex(where: { $0.id == update.person.id }) {
+            people[index] = update.applying(to: people[index])
+        } else if !update.person.isHidden,
+                  people.count < Self.rowLimit || (update.fields.contains(.favorite) && update.person.isFavorite == true) {
+            people.append(update.person)
+        }
+        let order = Dictionary(people.enumerated().map { ($0.element.id, $0.offset) }, uniquingKeysWith: { first, _ in first })
+        people = Array(people.filter { !$0.isHidden }.sorted {
+            if ($0.isFavorite == true) != ($1.isFavorite == true) { return $0.isFavorite == true }
+            return (order[$0.id] ?? .max) < (order[$1.id] ?? .max)
+        }.prefix(Self.rowLimit))
+        LocalSnapshot.save(people, for: LocalSnapshot.Key.libraryPeople, expectedGeneration: snapshotGeneration)
+    }
+
+    func applyPeopleMerge(_ removedIDs: Set<String>) {
+        guard canPublish, !removedIDs.isEmpty else { return }
+        peopleRequest = UUID()
+        mergedPeopleIDs.formUnion(removedIDs)
+        people.removeAll { removedIDs.contains($0.id) }
         LocalSnapshot.save(people, for: LocalSnapshot.Key.libraryPeople, expectedGeneration: snapshotGeneration)
     }
 

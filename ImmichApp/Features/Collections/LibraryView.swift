@@ -575,7 +575,7 @@ struct LibraryView: View {
         PersonDetailView(
             person: person,
             repo: PeopleRepository(api: APIClient(session: session)),
-            onRenamed: { id, name in vm?.applyPersonRename(id, to: name) })
+            onPersonUpdated: { vm?.applyPersonUpdate($0) })
             .navigationTransition(.zoom(sourceID: person.id, in: personNamespace))
     }
 

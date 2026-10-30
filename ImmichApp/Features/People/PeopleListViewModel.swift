@@ -184,17 +184,6 @@ final class PeopleListViewModel {
         await loadPeople()
     }
 
-    func applyRename(_ personId: String, to name: String) {
-        guard !Task.isCancelled, snapshotGeneration == LocalSnapshot.generation else { return }
-        invalidateLoads()
-        if let index = people.firstIndex(where: { $0.id == personId }) {
-            var updated = people[index]
-            updated.name = name
-            people[index] = updated
-            persist()
-        }
-    }
-
     func applyHidden(_ personId: String, to value: Bool) {
         guard !Task.isCancelled, snapshotGeneration == LocalSnapshot.generation else { return }
         invalidateLoads()

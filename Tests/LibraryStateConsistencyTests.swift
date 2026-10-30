@@ -153,7 +153,7 @@ final class LibraryStateConsistencyTests: XCTestCase {
         let remaining = AssetLite(makeTestAsset(id: "kept"))
         XCTAssertTrue(model.applyAlbumContents([remaining], to: "album"))
         model.applyAlbumUpdate(staleEditorValue)
-        model.applyPersonRename("person", to: "Saved person name")
+        model.applyPersonUpdate(PersonUpdate(person: person("person", name: "Saved person name"), fields: [.name]))
         albums.complete(.success([album("album", name: "Stale name", count: 9, cover: "removed")]))
         people.complete(.success([person("person", name: "Stale person name")]))
         await old.value
@@ -443,7 +443,7 @@ final class LibraryStateConsistencyTests: XCTestCase {
         await load.value
         await action.value
         model.applyAlbumUpdate(album("old", name: "Stale callback"))
-        model.applyPersonRename("old", to: "Stale callback")
+        model.applyPersonUpdate(PersonUpdate(person: person("old", name: "Stale callback"), fields: [.name]))
         _ = model.applyAlbumContents([], to: "old")
         await model.load()
         await model.refreshAlbums()

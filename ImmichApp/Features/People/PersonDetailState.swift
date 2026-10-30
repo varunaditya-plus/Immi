@@ -4,7 +4,10 @@ import Observation
 @MainActor
 @Observable
 final class PersonDetailState {
-
+    enum RenameResult: Equatable, Sendable {
+        case saved
+        case failed(String)
+    }
 
     struct RenameRequest: Sendable {
         let personID: String
@@ -31,30 +34,30 @@ final class PersonDetailState {
 
     /// Admission happens in the Save action, before its task can be delayed.
     func prepareRename() -> RenameRequest? {
-        guard !Task.isCancelled, !renameDraft.isEmpty,
+        let name = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !Task.isCancelled, !name.isEmpty,
               snapshotGeneration == LocalSnapshot.generation else { return nil }
         renameID = UUID()
-        actionError = nil
-        return RenameRequest(personID: person.id, name: renameDraft,
+        return RenameRequest(personID: person.id, name: name,
             generation: LocalSnapshot.generation, operationID: renameID)
     }
 
+    @discardableResult
     func saveRename(
-        _ request: RenameRequest, using repository: PeopleRepository,
-        onRenamed: ((String, String) -> Void)? = nil
-    ) async {
-        guard isCurrent(request) else { return }
+        _ request: RenameRequest, using repository: PeopleRepository
+    ) async -> RenameResult? {
+        guard isCurrent(request) else { return nil }
         do {
             try await repository.rename(request.personID, to: request.name)
-            guard isCurrent(request) else { return }
+            guard isCurrent(request) else { return nil }
             detailID = UUID()
             var updated = person
             updated.name = request.name
             person = updated
-            onRenamed?(request.personID, request.name)
+            return .saved
         } catch {
-            guard isCurrent(request), !(error is CancellationError) else { return }
-            actionError = (error as? APIError)?.errorDescription ?? error.localizedDescription
+            guard isCurrent(request), !(error is CancellationError) else { return nil }
+            return .failed((error as? APIError)?.errorDescription ?? error.localizedDescription)
         }
     }
 

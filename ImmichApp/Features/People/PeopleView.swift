@@ -192,16 +192,47 @@ struct PeopleView: View {
     }
 }
 
-/// Foto seseorang, memakai `PhotoCollectionScreen` yang sama dengan detail
-/// album — yang khas di sini hanya menu Rename / Hide.
+struct PeoplePortrait: View {
+    let person: PersonDTO
+    var side: CGFloat = 140
+    var selected: Bool? = nil
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            Group {
+                if person.thumbnailPath?.isEmpty == false {
+                    AuthImage(assetId: person.id, path: "/people/\(person.id)/thumbnail")
+                        .id(person.updatedAt)
+                } else {
+                    Circle().fill(.fill.tertiary)
+                        .overlay { Image(systemName: "person.fill").font(.largeTitle).foregroundStyle(.secondary) }
+                }
+            }
+            .frame(width: side, height: side)
+            .clipShape(.circle)
+            if let selected {
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.title2).symbolRenderingMode(.palette).foregroundStyle(.white, .blue)
+                    .padding(4).background(.regularMaterial, in: .circle)
+            } else if person.isFavorite == true {
+                Image(systemName: "heart.fill").font(.caption.bold()).foregroundStyle(.white)
+                    .padding(8).background(.black.opacity(0.5), in: .circle)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+
 @MainActor
 struct PersonDetailView: View {
     @State private var detail: PersonDetailState
     let repo: PeopleRepository
     var listVM: PeopleListViewModel?
-    var onRenamed: ((String, String) -> Void)? = nil
+    var onPersonUpdated: ((PersonUpdate) -> Void)? = nil
 
     @Environment(SessionManager.self) private var session
+    @Environment(\.dismiss) private var dismiss
     @State private var vm: AssetGridViewModel?
     @State private var albumPickerAsset: AssetLite?
     @State private var albumPickerSelection: SelectedAssetIDs?
@@ -213,12 +244,12 @@ struct PersonDetailView: View {
 
     init(
         person: PersonDTO, repo: PeopleRepository, listVM: PeopleListViewModel? = nil,
-        onRenamed: ((String, String) -> Void)? = nil
+        onPersonUpdated: ((PersonUpdate) -> Void)? = nil
     ) {
         _detail = State(initialValue: PersonDetailState(person: person))
         self.repo = repo
         self.listVM = listVM
-        self.onRenamed = onRenamed
+        self.onPersonUpdated = onPersonUpdated
     }
 
     private var person: PersonDTO { detail.person }
@@ -226,15 +257,7 @@ struct PersonDetailView: View {
     var body: some View {
         screen
             .sheet(isPresented: $showRenameSheet) {
-                RenameSheet(name: Bindable(detail).renameDraft, onSave: {
-                    guard let request = detail.prepareRename() else { return }
-                    Task {
-                        await detail.saveRename(request, using: repo) { id, name in
-                            listVM?.applyRename(id, to: name)
-                            onRenamed?(id, name)
-                        }
-                    }
-                })
+                PersonIdentityEditor(person: person, repository: repo, detailState: detail, onUpdated: publish)
             }
             .sheet(item: $albumPickerAsset) { asset in
                 AlbumPickerLoader { album in
@@ -246,7 +269,7 @@ struct PersonDetailView: View {
                 }
             }
             .alert("Action Failed", isPresented: .init(
-                get: { detail.actionError != nil },
+                get: { detail.actionError != nil && !isPresentingSheet },
                 set: { if !$0 { detail.actionError = nil } }
             )) {
                 Button("OK", role: .cancel) {}
@@ -264,12 +287,20 @@ struct PersonDetailView: View {
             }
             .sheet(item: $sharedLink) { ShareSheet(url: $0.url) }
             .errorToast($actionMessage)
+            .onChange(of: session.accountGeneration) { _, _ in dismiss() }
             .task { await start() }
     }
 
+    private var isPresentingSheet: Bool {
+        showRenameSheet || albumPickerAsset != nil || albumPickerSelection != nil
+            || sharedLink != nil
+    }
+
+    @ViewBuilder
     private var screen: some View {
+        if detail.isCurrent {
         PhotoCollectionScreen(
-            title: LocalizedStringKey(person.name),
+            title: LocalizedStringKey(person.displayName),
             assets: vm?.assets ?? [],
             phase: vm?.phase ?? .loading,
             actionError: Binding(
@@ -284,8 +315,11 @@ struct PersonDetailView: View {
             onArchiveSelection: { await vm?.setArchived($0, to: true) },
             onMoveToLocked: { await vm?.setLocked($0) },
             onShareLink: { createSharedLink(for: $0) },
+            visibilityScope: .timeline,
+            facePersonID: person.id,
             selectionMenu: selectionMenu,
             options: { personMenu })
+        } else { ProgressView() }
     }
 
     /// Menu elipsis mode pilih — isinya sama dengan Photos.
@@ -294,7 +328,7 @@ struct PersonDetailView: View {
     /// menambahkannya sendiri dari `onMoveToLocked`, supaya semua layar yang
     /// punya aksi itu memakai satu susunan yang sama.
     private func selectionMenu(_ ids: Set<String>) -> [SelectionMenuAction] {
-        [
+        var actions: [SelectionMenuAction] = [
             SelectionMenuAction(title: "Share Link", systemImage: "link") {
                 createSharedLink(for: Array(ids))
             },
@@ -305,6 +339,16 @@ struct PersonDetailView: View {
                 albumPickerSelection = SelectedAssetIDs(ids: Array(ids))
             },
         ]
+        if ids.count == 1, let id = ids.first {
+            actions.append(SelectionMenuAction(title: "Make Key Photo", systemImage: "person.crop.square") {
+                Task {
+                    if let error = await detail.chooseKeyPhoto(id, from: vm?.assets ?? [], using: repo, onUpdated: publish) {
+                        detail.actionError = error
+                    }
+                }
+            })
+        }
+        return actions
     }
 
     private func createSharedLink(for ids: [String]) {
@@ -332,13 +376,22 @@ struct PersonDetailView: View {
             detail.renameDraft = person.name
             showRenameSheet = true
         } label: {
-            Label("Rename", systemImage: "pencil")
+            Label("Edit Name and Photos", systemImage: "pencil")
+        }
+
+        if person.isFavorite != nil {
+            Button {
+                Task { await detail.setFavorite(person.isFavorite != true, using: repo, onUpdated: publish) }
+            } label: {
+                Label(person.isFavorite == true ? "Unfavorite" : "Favorite", systemImage: "heart")
+            }
         }
 
         Button {
             Task {
                 await detail.toggleHidden(using: repo) { id, hidden in
                     listVM?.applyHidden(id, to: hidden)
+                    onPersonUpdated?(PersonUpdate(person: detail.person, fields: [.hidden]))
                 }
             }
         } label: {
@@ -348,7 +401,13 @@ struct PersonDetailView: View {
         }
     }
 
+    private func publish(_ update: PersonUpdate) {
+        listVM?.applyPersonUpdate(update)
+        onPersonUpdated?(update)
+    }
+
     private func start() async {
+        guard !Task.isCancelled, detail.isCurrent else { return }
         if vm == nil {
             let api = APIClient(session: session)
             let repo = repo
@@ -368,37 +427,6 @@ struct PersonDetailView: View {
         // Nama bisa berubah di server sejak daftar dimuat; diambil ulang supaya
         // judul sampulnya benar.
         await detail.loadDetail(using: repo)
-    }
-}
-
-struct RenameSheet: View {
-    @Binding var name: String
-    var onSave: () -> Void
-    @FocusState private var isFocused: Bool
-    @Environment(\.dismiss) var dismiss
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                TextField("Name", text: $name)
-                    .focused($isFocused)
-            }
-            .navigationTitle("Rename Person")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Save") {
-                        onSave()
-                        dismiss()
-                    }
-                    .disabled(name.isEmpty)
-                }
-            }
-            .onAppear { isFocused = true }
-        }
     }
 }
 
