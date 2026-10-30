@@ -159,6 +159,34 @@ final class LibraryBrowsingTests: XCTestCase {
         XCTAssertEqual(model.libraryAssets.map(\.id), [photo.id])
     }
 
+    func testDefaultLibraryUsesDeviceSnapshotFavoritesWithoutAdditionalMetadataQueries() async throws {
+        var favorite = localPhoto()
+        favorite.isFavorite = true
+        var photos = [favorite, localPhoto()]
+        let favoriteID = LocalPhotoLibrary.assetID(for: favorite.id)
+        var metadataQueries = 0
+        let model = TimelineViewModel(libraryDeviceMetadata: { _ in
+            metadataQueries += 1
+            return [:]
+        }, localPhotos: { photos })
+
+        await model.loadTimeline()
+
+        XCTAssertEqual(model.libraryOptions, LibraryBrowseOptions())
+        let included = try XCTUnwrap(model.asset(for: favoriteID))
+        XCTAssertTrue(included.isFavorite)
+        XCTAssertEqual(PhotoAssetAccessibility.value(for: included), String(localized: "Favorite"))
+        XCTAssertEqual(model.libraryAssets.filter(\.isFavorite).map(\.id), [favoriteID])
+        XCTAssertEqual(metadataQueries, 0, "Default browsing must reuse the selected-device scan")
+
+        photos[0].isFavorite = false
+        await model.loadTimeline()
+
+        XCTAssertEqual(model.asset(for: favoriteID)?.isFavorite, false)
+        XCTAssertTrue(model.libraryAssets.filter(\.isFavorite).isEmpty)
+        XCTAssertEqual(metadataQueries, 0)
+    }
+
     func testCompleteMetadataAndMembershipRequestsFollowEveryContinuationAndExcludePrivatePhotos() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("library-network-index-\(UUID())")
         directories.append(directory)

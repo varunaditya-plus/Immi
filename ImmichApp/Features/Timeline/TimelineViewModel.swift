@@ -486,7 +486,7 @@ final class TimelineViewModel {
             .union(dataManager?.nonTimelineAssetIDs ?? [])
         return localPhotos().compactMap { photo -> TimelineRow? in
             var origin = AssetOrigin.device
-            var isFavorite = false
+            var isFavorite = photo.isFavorite
             if let serverID = links[photo.id] {
                 // Backup mappings survive deletion, archive, and locking. The
                 // mapping must not make a private asset visible as a local copy.

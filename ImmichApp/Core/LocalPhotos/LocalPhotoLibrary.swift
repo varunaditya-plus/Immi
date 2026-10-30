@@ -47,6 +47,7 @@ struct LocalPhoto: Identifiable, Sendable {
     let isLivePhoto: Bool
     let duration: Double?
     let ratio: Double
+    var isFavorite = false
 }
 
 struct LocalPhotoDisplayMetadata: Sendable {
@@ -311,7 +312,8 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
                 isLivePhoto: asset.mediaType == .image
                     && asset.mediaSubtypes.contains(.photoLive),
                 duration: asset.mediaType == .video ? asset.duration : nil,
-                ratio: Double(asset.pixelWidth) / Double(height)))
+                ratio: Double(asset.pixelWidth) / Double(height),
+                isFavorite: asset.isFavorite))
         }
         return result
     }
@@ -682,7 +684,8 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
                         isLivePhoto: asset.mediaType == .image
                             && asset.mediaSubtypes.contains(.photoLive),
                         duration: asset.mediaType == .video ? asset.duration : nil,
-                        ratio: height > 0 ? width / height : 1)
+                        ratio: height > 0 ? width / height : 1,
+                        isFavorite: asset.isFavorite)
                 }
         }
 
@@ -939,7 +942,8 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
                 isLivePhoto: asset.mediaType == .image
                     && asset.mediaSubtypes.contains(.photoLive),
                 duration: asset.mediaType == .video ? asset.duration : nil,
-                ratio: Double(asset.pixelWidth) / Double(height))
+                ratio: Double(asset.pixelWidth) / Double(height),
+                isFavorite: asset.isFavorite)
         }.value
     }
 

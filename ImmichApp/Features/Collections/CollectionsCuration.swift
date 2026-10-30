@@ -18,7 +18,8 @@ enum CollectionsAssetSources {
             result.append(AssetLite(
                 id: LocalPhotoLibrary.assetID(for: photo.id), isVideo: photo.isVideo,
                 ratio: photo.ratio, thumbhash: nil, createdAt: photo.createdAt,
-                duration: photo.duration, origin: mappings[photo.id] == nil ? .device : .both))
+                isFavorite: mappings[photo.id] == nil && photo.isFavorite, duration: photo.duration,
+                origin: mappings[photo.id] == nil ? .device : .both))
         }
         return policy.filter(result)
     }

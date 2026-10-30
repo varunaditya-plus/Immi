@@ -43,6 +43,36 @@ final class CollectionsCurationTests: XCTestCase {
         XCTAssertEqual(merged.map(\.origin), [.both, .device])
     }
 
+    func testDeviceFavoritesReachFeaturedRankingAndLabelsWithoutOverridingServerFavorites() throws {
+        let manager = try fixture()
+        var serverFavorite = asset("server-favorite", "2026-10-28T13:00:00Z")
+        serverFavorite.isFavorite = true
+        let serverPhoto = asset("server-photo", "2026-10-28T12:00:00Z")
+        let merged = CollectionsAssetSources.merge(
+            server: [serverFavorite, serverPhoto],
+            selectedLocal: [local("favorite", timestamp: "2026-10-28T11:00:00Z", favorite: true),
+                            local("newer", timestamp: "2026-10-28T14:00:00Z"),
+                            local("server-favorite-copy"), local("server-photo-copy", favorite: true),
+                            local("mapped-fallback", favorite: true)],
+            mappings: ["server-favorite-copy": serverFavorite.id, "server-photo-copy": serverPhoto.id,
+                       "mapped-fallback": "pending-server"],
+            policy: AssetVisibilityPolicy(scope: .timeline, dataManager: manager))
+        let byID = Dictionary(uniqueKeysWithValues: merged.map { ($0.id, $0) })
+        let deviceFavorite = try XCTUnwrap(byID[LocalPhotoLibrary.assetID(for: "favorite")])
+
+        XCTAssertTrue(deviceFavorite.isFavorite)
+        XCTAssertEqual(PhotoAssetAccessibility.value(for: deviceFavorite), String(localized: "Favorite"))
+        XCTAssertEqual(byID[serverFavorite.id]?.isFavorite, true)
+        XCTAssertEqual(byID[serverPhoto.id]?.isFavorite, false)
+        XCTAssertEqual(byID[LocalPhotoLibrary.assetID(for: "mapped-fallback")]?.isFavorite, false,
+            "An uploaded fallback's server favorite must not inherit PhotoKit's independent favorite")
+        XCTAssertEqual(FeaturedPhotoSelection.select(from: merged, limit: 2, calendar: calendar).map(\.id),
+            [serverFavorite.id, deviceFavorite.id])
+        let recentFavorite = RecentDayCollection.build(from: merged, calendar: calendar)
+            .flatMap(\.assets).first(where: { $0.id == deviceFavorite.id })
+        XCTAssertEqual(recentFavorite?.isFavorite, true)
+    }
+
     func testRecentAndFeaturedCollectionsRetainSelectedLocalMembersAndDropUnselectedCopiesImmediately() throws {
         let manager = try fixture()
         let serverID = UUID().uuidString
@@ -153,8 +183,9 @@ final class CollectionsCurationTests: XCTestCase {
     private func asset(_ id: String, _ text: String, video: Bool = false) -> AssetLite {
         AssetLite(id: id, isVideo: video, ratio: 1.5, thumbhash: nil, createdAt: date(text))
     }
-    private func local(_ id: String, timestamp: String = "2026-10-28T12:00:00Z") -> LocalPhoto {
-        LocalPhoto(id: id, createdAt: date(timestamp), modifiedAt: date(timestamp), isVideo: false, isLivePhoto: false, duration: nil, ratio: 1.5)
+    private func local(_ id: String, timestamp: String = "2026-10-28T12:00:00Z", favorite: Bool = false) -> LocalPhoto {
+        LocalPhoto(id: id, createdAt: date(timestamp), modifiedAt: date(timestamp), isVideo: false,
+            isLivePhoto: false, duration: nil, ratio: 1.5, isFavorite: favorite)
     }
     private func dto(_ id: String, _ text: String) -> AssetResponseDTO {
         var asset = makeTestAsset(id: id)
