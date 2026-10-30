@@ -109,6 +109,7 @@ struct PhotoCollectionScreen<Options: View>: View {
     var removalScope: RemovedAssets.Scope = .library
     var visibilityScope: AssetVisibilityPolicy.Scope = .collection
     var canPerformServerActions: (AssetLite) -> Bool = { _ in true }
+    var facePersonID: String? = nil
     /// Detail album di iPad tetap membutuhkan sidebar sebagai jalan kembali ke
     /// All Albums. Di compact/iPhone, tab bar tetap disembunyikan seperti biasa.
     var keepsTabBarVisibleOnRegularWidth = false
@@ -138,6 +139,7 @@ struct PhotoCollectionScreen<Options: View>: View {
     @State private var preparedURLs: [URL] = []
     @State private var preparedAssetIDs: [String] = []
     @State private var isSharePresented = false
+    @State private var showsFaces = false
     /// Foto yang menunggu konfirmasi hapus DARI CONTEXT MENU.
     ///
     /// Terpisah dari konfirmasi mode pilih, dan bentuknya alert, bukan dialog:
@@ -412,9 +414,13 @@ struct PhotoCollectionScreen<Options: View>: View {
 
     private var configuration: PhotoGridConfiguration {
         PhotoGridConfiguration(
-            layoutStyle: layout == .hero && aspectRatioGrid ? .justified : .square,
+            layoutStyle: layout == .hero && aspectRatioGrid && !showsFaces ? .justified : .square,
             columns: max(gridColumns, 1),
             allowsDensityZoom: true,
+            facePersonID: showsFaces ? facePersonID : nil,
+            faceRevision: showsFaces ? facePersonID.map {
+                "\(LocalSnapshot.invalidationRevision(for: LocalSnapshot.Key.person($0))):\(SwiftDataManager.shared.assetMutationRevision)"
+            } : nil,
             showsSectionHeaders: layout == .monthly,
             startsAtNewest: false,
             heroHeight: layout == .hero ? 420 : 0,
@@ -852,6 +858,17 @@ struct PhotoCollectionScreen<Options: View>: View {
             Menu {
                 if layout == .hero {
                     Menu("View Options") {
+                        if facePersonID != nil {
+                            Button { showsFaces = false } label: {
+                                if showsFaces { Text("Photos") }
+                                else { Label("Photos", systemImage: "checkmark") }
+                            }
+                            Button { showsFaces = true } label: {
+                                if showsFaces { Label("Faces", systemImage: "checkmark") }
+                                else { Text("Faces") }
+                            }
+                            Divider()
+                        }
                         Button("Zoom In", systemImage: "plus.magnifyingglass") {
                             gridController?.zoomDensity(in: true)
                         }
@@ -861,6 +878,7 @@ struct PhotoCollectionScreen<Options: View>: View {
                         }
                         .disabled(PhotoGridDensity.next(columns: gridColumns, zoomingIn: false) == nil)
                         Toggle("Aspect Ratio Grid", isOn: $aspectRatioGrid)
+                            .disabled(showsFaces)
                     }
                 }
                 options()
@@ -1180,6 +1198,7 @@ extension PhotoCollectionScreen where Options == EmptyView {
         deletesPermanently: Bool = false,
         visibilityScope: AssetVisibilityPolicy.Scope = .collection,
         canPerformServerActions: @escaping (AssetLite) -> Bool = { _ in true },
+        facePersonID: String? = nil,
         selectionMenu: ((Set<String>) -> [SelectionMenuAction])? = nil
     ) {
         self.init(
@@ -1210,6 +1229,7 @@ extension PhotoCollectionScreen where Options == EmptyView {
             deletesPermanently: deletesPermanently,
             visibilityScope: visibilityScope,
             canPerformServerActions: canPerformServerActions,
+            facePersonID: facePersonID,
             selectionMenu: selectionMenu,
             options: { EmptyView() })
     }

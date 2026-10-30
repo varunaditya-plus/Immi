@@ -26,10 +26,56 @@ class PhotoThumbnailLoader {
     var visibilityPolicy = AssetVisibilityPolicy()
 
     private let session: SessionManager
+    private let faceAPI: APIClient
     private let accountGeneration = LocalSnapshot.generation
 
-    init(session: SessionManager) {
+    init(session: SessionManager, faceAPI: APIClient? = nil) {
         self.session = session
+        self.faceAPI = faceAPI ?? session.imageAPI
+    }
+
+    func faceCacheKey(for assetID: String, personID: String) -> String {
+        let personRevision = LocalSnapshot.invalidationRevision(for: LocalSnapshot.Key.person(personID))
+        return "face:\(accountGeneration):\(personID):\(assetID):\(personRevision):\(SwiftDataManager.shared.assetMutationRevision)"
+    }
+
+    func cachedFaceImage(for assetID: String, personID: String) -> UIImage? {
+        guard accountGeneration == LocalSnapshot.generation, visibilityPolicy.allows(id: assetID) else { return nil }
+        return ImageMemoryCache.shared.image(for: ImageCache.memoryKey(
+            faceCacheKey(for: assetID, personID: personID), Self.maxPixelSize))
+    }
+
+    func faceImage(for assetID: String, personID: String) async -> UIImage? {
+        guard !isSuspended, !LocalPhotoLibrary.isLocal(assetID),
+              accountGeneration == LocalSnapshot.generation, visibilityPolicy.allows(id: assetID) else { return nil }
+        let key = faceCacheKey(for: assetID, personID: personID)
+        let api = faceAPI
+        let repository = PeopleRepository(api: api)
+        do {
+            let image = try await ImageCache.shared.image(key: key, maxPixelSize: Self.maxPixelSize) {
+                let faces = try? await repository.faces(in: assetID)
+                try Task.checkCancellation()
+                let data = try await api.rawData(.init(path: "/assets/\(assetID)/thumbnail", query: [
+                    .init(name: "size", value: "preview"), .init(name: "cropped", value: "false"),
+                    .init(name: "edited", value: "true"),
+                ]))
+                let current = await MainActor.run {
+                    self.accountGeneration == LocalSnapshot.generation && self.visibilityPolicy.allows(id: assetID)
+                        && self.faceCacheKey(for: assetID, personID: personID) == key
+                }
+                guard current else { throw CancellationError() }
+                // Face bounds are transformed by saved edits on the server;
+                // only the matching uncropped edited preview uses that space.
+                if let face = faces?.first(where: { $0.person?.id == personID }),
+                   let cropped = PersonFaceImage.croppedData(data, face: face) { return cropped }
+                return data
+            }
+            guard !Task.isCancelled, accountGeneration == LocalSnapshot.generation,
+                  visibilityPolicy.allows(id: assetID), faceCacheKey(for: assetID, personID: personID) == key else { return nil }
+            return image
+        } catch {
+            return nil
+        }
     }
 
     func cacheKey(for assetId: String) -> String {

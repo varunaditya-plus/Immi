@@ -20,6 +20,8 @@ struct PhotoGridConfiguration: Equatable {
     var layoutStyle: PhotoGridLayoutStyle = .square
     var columns: Int = 3
     var allowsDensityZoom = false
+    var facePersonID: String? = nil
+    var faceRevision: String? = nil
     /// Judul bulan yang menempel di tepi atas.
     ///
     /// Sekaligus menentukan apakah gridnya DIPECAH per bulan. Batas section-lah
@@ -666,7 +668,7 @@ final class PhotoGridController: UIViewController {
             cell.contentView.isHidden = true
             return
         }
-        cell.configure(with: asset, loader: loader)
+        cell.configure(with: asset, loader: loader, facePersonID: configuration.facePersonID)
         guard cell.isAccessibilityElement else { return }
         let isPicked = dataSource.indexPath(for: asset.id).map {
             collectionView.indexPathsForSelectedItems?.contains($0) ?? false
@@ -827,6 +829,8 @@ final class PhotoGridController: UIViewController {
 
         self.pending = nil
         let configurationChanged = configuration != pending.configuration
+        let facePresentationChanged = configuration.facePersonID != pending.configuration.facePersonID
+            || configuration.faceRevision != pending.configuration.faceRevision
         let scrolledAwayFromNewest = releaseNewestAnchorIfScrolledAway()
 
         // Posisi yang sedang dilihat, DICATAT SEBELUM snapshot dipasang.
@@ -869,7 +873,7 @@ final class PhotoGridController: UIViewController {
         }
 
         var snapshot = pending.snapshot
-        reconfigureChangedItems(in: &snapshot)
+        reconfigureChangedItems(in: &snapshot, force: facePresentationChanged)
 
         dataSource.apply(snapshot, animatingDifferences: animates) { [weak self] in
             guard let self else { return }
@@ -922,7 +926,7 @@ final class PhotoGridController: UIViewController {
     /// Berlaku sama untuk favorit, durasi, dan apa pun yang hidup di dalam sel
     /// tanpa mengubah identitas fotonya.
     private func reconfigureChangedItems(
-        in snapshot: inout NSDiffableDataSourceSnapshot<SectionID, String>
+        in snapshot: inout NSDiffableDataSourceSnapshot<SectionID, String>, force: Bool = false
     ) {
         let current = sections.flatMap(\.assets)
         defer { renderedAssets = Dictionary(current.map { ($0.id, $0) },
@@ -936,7 +940,7 @@ final class PhotoGridController: UIViewController {
         let changed = current.compactMap { asset -> String? in
             guard existing.contains(asset.id),
                   let previous = renderedAssets[asset.id],
-                  !previous.hasSameContent(as: asset)
+                  force || !previous.hasSameContent(as: asset)
             else { return nil }
             return asset.id
         }
@@ -2119,7 +2123,7 @@ extension PhotoGridController: UICollectionViewDataSourcePrefetching {
             .compactMap { dataSource.itemIdentifier(for: $0) }
             .filter { assetsByID[$0] != nil }
         guard !ids.isEmpty else { return }
-        loader.prefetch(ids)
+        if configuration.facePersonID == nil { loader.prefetch(ids) }
 
         // Paginasi menumpang di sini, bukan di `willDisplay`.
         //

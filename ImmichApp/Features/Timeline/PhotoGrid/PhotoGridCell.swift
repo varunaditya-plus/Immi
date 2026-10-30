@@ -156,7 +156,7 @@ final class PhotoGridCell: UICollectionViewCell {
         onAccessibilityActivate = nil
     }
 
-    func configure(with asset: AssetLite, loader: PhotoThumbnailLoader) {
+    func configure(with asset: AssetLite, loader: PhotoThumbnailLoader, facePersonID: String? = nil) {
         guard loader.visibilityPolicy.allows(id: asset.id) else {
             prepareForReuse()
             return
@@ -168,7 +168,8 @@ final class PhotoGridCell: UICollectionViewCell {
         loadTask?.cancel()
         loadTask = nil
 
-        let key = loader.cacheKey(for: asset.id)
+        let key = facePersonID.map { loader.faceCacheKey(for: asset.id, personID: $0) }
+            ?? loader.cacheKey(for: asset.id)
         currentKey = key
         isAccessibilityElement = true
         accessibilityLabel = PhotoAssetAccessibility.label(for: asset)
@@ -182,7 +183,10 @@ final class PhotoGridCell: UICollectionViewCell {
         originBadge.isHidden = originBadge.image == nil
 
         // Sudah ada di memori: dipasang seketika, tanpa `Task` sama sekali.
-        if let cached = loader.cachedImage(for: asset.id) {
+        let cached: UIImage?
+        if let facePersonID { cached = loader.cachedFaceImage(for: asset.id, personID: facePersonID) }
+        else { cached = loader.cachedImage(for: asset.id) }
+        if let cached {
             imageView.image = cached
             return
         }
@@ -198,7 +202,9 @@ final class PhotoGridCell: UICollectionViewCell {
             : ThumbHash.placeholder(for: asset.thumbhash)
 
         loadTask = Task { [weak self] in
-            let image = await loader.image(for: asset.id)
+            let image: UIImage?
+            if let facePersonID { image = await loader.faceImage(for: asset.id, personID: facePersonID) }
+            else { image = await loader.image(for: asset.id) }
             guard let self, !Task.isCancelled, self.currentKey == key, let image,
                   loader.visibilityPolicy.allows(id: asset.id)
             else { return }
