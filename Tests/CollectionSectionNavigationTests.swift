@@ -46,17 +46,25 @@ final class CollectionSectionNavigationTests: SimulatorHostedTestCase {
         }
     }
 
-    func testFeaturedPhotoExposesItsMediaLabelAndOpensTheViewer() async throws {
+    func testFeaturedPhotoExposesItsMediaLabelAndDismissesWhenArchived() async throws {
         let date = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-09-28T12:00:00Z"))
         let photo = AssetLite(id: UUID().uuidString, isVideo: false, ratio: 1,
             thumbhash: nil, createdAt: date, isFavorite: true)
+        defer { try? SwiftDataManager.shared.setAssetVisibility([photo.id], to: "timeline") }
         let window = try await host(NavigationStack {
             FeaturedPhotoCards(assets: [photo], width: 120) { _ in EmptyView() }
         })
 
         try await activateAccessibilityButton(named: PhotoAssetAccessibility.label(for: photo), in: window)
         try await waitUntil("The labeled Featured photo opens its actual viewer") {
-            self.navigation(in: window.rootViewController)?.viewControllers.count == 2
+            let navigation = self.navigation(in: window.rootViewController)
+            return navigation?.viewControllers.count == 2 && navigation?.transitionCoordinator == nil
+        }
+
+        try SwiftDataManager.shared.setAssetVisibility([photo.id], to: "archive")
+
+        try await waitUntil("The Featured viewer dismisses its last photo when it leaves the timeline") {
+            self.navigation(in: window.rootViewController)?.viewControllers.count == 1
         }
     }
 

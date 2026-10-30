@@ -11,7 +11,8 @@ struct FeaturedPhotoCards<Actions: View>: View {
     var body: some View {
         ForEach(assets) { asset in
             NavigationLink {
-                AssetDetailView(currentAsset: asset, assets: assets)
+                AssetDetailView(currentAsset: asset, assets: assets,
+                    visibilityPolicy: AssetVisibilityPolicy(scope: .timeline))
                     .navigationTransition(.zoom(sourceID: asset.id, in: namespace))
                     .toolbarVisibility(.hidden, for: .tabBar)
             } label: {
