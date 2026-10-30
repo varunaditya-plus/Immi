@@ -244,6 +244,7 @@
     "CFBundleName" : {
       "comment" : "Bundle name",
       "extractionState" : "extracted_with_value",
+      "shouldTranslate" : false,
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1209,6 +1210,246 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "搜尋"
+          }
+        }
+      }
+    },
+    "NSLocationWhenInUseUsageDescription" : {
+      "comment" : "Explains the optional Center on Me action. Browsing photo locations does not require device location access.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "يستخدم SelfPhotos موقعك فقط عندما تختار توسيط خريطة الصور حولك."
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos използва местоположението ви само когато изберете да центрирате картата със снимки около вас."
+          }
+        },
+        "bn" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "আপনি ছবির মানচিত্রটি আপনার অবস্থানকে কেন্দ্র করে দেখার বিকল্প বেছে নিলেই SelfPhotos আপনার অবস্থান ব্যবহার করে।"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos només utilitza la teva ubicació quan tries centrar el mapa de fotos al teu voltant."
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos používá vaši polohu jen tehdy, když zvolíte vycentrování mapy fotek kolem sebe."
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos bruger kun din lokalitet, når du vælger at centrere fotokortet omkring dig."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos verwendet deinen Standort nur, wenn du die Fotokarte auf deinen Standort zentrierst."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Το SelfPhotos χρησιμοποιεί την τοποθεσία σας μόνο όταν επιλέγετε να κεντράρετε τον χάρτη φωτογραφιών γύρω σας."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos uses your location only when you choose to center the photo map around you."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos solo usa tu ubicación cuando eliges centrar el mapa de fotos a tu alrededor."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos فقط وقتی از موقعیت مکانی شما استفاده می‌کند که بخواهید نقشهٔ عکس‌ها روی موقعیت شما متمرکز شود."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos käyttää sijaintiasi vain, kun valitset sijaintisi kuvakartan keskipisteeksi."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos utilise votre position uniquement lorsque vous choisissez de centrer la carte des photos autour de vous."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos משתמשת במיקום שלכם רק כשאתם בוחרים למרכז את מפת התמונות סביבכם."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos आपके स्थान का उपयोग केवल तब करता है जब आप फ़ोटो के नक़्शे को अपने स्थान के आसपास केंद्रित करने का विकल्प चुनते हैं।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos koristi vašu lokaciju samo kada odaberete centriranje karte fotografija oko sebe."
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A SelfPhotos csak akkor használja a helyzetét, ha azt választja, hogy a fotótérkép közepén az aktuális tartózkodási helye jelenjen meg."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos hanya menggunakan lokasi Anda saat Anda memilih untuk memusatkan peta foto di sekitar Anda."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos usa la tua posizione solo quando scegli di centrare la mappa delle foto intorno a te."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotosは、写真のマップを現在地の周辺に表示するよう選択した場合にのみ、位置情報を使用します。"
+          }
+        },
+        "kk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos фотосуреттер картасын орналасқан жеріңізге қатысты көрсетуді таңдағанда ғана геолокацияңызды пайдаланады."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos는 사진 지도를 사용자의 위치 중심으로 표시하도록 선택한 경우에만 사용자의 위치를 사용합니다."
+          }
+        },
+        "lt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos naudoja jūsų vietą tik tada, kai pasirenkate, kad nuotraukų žemėlapio centre būtų jūsų buvimo vieta."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos hanya menggunakan lokasi anda apabila anda memilih untuk memusatkan peta foto di sekitar anda."
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos bruker posisjonen din bare når du velger å sentrere bildekartet rundt deg."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos gebruikt je locatie alleen wanneer je de fotokaart rond je eigen locatie centreert."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos używa Twojej lokalizacji tylko wtedy, gdy wybierzesz wyśrodkowanie mapy zdjęć wokół siebie."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O SelfPhotos só utiliza a sua localização quando escolhe centrar o mapa de fotografias à sua volta."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos vă utilizează localizarea doar când alegeți să centrați harta pozelor în jurul dvs."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos использует вашу геопозицию только тогда, когда вы выбираете показ карты фотографий с центром в вашем местоположении."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos používa vašu polohu iba vtedy, keď vyberiete vycentrovanie mapy fotiek na svoju polohu."
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos uporablja vašo lokacijo samo, ko jo izberete za središče zemljevida fotografij."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos använder bara din plats när du väljer att centrera bildkartan runt dig."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos จะใช้ตำแหน่งที่ตั้งของคุณเฉพาะเมื่อคุณเลือกให้แผนที่รูปภาพแสดงโดยมีตำแหน่งของคุณเป็นจุดศูนย์กลาง"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos, konumunuzu yalnızca fotoğraf haritasını etrafınıza ortalamayı seçtiğinizde kullanır."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos використовує вашу геопозицію, лише коли ви вибираєте показ карти фотографій із центром у вашому місцеположенні."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos chỉ sử dụng vị trí của bạn khi bạn chọn căn giữa bản đồ ảnh quanh mình."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅当你选择以所在位置为中心显示照片地图时，SelfPhotos 才会使用你的位置。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SelfPhotos 只會在你選擇以目前位置為中心顯示照片地圖時使用你的位置。"
           }
         }
       }

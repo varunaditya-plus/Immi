@@ -11,7 +11,7 @@ final class LocalizationCoverageTests: XCTestCase {
 
     func testEveryCatalogEntryHasAllSupportedTranslationsAndValidFormatArguments() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-        for path in ["ImmichApp/Resources/Localizable.xcstrings", "ImmichWidgets/Localizable.xcstrings",
+        for path in ["ImmichApp/Resources/Localizable.xcstrings", "ImmichApp/Resources/InfoPlist.xcstrings", "ImmichWidgets/Localizable.xcstrings",
                      "SelfPhotosShareExtension/Localizable.xcstrings"] {
             let data = try Data(contentsOf: root.appendingPathComponent(path))
             let catalog = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -19,6 +19,10 @@ final class LocalizationCoverageTests: XCTestCase {
             XCTAssertFalse(entries.isEmpty)
             for (key, entry) in entries {
                 guard !key.isEmpty else { continue }
+                if entry["shouldTranslate"] as? Bool == false {
+                    XCTAssertFalse(key.hasSuffix("UsageDescription"), "Permission explanations must remain localized: \(key)")
+                    continue
+                }
                 let translations = try XCTUnwrap(entry["localizations"] as? [String: [String: Any]], "Missing translations: \(key)")
                 for language in languages {
                     let translation = try XCTUnwrap(translations[language], "\(path): \(language): \(key)")
@@ -53,6 +57,51 @@ final class LocalizationCoverageTests: XCTestCase {
         XCTAssertEqual(french.localizedString(forKey: "New Folder", value: nil, table: nil), "Nouveau dossier")
         let arabic = try localizedBundle(Bundle.main, language: "ar")
         XCTAssertNotEqual(arabic.localizedString(forKey: "Send Comment", value: nil, table: nil), "Send Comment")
+    }
+
+    func testPeopleGroupsAndMapControlsAreInEveryCompiledLocalization() throws {
+        let keys = ["Groups", "Group Options", "Group Name", "Create New Group", "Edit Name and People",
+            "Edit Name and Photos", "Name This Person", "Edit Key Photo", "Make Key Photo", "Faces",
+            "Merge", "Merge Photos", "Merge People", "Merge These People?", "Hidden People", "No Hidden People", "This is Not %@",
+            "Sort by Custom Order", "Sort by Name", "Other People", "Group Unavailable", "No Group Photos",
+            "Groups are saved on this device.", "The server did not provide people information for group photos.",
+            "Choose Map", "Explore", "Satellite", "Show Map", "Show Nearby Photos", "Hide Nearby Photos",
+            "No Photos with Location", "Photos and videos with location information appear here."]
+        for language in languages {
+            let bundle = try localizedBundle(Bundle.main, language: language)
+            for key in keys { assertCompiled(key, in: bundle) }
+        }
+        let french = try localizedBundle(Bundle.main, language: "fr")
+        XCTAssertEqual(french.localizedString(forKey: "Faces", value: nil, table: nil), "Visages")
+        XCTAssertEqual(french.localizedString(forKey: "Choose Map", value: nil, table: nil), "Choisir un plan")
+        let arabic = try localizedBundle(Bundle.main, language: "ar")
+        XCTAssertEqual(arabic.localizedString(forKey: "Faces", value: nil, table: nil), "الوجوه",
+            "The face view refers to people’s faces, not interface surfaces")
+        let persian = try localizedBundle(Bundle.main, language: "fa")
+        XCTAssertEqual(persian.localizedString(forKey: "Groups", value: nil, table: nil), "گروه‌ها")
+        let name = "Ada"
+        for language in ["fr", "ar", "fa"] {
+            let bundle = try localizedBundle(Bundle.main, language: language)
+            let correction = String(localized: "This is Not \(name)", bundle: bundle, locale: Locale(identifier: language))
+            XCTAssertTrue(correction.contains(name), correction)
+            XCTAssertFalse(correction.contains("%@"), correction)
+            XCTAssertNotEqual(correction, "This is Not Ada", correction)
+        }
+    }
+
+    func testOptionalPhotoMapLocationPermissionIsLocalizedInEveryCompiledBundle() throws {
+        let key = "NSLocationWhenInUseUsageDescription"
+        for language in languages {
+            let bundle = try localizedBundle(Bundle.main, language: language)
+            let message = bundle.localizedString(forKey: key, value: "MISSING-PERMISSION", table: "InfoPlist")
+            XCTAssertNotEqual(message, "MISSING-PERMISSION", "Missing \(language) location permission")
+            XCTAssertFalse(message.isEmpty)
+            XCTAssertTrue(message.contains("SelfPhotos"), message)
+        }
+        let french = try localizedBundle(Bundle.main, language: "fr")
+        let message = french.localizedString(forKey: key, value: nil, table: "InfoPlist")
+        XCTAssertTrue(message.contains("uniquement"), "Permission must describe the user-triggered location action")
+        XCTAssertFalse(message.contains("uses your location"))
     }
 
     func testRecentUserFacingErrorsAndPaginationAreInCompiledAppResources() throws {
