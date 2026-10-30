@@ -5,7 +5,7 @@ import XCTest
 @testable import ImmichApp
 
 @MainActor
-final class PinPromptFeedbackTests: XCTestCase {
+final class PinPromptFeedbackTests: SimulatorHostedTestCase {
     func testOnlyUnlockRejectionsBecomeIncorrectPINFeedback() async throws {
         MockURLProtocol.reset()
         defer { MockURLProtocol.reset() }
@@ -133,6 +133,46 @@ final class PinPromptFeedbackTests: XCTestCase {
         await first.value
         XCTAssertFalse(model.isWorking)
         XCTAssertEqual(model.pin, "")
+    }
+
+    func testActualContinueSubmitsFourDigitsAndSixDigitInputAutomaticallySubmitsOnce() async throws {
+        var attempts: [String] = []
+        var allowsSubmission = false
+        let prematureSubmission = expectation(description: "Four digits wait for Continue")
+        prematureSubmission.isInverted = true
+        let extraSubmission = expectation(description: "Successful six-digit entry does not submit twice")
+        extraSubmission.isInverted = true
+        let model = PinPromptModel { pin in
+            if !allowsSubmission { prematureSubmission.fulfill() }
+            attempts.append(pin)
+            if attempts.count > 2 { extraSubmission.fulfill() }
+            if pin == "0000" { throw PinUnlockError.incorrectPIN }
+        }
+        let window = try await host(PinPromptSheet(needsSetup: false, model: model))
+        model.updatePIN("0000")
+
+        await fulfillment(of: [prematureSubmission], timeout: 0.2)
+        XCTAssertTrue(attempts.isEmpty)
+        XCTAssertFalse(model.isWorking)
+        allowsSubmission = true
+        try await activateAccessibilityButton(named: "Continue", in: window)
+
+        try await waitUntil("The actual Continue action reports a rejected four-digit PIN") {
+            attempts == ["0000"] && model.errorMessage == self.incorrectPINMessage && !model.isWorking
+        }
+        XCTAssertEqual(model.pin, "")
+        try await waitUntil("The rejection from Continue remains visible in the prompt") {
+            (try? self.visibleText(in: window).contains(self.incorrectPINMessage)) == true
+        }
+
+        model.updatePIN("123456")
+
+        try await waitUntil("Six digits submit through the prompt's input observer") {
+            attempts == ["0000", "123456"] && model.pin.isEmpty && !model.isWorking
+        }
+        await fulfillment(of: [extraSubmission], timeout: 0.2)
+        XCTAssertEqual(attempts, ["0000", "123456"])
+        XCTAssertNil(model.errorMessage)
     }
 
     func testTheActualPromptRendersPersistentFailureText() async throws {
