@@ -168,6 +168,39 @@ final class AssetInfoLocationMapTests: XCTestCase {
         }
     }
 
+    func testRestrictedPhotosKeepTheirLocationPreviewWithoutAnEmptyLibraryMapLink() async throws {
+        let publicPhoto = photo(UUID().uuidString, at: barcelona, city: "Synthetic Place")
+        let input = LocationPanelInput(detail: publicPhoto)
+        try mount(NavigationStack { LocationPanelFixture(detail: { input.detail }, expanded: { true }) })
+        try await waitUntil("A public photo exposes its actual location navigation link") {
+            self.locationElements(named: "Synthetic Place").contains { $0.accessibilityTraits.contains(.button) }
+        }
+        let map = try await mountedMap(at: barcelona)
+        var archived = publicPhoto
+        archived.isArchived = true
+        archived.visibility = "archive"
+        var locked = publicPhoto
+        locked.visibility = "locked"
+        let trashed = makeTestAsset(id: publicPhoto.id, isTrashed: true, exifInfo: publicPhoto.exifInfo)
+
+        for restricted in [archived, locked, trashed] {
+            input.detail = restricted
+
+            try await waitUntil("An excluded photo retains readable location text without a map navigation action") {
+                let elements = self.locationElements(named: "Synthetic Place")
+                return elements.contains { !$0.accessibilityTraits.contains(.button) }
+                    && !elements.contains { $0.accessibilityTraits.contains(.button) }
+            }
+            XCTAssertTrue(findMap(in: window) === map, "Privacy restrictions must retain the existing location preview")
+            XCTAssertTrue(hasAnnotation(map, at: barcelona))
+
+            input.detail = publicPhoto
+            try await waitUntil("Restoring a timeline photo restores its real map link") {
+                self.locationElements(named: "Synthetic Place").contains { $0.accessibilityTraits.contains(.button) }
+            }
+        }
+    }
+
     private func mount(detail: @escaping () -> AssetResponseDTO?, expanded: @escaping () -> Bool = { true }) throws {
         try mount(LocationPanelFixture(detail: detail, expanded: expanded))
     }
@@ -221,6 +254,33 @@ final class AssetInfoLocationMapTests: XCTestCase {
         if let field = view as? UITextField { return [field.text ?? ""] }
         if let field = view as? UITextView { return [field.text ?? ""] }
         return view.subviews.flatMap { textInputs(in: $0) }
+    }
+
+    private func locationElements(named title: String) -> [NSObject] {
+        var visited = Set<ObjectIdentifier>()
+        func collect(_ object: NSObject, depth: Int) -> [NSObject] {
+            guard depth < 40, visited.insert(ObjectIdentifier(object)).inserted else { return [] }
+            if let view = object as? UIView, view.isHidden || view.alpha <= 0 { return [] }
+            var result: [NSObject] = []
+            if object.accessibilityLabel?.contains(title) == true { result.append(object) }
+            if let view = object as? UIView {
+                for child in view.subviews { result += collect(child, depth: depth + 1) }
+            }
+            if let elements = object.accessibilityElements {
+                for case let child as NSObject in elements { result += collect(child, depth: depth + 1) }
+            }
+            let count = object.accessibilityElementCount()
+            if (1...500).contains(count) {
+                for index in 0..<count {
+                    if let child = object.accessibilityElement(at: index) as? NSObject {
+                        result += collect(child, depth: depth + 1)
+                    }
+                }
+            }
+            return result
+        }
+        guard let window else { return [] }
+        return collect(window, depth: 0)
     }
 
     private func waitUntil(_ message: String, _ condition: () -> Bool,

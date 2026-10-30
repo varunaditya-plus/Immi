@@ -2,6 +2,10 @@ import Foundation
 
 @MainActor
 enum PhotoMapNavigation {
+    static func allowsNavigation(to asset: AssetResponseDTO, dataManager: SwiftDataManager? = nil) -> Bool {
+        asset.isTimelineVisible && AssetVisibilityPolicy(scope: .timeline, dataManager: dataManager).allows(id: asset.id)
+    }
+
     static func libraryIDs(for assets: [AssetLite], options: LibraryBrowseOptions) -> Set<String>? {
         guard !options.filters.isEmpty || !options.showsScreenshots else { return nil }
         return ids(for: assets)

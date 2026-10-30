@@ -373,18 +373,22 @@ struct AssetInfoPanel: View {
                 Divider()
 
                 HStack(spacing: 4) {
-                    NavigationLink {
-                        PhotoMapView(assetIDs: [detail.id], initialBounds: PhotoMapBounds(
-                            centerLatitude: coordinate.latitude, centerLongitude: coordinate.longitude,
-                            latitudeDelta: 0.04, longitudeDelta: 0.04))
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(placeName).font(.subheadline)
-                            Image(systemName: "chevron.forward").font(.caption2.weight(.semibold))
+                    if PhotoMapNavigation.allowsNavigation(to: detail) {
+                        NavigationLink {
+                            PhotoMapView(assetIDs: [detail.id], initialBounds: PhotoMapBounds(
+                                centerLatitude: coordinate.latitude, centerLongitude: coordinate.longitude,
+                                latitudeDelta: 0.04, longitudeDelta: 0.04))
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(placeName).font(.subheadline)
+                                Image(systemName: "chevron.forward").font(.caption2.weight(.semibold))
+                            }
+                            .foregroundStyle(.tint)
                         }
-                        .foregroundStyle(.tint)
+                        .buttonStyle(.plain)
+                    } else {
+                        Text(placeName).font(.subheadline)
                     }
-                    .buttonStyle(.plain)
                     Spacer()
                     Button("Adjust") { onAdjustLocation?() }
                         .font(.subheadline)

@@ -892,7 +892,9 @@ struct PhotoCollectionScreen<Options: View>: View {
                         Toggle("Aspect Ratio Grid", isOn: $aspectRatioGrid)
                             .disabled(showsFaces)
                     }
-                    if visibilityScope != .locked && onRestoreSelection == nil && onUnlockSelection == nil {
+                    let mapPolicy = AssetVisibilityPolicy(scope: .timeline)
+                    if visibilityScope != .locked && onRestoreSelection == nil && onUnlockSelection == nil,
+                       visibleAssets.contains(where: { mapPolicy.allows(id: $0.id) }) {
                         Button("Show Map", systemImage: "map") { showsMap = true }
                     }
                 }
