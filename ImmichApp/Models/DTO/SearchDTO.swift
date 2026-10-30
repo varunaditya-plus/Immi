@@ -1,4 +1,4 @@
-struct SearchRequestDTO: Encodable {
+struct SearchRequestDTO: Encodable, Equatable {
     var query: String? = nil
     var page: Int? = 1
     /// Filter album resmi pada `POST /search/metadata`.
@@ -6,12 +6,18 @@ struct SearchRequestDTO: Encodable {
     /// Urutan aset menurut waktu pengambilan (`asc` atau `desc`).
     var order: String? = nil
     var type: String? = nil
+    var isMotion: Bool? = nil
     var isFavorite: Bool? = nil
     var isNotInAlbum: Bool? = nil
     var takenAfter: String? = nil
     var takenBefore: String? = nil
     var city: String? = nil
+    var state: String? = nil
+    var country: String? = nil
     var personIds: [String]? = nil
+    var description: String? = nil
+    var originalFileName: String? = nil
+    var ocr: String? = nil
     var withPeople: Bool? = nil
     var size: Int? = nil
     /// Explicitly preserve timeline-only browsing on both Immich v2 and v3.
@@ -41,6 +47,15 @@ struct SearchRequestDTO: Encodable {
     /// Exif juga yang mengisi panel info (kamera, lensa, lokasi), jadi ini bukan
     /// tambahan demi satu angka saja.
     var withExif: Bool? = true
+    // Calendar ranges are half-open locally; the legacy server's takenBefore is inclusive.
+    var exclusiveTakenBefore: String? = nil
+
+    private enum CodingKeys: String, CodingKey {
+        case query, page, albumIds, order, type, isMotion, isFavorite, isNotInAlbum
+        case takenAfter, takenBefore, city, state, country, personIds
+        case description, originalFileName, ocr, withPeople, size, visibility
+        case withDeleted, trashedAfter, withExif
+    }
 }
 
 struct SearchResponseDTO: Decodable {
@@ -50,4 +65,5 @@ struct SearchResponseDTO: Decodable {
         let nextPage: String?
     }
     let assets: AssetsPage
+    var incompleteSources: [String]? = nil
 }

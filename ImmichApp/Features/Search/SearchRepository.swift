@@ -11,6 +11,19 @@ class SearchRepository {
         self.recordsVisibility = recordsVisibility
     }
 
+    @MainActor
+    func search(_ request: SearchRequestDTO, options: PhotoSearchOptions = .init()) async throws -> SearchResponseDTO {
+        if request.query?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+            return try await metadataSearch(request)
+        }
+        return try await smartSearch(request)
+    }
+
+    @MainActor
+    func exactResultCount(for request: SearchRequestDTO, options: PhotoSearchOptions, excluding ids: Set<String>) -> Int? {
+        nil
+    }
+
     /// Menerima permintaan UTUH, bukan sekadar kata kuncinya.
     ///
     /// Penyaring — orang, kota, tanggal, jenis media — dikirim di badan yang sama
