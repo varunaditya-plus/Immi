@@ -292,6 +292,7 @@ final class PhotoGridController: UIViewController {
     ///
     /// Sebagai jangkar, ia bertahan sampai penggunanya sendiri yang menggulir.
     private var isAnchoredToNewest = true
+    private var newestPinnedGeometry: (size: CGSize, inset: UIEdgeInsets, contentSize: CGSize)?
     /// Snapshot pertama dapat terpasang sebelum collection view mempunyai tinggi
     /// final. Dalam keadaan itu offset masih nol dan bagian lama sempat terlihat
     /// satu frame sebelum `viewDidLayoutSubviews` memindahkannya ke bawah.
@@ -315,6 +316,7 @@ final class PhotoGridController: UIViewController {
     /// Isi berikutnya beserta model turunannya — dipasang sekaligus, tidak
     /// sepotong-sepotong.
     private struct PendingContent {
+        let configuration: PhotoGridConfiguration
         let sections: [TimelineSection]
         let assetsByID: [String: AssetLite]
         let sectionTitles: [SectionID: String]
@@ -322,6 +324,9 @@ final class PhotoGridController: UIViewController {
         let snapshot: NSDiffableDataSourceSnapshot<SectionID, String>
     }
     private var pending: PendingContent?
+    private var allowsAddAction: Bool {
+        (pending?.configuration ?? configuration).showsAddTile
+    }
     /// Jari sedang menggulir, atau lemparannya masih meluncur.
     private var isScrolling = false
     /// Animasi "kembali ke foto terbaru" sedang berjalan.
@@ -348,10 +353,6 @@ final class PhotoGridController: UIViewController {
     /// mendaratnya meredam — diukur dari rekaman Photos: dua frame pertama pelan,
     /// tengahnya beberapa layar per frame, tiga frame terakhir melandai.
     private static let returnCurve = UnitBezier(0.3, 0, 0.22, 1)
-    /// Konfigurasi yang sudah tergambar, untuk tahu kapan layout perlu disusun
-    /// ulang.
-    private var appliedConfiguration: PhotoGridConfiguration?
-
     var onOpen: ((String) -> Void)?
     var onAddTapped: (() -> Void)?
     var onVisibleSectionChanged: ((TimelineSection) -> Void)?
@@ -514,7 +515,6 @@ final class PhotoGridController: UIViewController {
     /// The layout owns its configuration. A weak controller reference only
     /// identifies the add-only section, which has no month header.
     private func makeLayout() -> UICollectionViewCompositionalLayout {
-        appliedConfiguration = configuration
         let config = configuration
 
         let layoutConfiguration = UICollectionViewCompositionalLayoutConfiguration()
@@ -644,12 +644,8 @@ final class PhotoGridController: UIViewController {
             hostCell.host(newHero ?? AnyView(EmptyView()))
         }
 
-        let configurationChanged = configuration != newConfiguration
-        configuration = newConfiguration
-        if isViewLoaded, appliedConfiguration != newConfiguration {
-            collectionView.setCollectionViewLayout(makeLayout(), animated: false)
-            applyContentInsets()
-        }
+        let configurationChanged = (pending?.configuration ?? configuration) != newConfiguration
+        if !isViewLoaded { configuration = newConfiguration }
 
         // Isi yang sama tidak perlu diterapkan ulang: snapshot diffable pun tetap
         // membandingkan seluruh identitas, dan pada puluhan ribu item itu bukan
@@ -674,14 +670,14 @@ final class PhotoGridController: UIViewController {
 
         // Kedua syaratnya harus sejalan dengan `makeLayout`, yang memberi tinggi
         // sampul hanya pada section pertama dan hanya kalau tingginya > 0.
-        if newHero != nil, configuration.heroHeight > 0 {
+        if newHero != nil, newConfiguration.heroHeight > 0 {
             snapshot.appendSections([.hero])
             snapshot.appendItems([heroItemID], toSection: .hero)
         }
 
         var lastSectionID: SectionID?
 
-        if configuration.showsSectionHeaders {
+        if newConfiguration.showsSectionHeaders {
             for section in newSections {
                 let id = SectionID.month(section.id)
                 sectionTitles[id] = section.title
@@ -696,9 +692,9 @@ final class PhotoGridController: UIViewController {
 
             // Petak kosong perata, kalau diminta: sisanya ditaruh di depan supaya
             // baris TERAKHIR selalu genap.
-            let columns = max(configuration.columns, 1)
+            let columns = max(newConfiguration.columns, 1)
             let remainder = assetCount % columns
-            flatPadCount = configuration.padsFirstRow && remainder != 0
+            flatPadCount = newConfiguration.padsFirstRow && remainder != 0
                 ? columns - remainder
                 : 0
 
@@ -717,13 +713,14 @@ final class PhotoGridController: UIViewController {
             lastSectionID = id
         }
 
-        if configuration.showsAddTile {
+        if newConfiguration.showsAddTile {
             let addSection = lastSectionID ?? .add
             if lastSectionID == nil { snapshot.appendSections([addSection]) }
             snapshot.appendItems([addItemID], toSection: addSection)
         }
 
         pending = PendingContent(
+            configuration: newConfiguration,
             sections: newSections,
             assetsByID: assetsByID,
             sectionTitles: sectionTitles,
@@ -754,13 +751,13 @@ final class PhotoGridController: UIViewController {
         // Terbang ke foto terbaru termasuk di dalamnya. `apply` untuk puluhan
         // ribu item adalah kerja main thread yang panjang; menjalankannya di
         // tengah animasi menghasilkan gerakan yang macet lalu lanjut lagi.
-        guard !isScrolling else { return }
+        guard !isScrolling, !collectionView.isDragging, !collectionView.isDecelerating,
+              applyingSnapshotRevision == nil
+        else { return }
 
         self.pending = nil
-        sections = pending.sections
-        assetsByID = pending.assetsByID
-        sectionTitles = pending.sectionTitles
-        flatPadCount = pending.flatPadCount
+        let configurationChanged = configuration != pending.configuration
+        let scrolledAwayFromNewest = releaseNewestAnchorIfScrolledAway()
 
         // Posisi yang sedang dilihat, DICATAT SEBELUM snapshot dipasang.
         //
@@ -768,13 +765,24 @@ final class PhotoGridController: UIViewController {
         // ada lagi cara mengetahui pengguna tadi sedang di mana. Tanpa ini,
         // setiap sync yang datang saat pengguna sedang menyusuri foto lama
         // melemparkannya kembali ke awal.
-        let animates = shouldAnimate(pending.snapshot)
+        let animates = !configurationChanged && !scrolledAwayFromNewest && shouldAnimate(pending.snapshot)
 
         // Penambatan foto tertentu hanya untuk pemasangan tanpa animasi.
         // Pembaruan beranimasi menjaga posisi lama, tetapi kalau layar memang
         // masih berjangkar ke newest, posisi lama itu justru harus digeser ke
         // dasar baru setelah aset auto-backup disisipkan.
         let anchor = animates ? nil : currentAnchor()
+
+        // Layout callbacks must queue updates until this snapshot completes.
+        contentRevision &+= 1
+        let revision = contentRevision
+        applyingSnapshotRevision = revision
+
+        sections = pending.sections
+        assetsByID = pending.assetsByID
+        sectionTitles = pending.sectionTitles
+        flatPadCount = pending.flatPadCount
+        configuration = pending.configuration
 
         // SESUDAH jangkarnya dicatat, sebelum snapshotnya dipasang.
         //
@@ -785,27 +793,32 @@ final class PhotoGridController: UIViewController {
         // — jangkarnya jadi menunjuk tempat yang salah, dan setiap paginasi
         // terasa menyentak.
         refreshJustifiedLayoutIfNeeded()
+        if configurationChanged {
+            collectionView.setCollectionViewLayout(makeLayout(), animated: false)
+            applyContentInsets()
+        }
 
         var snapshot = pending.snapshot
         reconfigureChangedItems(in: &snapshot)
 
-        contentRevision &+= 1
-        let revision = contentRevision
-        applyingSnapshotRevision = revision
         dataSource.apply(snapshot, animatingDifferences: animates) { [weak self] in
             guard let self else { return }
             guard self.contentRevision == revision else { return }
-            self.applyingSnapshotRevision = nil
             self.refreshVisibleHeaders()
-            if let anchor {
+            let canRestore = !self.isScrolling && !self.collectionView.isDragging
+                && !self.collectionView.isDecelerating
+            if canRestore, let anchor {
                 self.restorePosition(anchor)
-            } else if self.isAnchoredToNewest {
+            } else if canRestore, self.isAnchoredToNewest {
                 // Jalur inilah yang hilang: diff kecil dari auto-backup memakai
                 // animasi, `anchor` nil, lalu completion lama langsung pulang.
                 // Hasilnya baris baru ada di bawah tetapi belum terlihat sampai
                 // pengguna menggeser grid sendiri.
                 _ = self.scrollToNewestIfNeeded()
             }
+            self.applyingSnapshotRevision = nil
+            self.scheduleInitialNewestRevealIfNeeded()
+            self.flushPendingSnapshot()
         }
     }
 
@@ -943,6 +956,7 @@ final class PhotoGridController: UIViewController {
         let top = collectionView.contentOffset.y
         let candidates: [(id: String, offsetFromTop: CGFloat)] = visible.compactMap { path in
             guard let id = dataSource.itemIdentifier(for: path),
+                  assetsByID[id] != nil,
                   let attributes = collectionView.layoutAttributesForItem(at: path)
             else { return nil }
             return (id, attributes.frame.minY - top)
@@ -987,6 +1001,24 @@ final class PhotoGridController: UIViewController {
 
     // MARK: - Posisi
 
+    @discardableResult
+    private func releaseNewestAnchorIfScrolledAway() -> Bool {
+        guard configuration.startsAtNewest, isAnchoredToNewest,
+              !isWaitingForInitialNewestPosition, !isReturningToNewest,
+              applyingSnapshotRevision == nil, !assetsByID.isEmpty,
+              let geometry = newestPinnedGeometry,
+              geometry.size == collectionView.bounds.size,
+              geometry.inset == collectionView.adjustedContentInset,
+              geometry.contentSize == collectionView.contentSize,
+              abs(collectionView.contentOffset.y - maxContentOffsetY()) > 1.5
+        else { return false }
+
+        // Non-drag paging changes only the offset. Layout and snapshot changes
+        // must retain newest intent until their new geometry has been pinned.
+        isAnchoredToNewest = false
+        return true
+    }
+
     /// Foto terbaru ada di paling bawah, jadi di situlah tampilan dibuka.
     ///
     /// `scrollToItem` bekerja dari tata letak yang sudah pasti — tidak seperti
@@ -1009,6 +1041,7 @@ final class PhotoGridController: UIViewController {
               isViewLoaded, collectionView.bounds.height > 0,
               lastItemIndexPath() != nil
         else { return false }
+        guard !releaseNewestAnchorIfScrolledAway() else { return false }
 
         pinToNewestOffset()
         scheduleInitialNewestRevealIfNeeded()
@@ -1082,6 +1115,8 @@ final class PhotoGridController: UIViewController {
     /// terakhir memang terpilih tetapi sebagian barisnya masih tenggelam.
     private func pinToNewestOffset() {
         collectionView.layoutIfNeeded()
+        newestPinnedGeometry = (collectionView.bounds.size, collectionView.adjustedContentInset,
+            collectionView.contentSize)
         collectionView.setContentOffset(
             CGPoint(x: 0, y: maxContentOffsetY()),
             animated: false)
@@ -1482,7 +1517,7 @@ extension PhotoGridController: UICollectionViewDelegate {
     ) -> Bool {
         guard let id = dataSource.itemIdentifier(for: indexPath) else { return false }
         if id == addItemID {
-            return configuration.showsAddTile && !collectionView.isEditing
+            return allowsAddAction && !collectionView.isEditing
         }
         return id != heroItemID && !id.hasPrefix(padItemPrefix)
     }
@@ -1495,7 +1530,7 @@ extension PhotoGridController: UICollectionViewDelegate {
 
         if id == addItemID {
             collectionView.deselectItem(at: indexPath, animated: false)
-            guard configuration.showsAddTile, !collectionView.isEditing else { return }
+            guard allowsAddAction, !collectionView.isEditing else { return }
             onAddTapped?()
             return
         }
@@ -1586,6 +1621,7 @@ extension PhotoGridController: UICollectionViewDelegate {
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        releaseNewestAnchorIfScrolledAway()
         updateTitleDock()
 
         guard onVisibleSectionChanged != nil,
