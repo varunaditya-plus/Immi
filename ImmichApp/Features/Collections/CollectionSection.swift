@@ -17,6 +17,7 @@ struct CollectionSection<Destination: View, Content: View>: View {
     /// Tinggi isi saat terbuka. Harus diberikan eksplisit — lihat catatan di
     /// `contentArea`.
     let contentHeight: CGFloat
+    var emptyMessage: LocalizedStringKey? = nil
     @ViewBuilder let destination: () -> Destination
     @ViewBuilder let content: () -> Content
 
@@ -43,6 +44,8 @@ struct CollectionSection<Destination: View, Content: View>: View {
     /// di tengah animasi tutupan kedua — dan kartunya lenyap seketika, persis
     /// yang mau dicegah penahan ini.
     @State private var collapseGeneration = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.layoutDirection) private var layoutDirection
 
     /// Isi hanya dibangun untuk baris yang terbuka.
     ///
@@ -62,7 +65,13 @@ struct CollectionSection<Destination: View, Content: View>: View {
             header
             // Section kosong tetap menjadi pintu ke layar lengkapnya, tetapi
             // tidak menawarkan aksi lipat untuk isi yang memang tidak ada.
-            if !isEmpty {
+            if isEmpty, isExpanded, let emptyMessage {
+                Text(emptyMessage)
+                    .foregroundStyle(.secondary)
+                    .font(.subheadline)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 12)
+            } else if !isEmpty {
                 contentArea
             }
         }
@@ -130,6 +139,11 @@ struct CollectionSection<Destination: View, Content: View>: View {
         .onChange(of: isExpanded) { _, expanded in
             // Menutup: klip dipasang seketika, karena isinya langsung lebih
             // tinggi dari framenya yang menyusut.
+            if reduceMotion {
+                clipsContent = !expanded
+                buildsContentOverride = nil
+                return
+            }
             guard expanded else {
                 clipsContent = true
                 // Isinya DITAHAN dulu. Melepasnya sekarang berarti kartunya
@@ -169,12 +183,12 @@ struct CollectionSection<Destination: View, Content: View>: View {
             } label: {
                 HStack(spacing: 4) {
                     Text(title)
-                        .font(.title2.bold())
+                        .font(.title2.bold()).lineLimit(1).minimumScaleFactor(0.5)
                     // Hanya tampil saat barisnya terbuka — sewaktu tertutup
                     // tidak ada isi yang bisa "dilihat selengkapnya", jadi
                     // panah itu cuma mengundang salah tekan.
-                    if !isEmpty && isExpanded {
-                        Image(systemName: "chevron.right")
+                    if !isEmpty {
+                        Image(systemName: "chevron.forward")
                             .font(.subheadline.weight(.bold))
                             .foregroundStyle(.secondary)
                     }
@@ -185,7 +199,7 @@ struct CollectionSection<Destination: View, Content: View>: View {
                     Spacer(minLength: 8)
 
                     if isEmpty {
-                        Image(systemName: "chevron.right")
+                        Image(systemName: "chevron.forward")
                             .font(.footnote.weight(.bold))
                             .foregroundStyle(.secondary)
                     }
@@ -198,19 +212,22 @@ struct CollectionSection<Destination: View, Content: View>: View {
                 Button {
                     // `.smooth` meredam sisa gerakan di ujung animasi, jadi baris
                     // di bawahnya tidak berhenti mendadak seperti pada easeInOut.
-                    withAnimation(.smooth(duration: collectionSectionCollapseDuration)) {
+                    withAnimation(reduceMotion ? nil : .smooth(duration: collectionSectionCollapseDuration)) {
                         isExpanded.toggle()
                     }
                 } label: {
                     Image(systemName: "chevron.down")
-                        .font(.footnote.weight(.bold))
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(.blue)
                         // Ikon yang sama diputar, bukan diganti: perputarannya bisa
                         // dianimasikan, sedangkan pergantian simbol akan berkedip.
-                        .rotationEffect(.degrees(isExpanded ? 0 : -90))
+                        .rotationEffect(.degrees(isExpanded ? 0 : (layoutDirection == .rightToLeft ? 90 : -90)))
                         .frame(width: 28, height: 28)
                         .background(.fill.tertiary, in: .circle)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(isExpanded ? Text("Collapse \(Text(title))") : Text("Expand \(Text(title))"))
+                .accessibilityValue(isExpanded ? Text("Expanded") : Text("Collapsed"))
             }
         }
         .padding(.horizontal, 20)
@@ -225,6 +242,7 @@ struct MemoryCard: View {
     /// kolomnya ditentukan layar. Angka tetap 180 untuk baris mendatar di
     /// Library, yang memang tidak punya lebar untuk diikuti.
     var width: CGFloat? = 180
+    var height: CGFloat = 240
     let onOpen: () -> Void
 
     var body: some View {
@@ -233,8 +251,8 @@ struct MemoryCard: View {
                 cover
                 caption
             }
-            .frame(width: width, height: 240)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .frame(width: width, height: height)
+            .clipShape(RoundedRectangle(cornerRadius: 28))
         }
         .buttonStyle(.plain)
     }
@@ -261,7 +279,7 @@ struct MemoryCard: View {
                         thumbhash: asset.thumbhash,
                         pixelSize: 800)
                 }
-                .frame(width: width, height: 240)
+                .frame(width: width, height: height)
                 .clipped()
         } else {
             Rectangle().fill(.fill.tertiary)
@@ -271,10 +289,11 @@ struct MemoryCard: View {
     private var caption: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(story.title)
-                .font(.headline)
+                .font(.headline).lineLimit(2).minimumScaleFactor(0.65)
             Text(story.subtitle)
-                .font(.caption)
+                .font(.caption).lineLimit(1).minimumScaleFactor(0.65)
         }
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .foregroundStyle(.white)
         .shadow(radius: 3)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -290,24 +309,27 @@ struct MemoryCard: View {
 
 struct AlbumCard: View {
     let album: AlbumResponseDTO
+    var width: CGFloat = 150
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            cover
-            Text(album.albumName)
-                .font(.subheadline.weight(.medium))
-                .lineLimit(1)
-            Text("^[\(album.assetCount) item](inflect: true)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .frame(width: 150, alignment: .leading)
-    }
-
-    private var cover: some View {
-        AlbumCoverImage(album: album)
-            .frame(width: 150, height: 150)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+        Color.clear
+            .overlay { AlbumCoverImage(album: album) }
+            .overlay(alignment: .bottomLeading) {
+                Text(album.albumName)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.65), radius: 2, y: 1)
+                    .lineLimit(2).minimumScaleFactor(0.65)
+                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background(LinearGradient(colors: [.clear, .black.opacity(0.6)], startPoint: .top, endPoint: .bottom))
+            }
+            .frame(width: width, height: width)
+            .clipShape(RoundedRectangle(cornerRadius: 18))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(album.albumName))
+            .accessibilityValue(Text("^[\(album.assetCount) item](inflect: true)"))
     }
 }
 

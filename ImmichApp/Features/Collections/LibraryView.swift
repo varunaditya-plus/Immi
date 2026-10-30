@@ -9,16 +9,19 @@ struct LibraryView: View {
     var isActive = true
 
     @Environment(SessionManager.self) private var session
+    @Environment(\.layoutDirection) private var layoutDirection
     @State private var vm: LibraryViewModel?
-    /// Baris yang sedang terbuka. Pada pemakaian pertama semuanya tertutup;
-    /// sesudah itu mengikuti pilihan terakhir pengguna.
-    @State private var expanded: Set<Row>
+    @State private var preferences = CollectionsPreferences()
+    @State private var preferencesStore: CollectionsPreferencesStore?
+    @State private var modelGeneration: UUID?
+    @State private var showReorder = false
+    @State private var showPinnedEditor = false
+    @State private var contentWidth: CGFloat = 390
     @State private var showSettings = false
     @State private var showBackup = false
     @State private var backupNotifier = BackupNotifier.shared
     @State private var editTarget: AlbumResponseDTO?
     @State private var addUserTarget: AlbumResponseDTO?
-    @State private var deleteTarget: AlbumResponseDTO?
     @State private var sharedLink: SharedLinkPresentation?
     @State private var albumPickerAsset: AssetLite?
     @State private var assetToDelete: AssetLite?
@@ -31,21 +34,7 @@ struct LibraryView: View {
     @State private var isRootVisible = false
     /// Kenangan yang sedang dibuka sebagai story; nil berarti tertutup.
     @State private var openedStoryID: String?
-    /// Namespace zoom transition untuk kartu album.
-    ///
-    /// Dideklarasikan di sini, bukan di `AlbumCard`: sumber dan tujuan transisi
-    /// harus berbagi namespace yang SAMA, sedangkan tiap kartu punya
-    /// `@Namespace`-nya sendiri kalau dideklarasikan di dalamnya.
-    @Namespace private var albumNamespace
-    @Namespace private var assetNamespace
     @Namespace private var personNamespace
-
-    enum Row: String, CaseIterable, Hashable {
-        // `utilities` sudah dihapus. Nilai lama yang masih tersimpan di
-        // UserDefaults tidak masalah: `Row(rawValue:)` mengembalikan nil dan
-        // `compactMap` membuangnya.
-        case memories, albums, favorites, people
-    }
 
     private enum ExternalRoute: Hashable {
         case favorites
@@ -53,29 +42,10 @@ struct LibraryView: View {
         case album(String)
     }
 
-    private static let expandedKey = "library.expandedRows"
-
-    /// Dibaca LANGSUNG di init, bukan lewat `onAppear`.
-    ///
-    /// Menyetelnya setelah view muncul berarti barisnya sempat tampil terbuka
-    /// lalu menutup sendiri — kelihatan seperti animasi lipat yang tidak diminta
-    /// setiap kali tab ini dibuka.
-    init(isActive: Bool = true) {
+    init(isActive: Bool = true, viewModel: LibraryViewModel? = nil) {
         self.isActive = isActive
-        // Nil berarti belum pernah disimpan (semua tertutup); string kosong
-        // berarti pengguna memang menutup semuanya. Keduanya harus dibedakan.
-        guard let stored = UserDefaults.standard.string(forKey: Self.expandedKey) else {
-            _expanded = State(initialValue: [])
-            return
-        }
-        var rows = Set(stored.split(separator: ",").compactMap { Row(rawValue: String($0)) })
-        // On This Day SELALU terbuka saat aplikasi dibuka.
-        //
-        // Isinya berganti tiap hari dan cuma ada hari ini; membiarkannya tertutup
-        // karena kemarin pernah dilipat berarti kenangan hari ini tidak pernah
-        // terlihat. Melipatnya tetap boleh — hanya tidak diingat.
-        rows.insert(.memories)
-        _expanded = State(initialValue: rows)
+        _vm = State(initialValue: viewModel)
+        _modelGeneration = State(initialValue: viewModel == nil ? nil : LocalSnapshot.generation)
     }
 
     var body: some View {
@@ -94,8 +64,18 @@ struct LibraryView: View {
                 // item toolbar tidak menyusut atau pindah ke tengah saat
                 // di-scroll — sama seperti di Photos.
                 .toolbarBackground(.hidden, for: .navigationBar)
+                .navigationBarTitleDisplayMode(.inline)
                 .toolbar { libraryToolbar }
                 .sheet(isPresented: $showSettings) { settingsSheet }
+                .sheet(isPresented: $showReorder) {
+                    CollectionsReorderView(preferences: $preferences)
+                }
+                .sheet(isPresented: $showPinnedEditor) {
+                    PinnedCollectionsEditor(preferences: $preferences, albums: vm?.albums ?? [])
+                }
+                .onChange(of: preferences) { _, value in preferencesStore?.save(value) }
+                .onChange(of: vm?.hasLoadedAlbums) { _, _ in reconcilePinnedAlbums() }
+                .onChange(of: vm?.albums.map(\.id)) { _, _ in reconcilePinnedAlbums() }
                 .onChange(of: showSettings) { _, isPresented in
                     if isPresented {
                         backupSetupJourney.advanceToBackupRow()
@@ -130,10 +110,14 @@ struct LibraryView: View {
                     else { return }
                     openExternalDestination(destination)
                 }
+                .onChange(of: LocalPhotoLibrary.shared.revision) { _, _ in vm?.refreshRecentDays() }
                 .onChange(of: SwiftDataManager.shared.assetMutationRevision) { _, _ in
-                    Task { await vm?.refreshFavorites() }
+                    Task {
+                        vm?.refreshRecentDays()
+                        await vm?.refreshFavorites()
+                    }
                 }
-                .task {
+                .task(id: session.accountGeneration) {
                     if backupNotifier.shouldOpenBackup { openBackupScreen() }
                     await start()
                     if isActive, let destination = navigation.pendingDestination {
@@ -242,75 +226,38 @@ struct LibraryView: View {
     /// hilang isinya.
     private var hasLoaded: Bool { vm?.hasLoaded ?? false }
 
-    /// Baris mana saja yang sudah punya isi — pemicu animasi lipat otomatis.
-    ///
-    /// Satu angka, bukan empat pengamatan terpisah: `.animation(_:value:)` hanya
-    /// menerima satu nilai, dan yang penting cuma "ada yang berubah", bukan yang
-    /// mana. Selama satu tik semuanya datang bersamaan (view model memasang
-    /// keempatnya sekaligus), jadi seluruh baris terbuka dalam satu gerakan.
-    private var contentReadiness: Int {
-        var flags = 0
-        if !(vm?.memories.isEmpty ?? true) { flags |= 1 }
-        if !(vm?.albums.isEmpty ?? true) { flags |= 2 }
-        if !(vm?.favorites.isEmpty ?? true) { flags |= 4 }
-        if !(vm?.people.isEmpty ?? true) { flags |= 8 }
-        if hasLoaded { flags |= 16 }
-        return flags
-    }
-
     private var rows: some View {
         ScrollView {
-            // VStack biasa, bukan LazyVStack: isinya cuma enam baris, dan
-            // versi lazy membangun ulang baris saat tinggi berubah sehingga
-            // animasi lipatnya tersendat.
-            VStack(alignment: .leading, spacing: 28) {
-                memoriesSection
-                albumsSection
-                favoritesSection
-                peopleSection
-                fixedRows
+            VStack(alignment: .leading, spacing: 30) {
+                ForEach(preferences.sectionOrder) { section in
+                    collectionSection(section)
+                }
             }
-            .padding(.vertical, 12)
-            // Animasi dipasang DI SINI, bukan di baris masing-masing.
-            //
-            // Baris kenangan berupa `if` di dalam `@ViewBuilder`, dan baris
-            // lainnya membuka lewat binding yang nilainya berubah sendiri saat
-            // isinya datang. Dua-duanya perlu wadah yang SELALU ada untuk
-            // mengamati perubahannya — kalau dipasang di barisnya sendiri, saat
-            // isinya belum ada tidak ada view apa pun di situ yang bisa
-            // mengamati, dan barisnya menyodok masuk tanpa animasi.
-            .animation(.smooth(duration: 0.35), value: contentReadiness)
+            .padding(.vertical, 14)
         }
-        // Alasan sama seperti di `CollectionSection`: klip scroll memangkas
-        // pratinjau context menu. Bidang scroll ini sendiri sudah selebar dan
-        // setinggi layar, jadi tidak ada yang benar-benar meluber terlihat.
         .scrollClipDisabled()
-        // Blur tepi lembut ala iOS 26 saat isi lewat di bawah judul.
         .scrollEdgeEffectStyle(.soft, for: .top)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { contentWidth = $0 }
+        .refreshable { await vm?.load() }
+    }
+
+    @ViewBuilder
+    private func collectionSection(_ section: CollectionsSection) -> some View {
+        switch section {
+        case .pinned: pinnedSection
+        case .memories: memoriesSection
+        case .albums: albumsSection
+        case .people: peopleSection
+        case .featured: featuredSection
+        case .sharedAlbums: sharedAlbumsSection
+        case .recentDays: recentDaysSection
+        case .mediaTypes: mediaTypesSection
+        case .utilities: utilitiesSection
+        }
     }
 
     // MARK: - Aksi album
 
-    private func albumMenu(for album: AlbumResponseDTO) -> some View {
-        AlbumActionsMenu(
-            onEdit: { editTarget = album },
-            onAddUser: { addUserTarget = album },
-            onCreateLink: { createLink(for: album) },
-            onDelete: { deleteTarget = album })
-    }
-
-    private func deleteBinding(for album: AlbumResponseDTO) -> Binding<Bool> {
-        Binding(
-            get: { deleteTarget?.id == album.id },
-            set: { isPresented in
-                if !isPresented, deleteTarget?.id == album.id {
-                    deleteTarget = nil
-                }
-            })
-    }
-
-    // confirmationDialog memakai binding Bool, sementara sasarannya perlu
-    // disimpan sebagai nilai — jembatannya di sini.
     /// `isPresented`, bukan `item`: id-nya sekadar `String`, dan membungkusnya
     /// jadi tipe `Identifiable` hanya untuk keperluan satu sheet lebih banyak
     /// daripada yang dihematnya.
@@ -335,14 +282,20 @@ struct LibraryView: View {
 
     // MARK: - Aksi foto
 
+    @ViewBuilder
     private func assetMenu(for asset: AssetLite) -> some View {
-        AssetActionsMenu(
-            asset: asset,
-            onShare: { shareAsset(asset) },
-            onToggleFavorite: { Task { await vm?.toggleFavorite(asset) } },
-            onArchive: { Task { await vm?.archive(asset) } },
-            onAddToAlbum: { albumPickerAsset = asset },
-            onDelete: { assetToDelete = asset })
+        if AssetServerIdentity.resolve(asset, using: SwiftDataManager.shared) != nil {
+            AssetActionsMenu(
+                asset: asset,
+                onShare: { shareAsset(asset) },
+                onToggleFavorite: { Task { await vm?.toggleFavorite(asset) } },
+                onArchive: { Task { await vm?.archive(asset) } },
+                onAddToAlbum: { albumPickerAsset = asset },
+                onDelete: { assetToDelete = asset })
+        } else {
+            Button("Share", systemImage: "square.and.arrow.up") { shareAsset(asset) }
+            Button("Delete", systemImage: "trash", role: .destructive) { assetToDelete = asset }
+        }
     }
 
     private func shareAsset(_ asset: AssetLite) {
@@ -370,6 +323,16 @@ struct LibraryView: View {
     }
 
     private func start() async {
+        let owner = session.accountOwner ?? session.backupQueueOwner
+        if preferencesStore?.owner != owner || preferencesStore == nil || modelGeneration != session.accountGeneration {
+            let store = CollectionsPreferencesStore(owner: owner)
+            preferencesStore = store
+            preferences = store.load()
+        }
+        if modelGeneration != session.accountGeneration {
+            vm = nil
+            modelGeneration = session.accountGeneration
+        }
         if vm == nil {
             let api = APIClient(session: session)
             vm = LibraryViewModel(
@@ -402,34 +365,50 @@ struct LibraryView: View {
 
     @ToolbarContentBuilder
     private var libraryToolbar: some ToolbarContent {
-        ToolbarItem(placement: .topBarLeading) { titleLabel }
-            // Judul tidak boleh dapat latar kapsul seperti tombol.
-            .sharedBackgroundVisibility(.hidden)
-        profileButton
+        ToolbarItem(placement: .principal) {
+            HStack(spacing: 12) {
+                titleLabel
+                collectionsMenu
+                    .frame(width: 44, height: 44)
+                    .glassEffect(.regular, in: .circle)
+                JourneyProfileButton(
+                    isActive: isActive && isRootVisible && navigationPath.isEmpty
+                        && !showBackup && !showSettings && openedStoryID == nil
+                ) {
+                    showSettings = true
+                }
+                .frame(width: 44, height: 44)
+            }
+            .frame(width: max(1, contentWidth - 40), height: 44)
+        }
+        .sharedBackgroundVisibility(.hidden)
+    }
+
+    private var collectionsMenu: some View {
+        Menu {
+            Picker("Layout", selection: $preferences.layout) {
+                ForEach(CollectionsLayout.allCases) { layout in
+                    Text(layout.title).tag(layout)
+                }
+            }
+            Divider()
+            Button("Show All", systemImage: "chevron.down") { preferences.showAll() }
+            Button("Collapse All", systemImage: "chevron.up") { preferences.collapseAll() }
+            Button("Reorder", systemImage: "arrow.up.arrow.down") { showReorder = true }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 17, weight: .semibold))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Collection View Options")
     }
 
     private var titleLabel: some View {
-        Text("Library")
+        Text("Collections")
             .font(.largeTitle.bold())
             .lineLimit(1)
-            // WAJIB: tanpa ini toolbar menyempitkan item sampai selebar ikon
-            // dan judulnya tersisa jadi "…".
-            .fixedSize()
-    }
-
-    @ToolbarContentBuilder
-    private var profileButton: some ToolbarContent {
-        ToolbarItem(placement: .topBarTrailing) {
-            JourneyProfileButton(
-                isActive: isActive && isRootVisible && navigationPath.isEmpty
-                    && !showBackup && !showSettings && openedStoryID == nil
-            ) {
-                showSettings = true
-            }
-        }
-        // Avatarnya sudah bulat penuh; kapsul kaca bawaan toolbar hanya
-        // menambah lingkaran kedua yang lebih besar di belakangnya.
-        .sharedBackgroundVisibility(.hidden)
+            .minimumScaleFactor(0.3)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var settingsSheet: some View {
@@ -451,35 +430,22 @@ struct LibraryView: View {
 
     // MARK: - Baris yang bisa dilipat
 
-    /// Baris kenangan DIHILANGKAN sama sekali kalau tidak ada kenangan.
-    ///
-    /// Baris lain boleh tampil kosong — album dan orang memang bisa ditambah
-    /// pengguna, jadi judulnya berguna sebagai pintu masuk. Kenangan tidak: ia
-    /// disusun server dari tanggal hari ini, dan di hari yang tidak punya foto
-    /// dari tahun-tahun sebelumnya tidak ada yang bisa dilakukan pengguna.
-    /// Judul dengan "Nothing here yet" di bawahnya hanya menyisakan ruang mati
-    /// di puncak Library.
-    /// Kenangan MUNCUL BELAKANGAN — datang setelah permintaannya selesai,
-    /// sementara baris lain sudah ada sejak layar digambar. Tanpa animasi ia
-    /// menyodok masuk dan mendorong seluruh isi Library ke bawah secara
-    /// mendadak. Melarutkannya saja sudah cukup; yang bergerak justru
-    /// baris-baris di bawahnya. Animasinya sendiri dipasang di VStack induk.
-    @ViewBuilder
     private var memoriesSection: some View {
         let memories = vm?.memories ?? []
-        if !memories.isEmpty {
-            CollectionSection(
-                title: "On This Day",
-                isExpanded: binding(for: .memories),
-                isEmpty: false,
-                contentHeight: 240,
-                destination: { MemoriesView() }
-            ) {
-                ForEach(memories) { story in
-                    MemoryCard(story: story) { openedStoryID = story.id }
+        let width = cardWidth(.memories)
+        return CollectionSection(
+            title: "Memories",
+            isExpanded: expansion(for: .memories),
+            isEmpty: hasLoaded && memories.isEmpty,
+            contentHeight: width,
+            emptyMessage: "No Memories",
+            destination: { MemoriesView() }
+        ) {
+            ForEach(memories) { story in
+                MemoryCard(story: story, width: width, height: width) {
+                    openedStoryID = story.id
                 }
             }
-            .transition(.opacity)
         }
     }
 
@@ -499,46 +465,31 @@ struct LibraryView: View {
 
     @ViewBuilder
     private var albumsSection: some View {
-        let albums = vm?.recentAlbums ?? []
+        let albums = Array((vm?.albums ?? []).filter { !$0.shared }.prefix(15))
         CollectionSection(
             title: "Albums",
-            isExpanded: expansion(for: .albums, hasContent: !albums.isEmpty),
+            isExpanded: expansion(for: .albums),
             isEmpty: hasLoaded && albums.isEmpty,
-            contentHeight: 200,
+            contentHeight: cardWidth(.albums),
+            emptyMessage: "No Albums",
             destination: {
                 allAlbumsDestination(using: vm)
             }
         ) {
             ForEach(albums) { album in
-                NavigationLink {
-                    albumDestination(for: album, using: vm)
-                        .navigationTransition(
-                            .zoom(sourceID: album.id, in: albumNamespace))
-                } label: {
-                    AlbumCard(album: album)
-                        .matchedTransitionSource(id: album.id, in: albumNamespace)
-                }
-                .buttonStyle(.plain)
-                .contextMenu {
-                    albumMenu(for: album)
-                } preview: {
-                    AlbumCoverPreview(album: album, session: session)
-                }
-                .confirmationDialog(
-                    "Delete “\(album.albumName)”?",
-                    isPresented: deleteBinding(for: album),
-                    titleVisibility: .visible
-                ) {
-                    Button("Delete Album", role: .destructive) {
-                        deleteTarget = nil
-                        Task { await vm?.deleteAlbum(album.id) }
-                    }
-                    Button("Cancel", role: .cancel) {}
-                } message: {
-                    Text("The photos will stay in your library.")
-                }
+                albumCard(for: album, width: cardWidth(.albums), using: vm)
             }
         }
+    }
+
+    private func albumCard(for album: AlbumResponseDTO, width: CGFloat, using model: LibraryViewModel?) -> some View {
+        CollectionAlbumCard(
+            album: album, width: width,
+            onEdit: { editTarget = album },
+            onAddUser: { addUserTarget = album },
+            onCreateLink: { createLink(for: album) },
+            onDelete: { id in Task { await model?.deleteAlbum(id) } },
+            destination: { albumDestination(for: album, using: model) })
     }
 
     func albumDestination(for album: AlbumResponseDTO, using model: LibraryViewModel?) -> AlbumDetailView {
@@ -547,18 +498,21 @@ struct LibraryView: View {
             onContentsChanged: { reportAlbumContents($0, id: album.id, using: model) },
             onAlbumChanged: { model?.applyAlbumUpdate($0) },
             onDeleted: { model?.removeDeletedAlbum(album.id) },
-            onShared: { model?.applyAlbumSharing(album.id) })
+            onShared: { model?.applyAlbumSharing(album.id) },
+            onCoverChanged: { id, assetID in model?.applyAlbumCover(albumID: id, assetID: assetID) })
     }
 
-    func allAlbumsDestination(using model: LibraryViewModel?) -> AlbumsListView {
+    func allAlbumsDestination(using model: LibraryViewModel?, initialScope: AlbumsListView.Scope? = nil) -> AlbumsListView {
         AlbumsListView(
+            initialScope: initialScope,
             onAlbumUpdated: { model?.applyAlbumUpdate($0) },
             onAlbumCreated: { model?.applyAlbumCreation($0) },
             onAlbumContentsChanged: { id, assets in
                 reportAlbumContents(assets, id: id, using: model)
             },
             onAlbumDeleted: { model?.removeDeletedAlbum($0) },
-            onAlbumShared: { model?.applyAlbumSharing($0) })
+            onAlbumShared: { model?.applyAlbumSharing($0) },
+            onAlbumCoverChanged: { id, assetID in model?.applyAlbumCover(albumID: id, assetID: assetID) })
     }
 
     func routedAlbumDestination(id: String, using model: LibraryViewModel?) -> RoutedAlbumView {
@@ -573,41 +527,21 @@ struct LibraryView: View {
         Task { await model?.refreshAlbums(invalidatingCoverFor: id) }
     }
 
-    @ViewBuilder
-    private var favoritesSection: some View {
-        let favorites = vm?.favorites ?? []
-        CollectionSection(
-            title: "Favorites",
-            isExpanded: expansion(for: .favorites, hasContent: !favorites.isEmpty),
-            isEmpty: hasLoaded && favorites.isEmpty,
-            contentHeight: 140,
+    private var featuredSection: some View {
+        let featured = vm?.featuredPhotos ?? []
+        let width = cardWidth(.featured)
+        return CollectionSection(
+            title: "Featured Photos",
+            isExpanded: expansion(for: .featured),
+            isEmpty: hasLoaded && featured.isEmpty,
+            contentHeight: width,
+            emptyMessage: "No Featured Photos",
             destination: {
-                AssetCollectionView(
-                    title: "Favorites",
-                    request: SearchRequestDTO(isFavorite: true, size: 200),
-                    isFavoritesCollection: true)
+                DerivedCollectionView(title: "Featured Photos", assets: { [model = vm] in model?.featuredPhotos ?? [] },
+                    refreshSources: { [model = vm] in model?.refreshRecentDays() })
             }
         ) {
-            ForEach(favorites) { asset in
-                NavigationLink {
-                    AssetDetailView(currentAsset: asset, assets: favorites)
-                        .navigationTransition(
-                            .zoom(sourceID: asset.id, in: assetNamespace))
-                        .toolbarVisibility(.hidden, for: .tabBar)
-                } label: {
-                    AuthImage(assetId: asset.id, thumbhash: asset.thumbhash)
-                        .frame(width: 140, height: 140)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                        .matchedTransitionSource(id: asset.id, in: assetNamespace)
-                }
-                .buttonStyle(.plain)
-                .contextMenu {
-                    assetMenu(for: asset)
-                } preview: {
-                    AssetContextPreview(asset: asset, session: session,
-                        visibilityPolicy: AssetVisibilityPolicy(scope: .timeline))
-                }
-            }
+            FeaturedPhotoCards(assets: featured, width: width) { assetMenu(for: $0) }
         }
     }
 
@@ -615,17 +549,18 @@ struct LibraryView: View {
     private var peopleSection: some View {
         let people = vm?.people ?? []
         CollectionSection(
-            title: "People",
-            isExpanded: expansion(for: .people, hasContent: !people.isEmpty),
+            title: "People & Pets",
+            isExpanded: expansion(for: .people),
             isEmpty: hasLoaded && people.isEmpty,
-            contentHeight: 136,
+            contentHeight: personSide + 26,
+            emptyMessage: "No People",
             destination: { PeopleView() }
         ) {
             ForEach(people) { person in
                 NavigationLink {
                     personDetail(for: person)
                 } label: {
-                    PersonCard(person: person)
+                    PersonCard(person: person, side: personSide)
                         .matchedTransitionSource(id: person.id, in: personNamespace)
                 }
                 .buttonStyle(.plain)
@@ -641,77 +576,288 @@ struct LibraryView: View {
             .navigationTransition(.zoom(sourceID: person.id, in: personNamespace))
     }
 
-    private func binding(for row: Row) -> Binding<Bool> {
+    private func expansion(for section: CollectionsSection) -> Binding<Bool> {
         Binding(
-            get: { expanded.contains(row) },
-            set: { isOn in
-                if isOn { expanded.insert(row) } else { expanded.remove(row) }
-                persistExpanded()
+            get: { !preferences.collapsedSections.contains(section) },
+            set: { expanded in
+                if expanded { preferences.collapsedSections.remove(section) }
+                else { preferences.collapsedSections.insert(section) }
             })
     }
 
-    /// Baris hanya benar-benar terbuka setelah ada yang bisa diperlihatkan.
-    ///
-    /// Pilihan pengguna tetap dihormati dan tetap disimpan — yang ditunda cuma
-    /// PEMBUKAANNYA. Baris yang terbuka sejak awal padahal isinya belum datang
-    /// hanyalah lubang kosong setinggi dua ratus titik di tengah Library, dan
-    /// lubang itu bertahan selama permintaannya berjalan.
-    ///
-    /// Begitu isinya datang, nilainya berubah dan barisnya terbuka dengan
-    /// animasi lipat yang sama seperti kalau ditekan sendiri — lihat `.animation`
-    /// di `rows`.
-    ///
-    /// `hasLoaded` ikut dihitung supaya baris yang memang KOSONG tetap bisa
-    /// terbuka dan mengatakannya, bukan diam tertutup tanpa penjelasan.
-    private func expansion(for row: Row, hasContent: Bool) -> Binding<Bool> {
-        let preference = binding(for: row)
-        return Binding(
-            get: { preference.wrappedValue && (hasContent || hasLoaded) },
-            set: { preference.wrappedValue = $0 })
+    private func cardWidth(_ section: CollectionsSection) -> CGFloat {
+        preferences.layout.cardWidth(for: section)
     }
 
-    /// Urutannya dinormalkan mengikuti `Row.allCases` supaya nilai tersimpannya
-    /// stabil — `Set` tidak menjamin urutan, dan tanpa ini isinya berubah-ubah
-    /// tiap kali ditulis meski pilihannya sama.
-    private func persistExpanded() {
-        // `.memories` sengaja tidak ikut disimpan — lihat catatan di `init`.
-        let ordered = Row.allCases
-            .filter { $0 != .memories && expanded.contains($0) }
-            .map(\.rawValue)
-        UserDefaults.standard.set(ordered.joined(separator: ","), forKey: Self.expandedKey)
+    private var personSide: CGFloat {
+        preferences.layout == .large ? 160 : preferences.layout == .small ? 88 : 110
     }
 
-    // MARK: - Baris tetap
+    private func reconcilePinnedAlbums() {
+        guard vm?.hasLoadedAlbums == true else { return }
+        preferences.removeMissingAlbums(Set(vm?.albums.map(\.id) ?? []))
+    }
 
-    private var fixedRows: some View {
-        VStack(spacing: 0) {
-            Divider().padding(.leading, 20)
-
-            plainRow("On This Device", systemImage: "iphone") {
-                DeviceAlbumsListView()
+    private var pinnedSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                NavigationLink {
+                    allPinnedCollections
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("Pinned").font(.title2.bold()).lineLimit(1).minimumScaleFactor(0.5)
+                        Image(systemName: "chevron.forward").font(.system(size: 13, weight: .bold)).foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+                Spacer()
+                Button("Edit") { showPinnedEditor = true }
+                    .font(.subheadline.weight(.semibold))
+                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                    .foregroundStyle(.blue)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 5)
+                    .background(.fill.tertiary, in: .capsule)
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("collections.editPinned")
+                collapseControl(.pinned)
             }
-            plainRow("Places", systemImage: "map") {
-                PhotoMapView()
-            }
-            plainRow("Shared Links", systemImage: "link") {
-                SharedLinksView()
-            }
-            plainRow("Duplicates", systemImage: "square.on.square") {
-                DuplicatesView()
-            }
-            plainRow("Archived", systemImage: "archivebox") {
-                AssetCollectionView(
-                    title: "Archived",
-                    request: SearchRequestDTO(size: 200, visibility: "archive"),
-                    layout: .monthly)
-            }
-            plainRow("Trash", systemImage: "trash") {
-                TrashView()
-            }
-            plainRow("Locked Folder", systemImage: "lock") {
-                LockedFolderView()
+            if !preferences.collapsedSections.contains(.pinned) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                    ForEach(preferences.pinnedCollections) { reference in
+                        NavigationLink {
+                            pinnedDestination(reference)
+                        } label: {
+                            pinnedTile(reference)
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button("Unpin", systemImage: "pin.slash") {
+                                preferences.pinnedCollections.removeAll { $0 == reference }
+                            }
+                        }
+                    }
+                    }
+                }
+                .scrollClipDisabled()
             }
         }
+        .padding(.horizontal, 20)
+    }
+
+    private var allPinnedCollections: some View {
+        ScrollView {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: cardWidth(.pinned)), spacing: 12)], spacing: 12) {
+                ForEach(preferences.pinnedCollections) { reference in
+                    NavigationLink { pinnedDestination(reference) } label: { pinnedTile(reference) }
+                        .buttonStyle(.plain)
+                }
+            }
+            .padding(20)
+        }
+        .navigationTitle("Pinned")
+        .toolbar {
+            Button("Edit") { showPinnedEditor = true }
+        }
+    }
+
+    private func collapseControl(_ section: CollectionsSection) -> some View {
+        let collapsed = preferences.collapsedSections.contains(section)
+        return Button {
+            if collapsed { preferences.collapsedSections.remove(section) }
+            else { preferences.collapsedSections.insert(section) }
+        } label: {
+            Image(systemName: "chevron.down")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(.blue)
+                .rotationEffect(.degrees(collapsed ? (layoutDirection == .rightToLeft ? 90 : -90) : 0))
+                .frame(width: 28, height: 28)
+                .background(.fill.tertiary, in: .circle)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(collapsed ? Text("Expand \(Text(section.title))") : Text("Collapse \(Text(section.title))"))
+        .accessibilityValue(collapsed ? Text("Collapsed") : Text("Expanded"))
+    }
+
+    private func pinnedTile(_ reference: PinnedCollectionReference) -> some View {
+        let width = cardWidth(.pinned)
+        return Color(.tertiarySystemFill)
+            .overlay {
+                pinnedCover(reference)
+            }
+            .overlay(alignment: .bottomLeading) {
+                Text(reference.title(in: vm?.albums ?? []))
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.65), radius: 2, y: 1)
+                    .lineLimit(2).minimumScaleFactor(0.65)
+                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background(LinearGradient(colors: [.clear, .black.opacity(0.6)], startPoint: .top, endPoint: .bottom))
+            }
+            .overlay(alignment: .topTrailing) {
+                if reference == .favorites {
+                    Image(systemName: "heart.fill").foregroundStyle(.white).padding(10)
+                }
+            }
+            .frame(width: width, height: width)
+            .clipShape(RoundedRectangle(cornerRadius: 18))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(reference.title(in: vm?.albums ?? []))
+    }
+
+    @ViewBuilder
+    private func pinnedCover(_ reference: PinnedCollectionReference) -> some View {
+        switch reference {
+        case .favorites:
+            if let asset = vm?.favorites.first { AuthImage(assetId: asset.id, thumbhash: asset.thumbhash) }
+            else { pinnedPlaceholder(reference) }
+        case .album(let id):
+            if let album = vm?.albums.first(where: { $0.id == id }) { AlbumCoverImage(album: album) }
+            else { pinnedPlaceholder(reference) }
+        case .albums:
+            if let album = vm?.albums.first { AlbumCoverImage(album: album) }
+            else { pinnedPlaceholder(reference) }
+        case .memories:
+            if let asset = vm?.memories.first?.cover { AuthImage(assetId: asset.id, thumbhash: asset.thumbhash) }
+            else { pinnedPlaceholder(reference) }
+        case .people:
+            if let person = vm?.people.first { AuthImage(assetId: person.id, path: "/people/\(person.id)/thumbnail") }
+            else { pinnedPlaceholder(reference) }
+        case .videos:
+            if let asset = vm?.recentDays.flatMap(\.assets).first(where: \.isVideo) {
+                AuthImage(assetId: asset.id, thumbhash: asset.thumbhash)
+            } else { pinnedPlaceholder(reference) }
+        case .map:
+            CollectionsMapPreview(marker: vm?.mapPreviewMarker)
+        case .recentlyDeleted:
+            pinnedPlaceholder(reference)
+        }
+    }
+
+    private func pinnedPlaceholder(_ reference: PinnedCollectionReference) -> some View {
+        Image(systemName: reference.systemImage)
+            .font(.largeTitle.weight(.medium))
+            .foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder
+    private func pinnedDestination(_ reference: PinnedCollectionReference) -> some View {
+        switch reference {
+        case .favorites:
+            AssetCollectionView(title: "Favorites", request: SearchRequestDTO(isFavorite: true, size: 200), isFavoritesCollection: true)
+        case .map: PhotoMapView()
+        case .videos: AssetCollectionView(title: "Videos", request: SearchRequestDTO(type: "VIDEO", size: 200))
+        case .recentlyDeleted: TrashView()
+        case .albums: allAlbumsDestination(using: vm)
+        case .people: PeopleView()
+        case .memories: MemoriesView()
+        case .album(let id): routedAlbumDestination(id: id, using: vm)
+        }
+    }
+
+    private var sharedAlbumsSection: some View {
+        let albums = Array((vm?.albums ?? []).filter(\.shared).prefix(15))
+        let width = cardWidth(.sharedAlbums)
+        return CollectionSection(
+            title: "Shared Albums",
+            isExpanded: expansion(for: .sharedAlbums),
+            isEmpty: hasLoaded && albums.isEmpty,
+            contentHeight: width,
+            emptyMessage: "No Shared Albums",
+            destination: { allAlbumsDestination(using: vm, initialScope: .shared) }
+        ) {
+            sharedAlbumCards(using: vm, width: width)
+        }
+    }
+
+    func sharedAlbumCards(using model: LibraryViewModel?, width: CGFloat) -> some View {
+        ForEach(Array((model?.albums ?? []).filter(\.shared).prefix(15))) { album in
+            albumCard(for: album, width: width, using: model)
+        }
+    }
+
+    private var recentDaysSection: some View {
+        let days = vm?.recentDays ?? []
+        let width = cardWidth(.recentDays)
+        return CollectionSection(
+            title: "Recent Days",
+            isExpanded: expansion(for: .recentDays),
+            isEmpty: hasLoaded && days.isEmpty,
+            contentHeight: width * 1.1,
+            emptyMessage: "No Recent Days",
+            destination: {
+                RecentDaysListView(days: days, refreshedDays: { [model = vm] in model?.recentDays ?? [] },
+                    refreshSources: { [model = vm] in model?.refreshRecentDays() })
+            }
+        ) {
+            ForEach(days) { day in
+                NavigationLink {
+                    RecentDayDestination(day: day,
+                        previewAssets: { [model = vm, day] in model?.assets(in: DateInterval(start: day.start, end: day.end)) ?? [] },
+                        refreshSources: { [model = vm] in model?.refreshRecentDays() })
+                } label: {
+                    RecentDayCard(day: day, width: width, height: width * 1.1)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var mediaTypesSection: some View {
+        VStack(spacing: 0) {
+            sectionToggle(.mediaTypes).padding(.horizontal, 20).padding(.bottom, 12)
+            if !preferences.collapsedSections.contains(.mediaTypes) {
+                plainRow("Videos", systemImage: "video") {
+                    AssetCollectionView(title: "Videos", request: SearchRequestDTO(type: "VIDEO", size: 200))
+                }
+                plainRow("Photos", systemImage: "photo") {
+                    AssetCollectionView(title: "Photos", request: SearchRequestDTO(type: "IMAGE", size: 200))
+                }
+            }
+        }
+    }
+
+    private var utilitiesSection: some View {
+        VStack(spacing: 0) {
+            sectionToggle(.utilities).padding(.horizontal, 20).padding(.bottom, 12)
+            if !preferences.collapsedSections.contains(.utilities) {
+                plainRow("On This Device", systemImage: "iphone") { DeviceAlbumsListView() }
+                plainRow("Map", systemImage: "map") { PhotoMapView() }
+                plainRow("Shared Links", systemImage: "link") { SharedLinksView() }
+                plainRow("Duplicates", systemImage: "square.on.square") { DuplicatesView() }
+                plainRow("Archived", systemImage: "archivebox") {
+                    AssetCollectionView(title: "Archived", request: SearchRequestDTO(size: 200, visibility: "archive"), layout: .monthly)
+                }
+                plainRow("Recently Deleted", systemImage: "trash") { TrashView() }
+                plainRow("Locked Folder", systemImage: "lock") { LockedFolderView() }
+            }
+        }
+    }
+
+    private func sectionToggle(_ section: CollectionsSection) -> some View {
+        Button {
+            withAnimation(.smooth(duration: 0.32)) {
+                if preferences.collapsedSections.contains(section) { preferences.collapsedSections.remove(section) }
+                else { preferences.collapsedSections.insert(section) }
+            }
+        } label: {
+            HStack {
+                Text(section.title).font(.title2.bold()).lineLimit(1).minimumScaleFactor(0.5)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.down")
+                    .font(.footnote.weight(.bold))
+                    .foregroundStyle(.blue)
+                    .rotationEffect(.degrees(preferences.collapsedSections.contains(section) ? (layoutDirection == .rightToLeft ? 90 : -90) : 0))
+                    .frame(width: 28, height: 28)
+                    .background(.fill.tertiary, in: .circle)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityValue(preferences.collapsedSections.contains(section) ? Text("Collapsed") : Text("Expanded"))
     }
 
     private func plainRow<Destination: View>(
@@ -727,7 +873,7 @@ struct LibraryView: View {
                     Label(title, systemImage: systemImage)
                         .font(.title3.weight(.semibold))
                     Spacer()
-                    Image(systemName: "chevron.right")
+                    Image(systemName: "chevron.forward")
                         .font(.footnote.weight(.bold))
                         .foregroundStyle(.secondary)
                 }
