@@ -176,7 +176,7 @@ private struct AlbumRowPresentationFixture: View {
                 AlbumRowView(album: album)
                 AlbumGridCard(album: album)
                     .frame(width: 240, height: 240)
-                    .background(Color.black)
+                    .background(Color(.systemBackground))
             }
         }
         .padding()

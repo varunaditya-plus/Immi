@@ -546,8 +546,16 @@ struct AlbumGridCard: View {
                 .foregroundStyle(.white.opacity(0.85))
         }
         .foregroundStyle(.white)
-        .shadow(radius: 4)
         .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            LinearGradient(
+                stops: [.init(color: .clear, location: 0),
+                        .init(color: .black.opacity(0.72), location: 0.25),
+                        .init(color: .black.opacity(0.85), location: 1)],
+                startPoint: .top, endPoint: .bottom)
+                .padding(.top, -28)
+        }
     }
 }
 
