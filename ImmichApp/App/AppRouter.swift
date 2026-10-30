@@ -25,7 +25,7 @@ struct AppRouter: View {
                 OnboardingView()
             }
         }
-        .preferredColorScheme(colorScheme)
+        .background { WindowAppearance(theme: theme).allowsHitTesting(false) }
         // Splash hanya untuk sesi yang sudah masuk: onboarding tidak membaca
         // cache apa pun, jadi tidak ada yang perlu ditutupi.
         .overlay {
@@ -41,13 +41,6 @@ struct AppRouter: View {
         launch.isReady
     }
 
-    private var colorScheme: ColorScheme? {
-        switch theme {
-        case "light": .light
-        case "dark":  .dark
-        default:      nil
-        }
-    }
 }
 
 struct MainTabView: View {
