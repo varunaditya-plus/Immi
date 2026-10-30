@@ -22,7 +22,37 @@ final class PeopleDirectoryPresentationTests: SimulatorHostedTestCase {
         else { LocalSnapshot.remove("people.hidden") }
     }
 
+    func testActualDirectoryBulkFavoriteAndRejectedUnfavoritePreserveConfirmedState() async throws {
+        let maya = person("Maya Test", favorite: true), leo = person("Leo Test")
+        let repository = DirectoryPresentationRepository(people: [maya, leo])
+        let model = PeopleListViewModel(repo: repository)
+        var updates: [PersonUpdate] = []
+        let window = try await host(NavigationStack {
+            PeopleView(viewModel: model, repository: repository, onPersonUpdated: { updates.append($0) })
+        })
+        try await waitUntil("The complete synthetic directory is loaded") { model.people.map(\.id) == [maya.id, leo.id] }
+        try await activateAccessibilityButton(named: "Edit", in: window)
+        _ = try await screenshot(window)
+        try await activateAccessibilityButton(named: leo.name, in: window)
+        try await activateAccessibilityButton(named: "Favorite", in: window)
+        try await waitUntil("The real bulk Favorite button publishes the accepted server change") {
+            model.people.first(where: { $0.id == leo.id })?.isFavorite == true && updates.count == 1
+        }
+        XCTAssertEqual(repository.favoriteChanges.map(\.id), [leo.id])
+        XCTAssertEqual(repository.favoriteChanges.map(\.value), [true])
+        XCTAssertEqual(updates.first?.fields, [.favorite])
 
+        repository.rejectFavorite = true
+        try await activateAccessibilityButton(named: "Unfavorite", in: window)
+        try await waitUntil("A rejected real Unfavorite action exposes its error") { model.actionError != nil }
+        try await assertReadOnlyAlert(in: window)
+        let text = try await renderedText(in: window)
+        XCTAssertTrue(text.contains("Action Failed"), text)
+        XCTAssertTrue(text.contains("Read only"), text)
+        XCTAssertEqual(repository.favoriteChanges.map(\.value), [true, false])
+        XCTAssertEqual(model.people.first(where: { $0.id == leo.id })?.isFavorite, true)
+        XCTAssertEqual(updates.count, 1, "A failed action must not notify the parent as an accepted update")
+    }
 
     func testActualNameEditorSavesOnlyTheSubmittedNameAndPreservesANewerFavorite() async throws {
         let original = person("Original Name")
@@ -123,7 +153,50 @@ final class PeopleDirectoryPresentationTests: SimulatorHostedTestCase {
         XCTAssertEqual(repository.renames.map(\.name), ["Accepted Name"])
     }
 
+    func testDirectoryDefersLateErrorsWhileTheActualDiscoveryEditorOwnsItsFailureAlert() async throws {
+        let original = person("")
+        let repository = DirectoryPresentationRepository(people: [original])
+        repository.rejectRename = true
+        let model = PeopleListViewModel(repo: repository)
+        var callbacks: [PersonUpdate] = []
+        let window = try await host(NavigationStack {
+            PeopleView(viewModel: model, repository: repository, onPersonUpdated: { callbacks.append($0) })
+        })
+        try await activateAccessibilityButton(named: "Add People", in: window)
+        try await waitUntil("The actual discovery sheet finishes presenting") {
+            guard let controller = self.presentedController(from: window.rootViewController) else { return false }
+            return controller.transitionCoordinator == nil
+        }
+        let discovery = try XCTUnwrap(presentedController(from: window.rootViewController))
 
+        model.actionError = "Background directory failure"
+
+        let discoveryText = try await renderedText(in: window)
+        XCTAssertTrue(discoveryText.contains("Add People"), discoveryText)
+        XCTAssertFalse(discoveryText.contains("Background directory failure"), discoveryText)
+        XCTAssertTrue(presentedController(from: window.rootViewController) === discovery,
+            "A late directory error must not replace or cover the active discovery sheet")
+        try await activateAccessibilityButton(named: "Add Name", in: window, within: discovery.view)
+        try await waitForEditor(in: window)
+        let field = try XCTUnwrap(nameField(in: window))
+        field.text = "Rejected Name"
+        field.sendActions(for: .editingChanged)
+        let editor = try XCTUnwrap(presentedController(from: window.rootViewController))
+        try await activateAccessibilityButton(named: "Done", in: window, within: editor.view)
+        try await assertReadOnlyAlert(in: window)
+
+        var controller = window.rootViewController
+        var alerts: [UIAlertController] = []
+        while let presented = controller?.presentedViewController {
+            if let alert = presented as? UIAlertController { alerts.append(alert) }
+            controller = presented
+        }
+        XCTAssertEqual(alerts.count, 1, "Only the editor that rejected Save owns the visible error")
+        XCTAssertEqual(model.actionError, "Background directory failure")
+        XCTAssertEqual(repository.renames.map(\.name), ["Rejected Name"])
+        XCTAssertEqual(repository.people.first?.name, "")
+        XCTAssertTrue(callbacks.isEmpty)
+    }
 
     func testRejectedHiddenPeopleShowKeepsTheConfirmedDirectoryAndExposesTheError() async throws {
         let shown = person("Visible Test"), hidden = person("Hidden Test", hidden: true)

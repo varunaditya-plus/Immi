@@ -552,12 +552,12 @@ struct LibraryView: View {
     private var peopleSection: some View {
         let people = vm?.people ?? []
         CollectionSection(
-            title: "People & Pets",
+            title: "People",
             isExpanded: expansion(for: .people),
             isEmpty: hasLoaded && people.isEmpty,
             contentHeight: personSide + 26,
             emptyMessage: "No People",
-            destination: { PeopleView() }
+            destination: { peopleDirectory }
         ) {
             ForEach(people) { person in
                 NavigationLink {
@@ -577,6 +577,11 @@ struct LibraryView: View {
             repo: PeopleRepository(api: APIClient(session: session)),
             onPersonUpdated: { vm?.applyPersonUpdate($0) })
             .navigationTransition(.zoom(sourceID: person.id, in: personNamespace))
+    }
+
+    private var peopleDirectory: some View {
+        PeopleView(onPersonUpdated: { vm?.applyPersonUpdate($0) },
+            onPeopleMerged: { removedIDs, _ in vm?.applyPeopleMerge(removedIDs) })
     }
 
     private func expansion(for section: CollectionsSection) -> Binding<Bool> {
@@ -755,7 +760,7 @@ struct LibraryView: View {
         case .videos: AssetCollectionView(title: "Videos", request: SearchRequestDTO(type: "VIDEO", size: 200))
         case .recentlyDeleted: TrashView()
         case .albums: allAlbumsDestination(using: vm)
-        case .people: PeopleView()
+        case .people: peopleDirectory
         case .memories: MemoriesView()
         case .album(let id): routedAlbumDestination(id: id, using: vm)
         }

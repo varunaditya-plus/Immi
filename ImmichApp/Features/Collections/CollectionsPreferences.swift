@@ -11,7 +11,7 @@ enum CollectionsSection: String, CaseIterable, Codable, Identifiable {
         case .pinned: String(localized: "Pinned")
         case .memories: String(localized: "Memories")
         case .albums: String(localized: "Albums")
-        case .people: String(localized: "People & Pets")
+        case .people: String(localized: "People")
         case .featured: String(localized: "Featured Photos")
         case .sharedAlbums: String(localized: "Shared Albums")
         case .recentDays: String(localized: "Recent Days")

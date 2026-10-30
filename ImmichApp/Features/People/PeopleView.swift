@@ -3,192 +3,281 @@ import SwiftUI
 struct PeopleView: View {
     @Environment(SessionManager.self) private var session
     @State private var vm: PeopleListViewModel?
+    @State private var organization: PeopleOrganizationStore?
+    @State private var groupsStore: PeopleGroupsStore?
     @State private var query = ""
-    /// Namespace zoom transition. Dideklarasikan di layar daftar, bukan di
-    /// selnya: sumber dan tujuan transisi harus berbagi namespace yang SAMA,
-    /// sedangkan tiap sel akan punya `@Namespace`-nya sendiri.
+    @State private var isFavoriting = false
+    @State private var isEditing = false
+    @State private var selectedIDs: Set<String> = []
+    @State private var editedPerson: PersonDTO?
+    @State private var mergePerson: PersonDTO?
+    @State private var showMergeConfirmation = false
+    @State private var showAddPeople = false
+    @State private var showHiddenPeople = false
+    @State private var showReorder = false
+    @State private var contentWidth: CGFloat = 390
     @Namespace private var personNamespace
-    private let columns = [
-        GridItem(.adaptive(minimum: 100), spacing: 12)
-    ]
+    private let providedRepository: PeopleRepository?
+    var onPersonUpdated: ((PersonUpdate) -> Void)? = nil
+    var onPeopleMerged: ((Set<String>, String) -> Void)? = nil
+
+    init(viewModel: PeopleListViewModel? = nil, organizationStore: PeopleOrganizationStore? = nil,
+         repository: PeopleRepository? = nil,
+         onPersonUpdated: ((PersonUpdate) -> Void)? = nil,
+         onPeopleMerged: ((Set<String>, String) -> Void)? = nil) {
+        _vm = State(initialValue: viewModel)
+        _organization = State(initialValue: organizationStore)
+        providedRepository = repository
+        self.onPersonUpdated = onPersonUpdated
+        self.onPeopleMerged = onPeopleMerged
+    }
 
     var body: some View {
         content
             .navigationTitle("People")
             .searchable(text: $query, prompt: "Search People")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    if case .loading = vm?.phase {
-                        ProgressView()
-                    }
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { contentWidth = $0 }
+            .toolbar { toolbar }
+            .toolbar(isEditing ? .visible : .hidden, for: .bottomBar)
+            .sheet(item: $editedPerson) { person in
+                PersonIdentityEditor(person: person, repository: repository, onUpdated: publish)
+            }
+            .sheet(item: $mergePerson) { person in
+                PeopleMergePicker(person: person, people: vm?.people ?? []) { sources, target in
+                    await merge(sources, into: target, reportsFailure: false)
                 }
             }
-        .task {
-            if vm == nil {
-                let api = APIClient(session: session)
-                let repo = PeopleRepository(api: api)
-                vm = PeopleListViewModel(repo: repo)
+            .sheet(isPresented: $showAddPeople) {
+                PeopleDiscoveryView(repository: repository, mode: .unnamed, onUpdated: publish)
             }
-            await vm?.loadPeople()
-        }
+            .sheet(isPresented: $showHiddenPeople) {
+                PeopleDiscoveryView(repository: repository, mode: .hidden, onUpdated: publish)
+            }
+            .sheet(isPresented: $showReorder) {
+                PeopleReorderSheet(people: { fullOrderedPeople }) { organization?.setOrder($0) }
+            }
+            .alert("Action Failed", isPresented: Binding(
+                get: { vm?.actionError != nil && !isPresentingSheet }, set: { if !$0 { vm?.actionError = nil } })) {
+                Button("OK", role: .cancel) { vm?.actionError = nil }
+            } message: { Text(vm?.actionError ?? "") }
+            .onChange(of: vm?.people) { _, _ in
+                selectedIDs.formIntersection(Set(orderedPeople.map(\.id)))
+            }
+            .onChange(of: query) { _, _ in
+                selectedIDs.formIntersection(Set(orderedPeople.map(\.id)))
+            }
+            .task(id: session.accountGeneration) {
+                if organization?.isCurrent != true { organization = PeopleOrganizationStore(owner: session.accountOwner) }
+                if groupsStore?.isCurrent != true { groupsStore = PeopleGroupsStore(owner: session.accountOwner) }
+                if vm?.isCurrent != true { vm = PeopleListViewModel(repo: repository) }
+                await vm?.loadPeople()
+            }
+    }
+
+    private var isPresentingSheet: Bool {
+        editedPerson != nil || mergePerson != nil || showAddPeople || showHiddenPeople || showReorder
+    }
+
+    private var repository: PeopleRepository { providedRepository ?? PeopleRepository(api: APIClient(session: session)) }
+    private var fullOrderedPeople: [PersonDTO] {
+        guard vm?.isCurrent == true else { return [] }
+        return (organization?.value ?? PeopleOrganization()).ordered((vm?.people ?? []).filter { !$0.isHidden })
+    }
+    private var orderedPeople: [PersonDTO] {
+        let sorted = fullOrderedPeople
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? sorted : sorted.filter { $0.name.localizedStandardContains(trimmed) }
     }
 
     @ViewBuilder
     private var content: some View {
-        if let vm {
-            switch vm.phase {
-            case .idle, .loading:
-            // Spinner HANYA kalau memang belum ada apa-apa.
-            //
-            // Potret lokal dibaca di `task`, yaitu setelah render pertama, jadi
-            // tanpa gerbang ini layar berkedip spinner satu frame sebelum isi
-            // yang sebenarnya sudah tersedia tergambar.
-                if vm.people.isEmpty {
-                    ProgressView()
-                } else {
-                    loadedContent(vm)
-                }
-
-            case .loaded:
-                loadedContent(vm)
-
-            case .failed(let error):
-                errorState(error, vm)
+        if let vm, case .failed(let error) = vm.phase, vm.people.isEmpty {
+            ContentUnavailableView {
+                Label("Failed to Load", systemImage: "exclamationmark.triangle")
+            } description: { Text(error) } actions: {
+                Button("Retry") { Task { await vm.retry() } }
             }
-        } else {
+        } else if vm == nil || vm?.phase.isLoading == true && vm?.people.isEmpty == true {
             ProgressView()
-        }
-    }
-
-    @ViewBuilder
-    private func loadedContent(_ vm: PeopleListViewModel) -> some View {
-        let people = visiblePeople(vm)
-
-        if people.isEmpty {
-            // Dibedakan: belum ada orang sama sekali vs. pencarian tanpa hasil.
-            // Pesan "Faces will appear here" akan menyesatkan kalau sebenarnya
-            // datanya ada, hanya tidak cocok dengan yang diketik.
-            if query.isEmpty {
-                emptyState
-            } else {
-                ContentUnavailableView.search(text: query)
-            }
         } else {
-            peopleGrid(people, vm)
-        }
-    }
-
-    /// Pencarian dilakukan DI KLIEN, bukan lewat endpoint.
-    ///
-    /// Daftar orang sudah dimuat seluruhnya sejak awal dan jumlahnya kecil, jadi
-    /// menyaringnya di tempat jauh lebih cepat daripada bolak-balik ke server
-    /// tiap ketukan huruf.
-    private func visiblePeople(_ vm: PeopleListViewModel) -> [PersonDTO] {
-        let trimmed = query.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return vm.people }
-        return vm.people.filter {
-            $0.name.localizedCaseInsensitiveContains(trimmed)
-        }
-    }
-
-    /// Tautan memakai TUJUAN LANGSUNG, bukan `NavigationLink(value:)` +
-    /// `navigationDestination(for:)`.
-    ///
-    /// Layar ini sendiri sudah didorong ke dalam stack milik Collections.
-    /// Mendaftarkan tujuan berbasis nilai dari posisi itu membuat SwiftUI
-    /// mendorong dua entri sekaligus — halaman yang sama muncul di atas, dan
-    /// detailnya baru terlihat setelah ditekan back. Jalur dari Collections
-    /// tidak pernah bermasalah justru karena memakai tujuan langsung.
-    @ViewBuilder
-    private func peopleGrid(
-        _ people: [PersonDTO],
-        _ vm: PeopleListViewModel
-    ) -> some View {
-        ScrollView {
-            LazyVGrid(columns: columns, spacing: 12) {
-                ForEach(people) { person in
-                    NavigationLink {
-                        PersonDetailView(
-                            person: person,
-                            repo: PeopleRepository(api: APIClient(session: session)),
-                            listVM: vm)
-                        .navigationTransition(
-                            .zoom(sourceID: person.id, in: personNamespace))
-                    } label: {
-                        VStack(spacing: 8) {
-                            ZStack(alignment: .topTrailing) {
-                                Circle()
-                                    .fill(.gray.opacity(0.2))
-
-                                if person.thumbnailPath?.isEmpty == false {
-                                    // thumbnailPath adalah path filesystem server;
-                                    // gambarnya harus diambil lewat endpoint terautentikasi.
-                                    AuthImage(assetId: person.id,
-                                              path: "/people/\(person.id)/thumbnail")
-                                } else {
-                                    Image(systemName: "person.crop.circle.fill")
-                                        .resizable()
-                                        .scaledToFit()
-                                        .foregroundStyle(.gray.opacity(0.5))
-                                }
-
-                                if person.isHidden {
-                                    Image(systemName: "eye.slash.fill")
-                                        .font(.caption)
-                                        .foregroundStyle(.red)
-                                        .padding(4)
-                                        .background(Circle().fill(.white))
-                                }
-                            }
-                            .frame(height: 100)
-                            .clipShape(Circle())
-
-                            Text(person.name)
-                                .font(.subheadline)
-                                .lineLimit(2)
-                                .multilineTextAlignment(.center)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 28) {
+                    if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        if orderedPeople.isEmpty { ContentUnavailableView.search(text: query) }
+                        else { peopleGrid(orderedPeople) }
+                    } else {
+                        let favorites = orderedPeople.filter { $0.isFavorite == true }
+                        if !favorites.isEmpty {
+                            sectionTitle("Favorites")
+                            peopleGrid(favorites)
                         }
-                        .matchedTransitionSource(id: person.id, in: personNamespace)
+                        if !isEditing, let groupsStore { PeopleGroupsSection(people: vm?.people ?? [], store: groupsStore) }
+                        let others = orderedPeople.filter { $0.isFavorite != true }
+                        if !others.isEmpty {
+                            sectionTitle("People")
+                            peopleGrid(others)
+                        } else if orderedPeople.isEmpty {
+                            ContentUnavailableView("No People", systemImage: "person.2.fill",
+                                description: Text("Faces will appear here when detected"))
+                        }
+                        Button("Add People") { showAddPeople = true }
+                            .font(.headline)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                }
+                .padding(20)
+            }
+            .refreshable { await vm?.loadPeople() }
+        }
+    }
+
+    private func sectionTitle(_ title: LocalizedStringKey) -> some View {
+        Text(title).font(.title2.bold()).accessibilityAddTraits(.isHeader)
+    }
+
+    private func peopleGrid(_ people: [PersonDTO]) -> some View {
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 20), GridItem(.flexible(), spacing: 20)], spacing: 24) {
+            ForEach(people) { person in
+                if isEditing {
+                    Button {
+                        if !selectedIDs.insert(person.id).inserted { selectedIDs.remove(person.id) }
+                    } label: { tile(person, selected: selectedIDs.contains(person.id)) }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(person.displayName)
+                    .accessibilityAddTraits(selectedIDs.contains(person.id) ? .isSelected : [])
+                } else {
+                    NavigationLink {
+                        PersonDetailView(person: person, repo: repository, listVM: vm,
+                            onPersonUpdated: { onPersonUpdated?($0) })
+                            .navigationTransition(.zoom(sourceID: person.id, in: personNamespace))
+                    } label: {
+                        tile(person)
+                            .matchedTransitionSource(id: person.id, in: personNamespace)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(person.displayName)
+                    .accessibilityValue(person.isFavorite == true ? String(localized: "Favorite") : "")
+                    .contextMenu { personActions(person) }
+                    .draggable("people:\(person.id)")
+                    .dropDestination(for: String.self) { values, _ in
+                        guard values.count == 1, let value = values.first, value.hasPrefix("people:") else { return false }
+                        return organization?.move(String(value.dropFirst(7)), before: person.id, people: vm?.people ?? []) == true
+                    }
                 }
             }
-            .padding(12)
+        }
+    }
+
+    private func tile(_ person: PersonDTO, selected: Bool? = nil) -> some View {
+        VStack(spacing: 8) {
+            PeoplePortrait(person: person, side: max(80, (contentWidth - 60) / 2), selected: selected)
+            Text(person.displayName).font(.headline).lineLimit(2).multilineTextAlignment(.center)
         }
     }
 
     @ViewBuilder
-    private var emptyState: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "person.2.circle.fill")
-                .font(.system(size: 48))
-                .foregroundStyle(.secondary)
-            Text("No People")
-                .font(.headline)
-            Text("Faces will appear here when detected")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    @ViewBuilder
-    private func errorState(_ error: String, _ vm: PeopleListViewModel) -> some View {
-        VStack(spacing: 16) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 48))
-                .foregroundStyle(.orange)
-            Text("Failed to Load")
-                .font(.headline)
-            Text(error)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Button("Retry") {
-                Task { await vm.retry() }
+    private func personActions(_ person: PersonDTO) -> some View {
+        if person.isFavorite != nil {
+            Button(person.isFavorite == true ? "Unfavorite" : "Favorite", systemImage: "heart") {
+                Task { await setFavorite([person.id], to: person.isFavorite != true) }
             }
-            .buttonStyle(.borderedProminent)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        Button("Edit Name and Photos", systemImage: "pencil") { editedPerson = person }
+        Button("Merge", systemImage: "person.2.fill") { mergePerson = person }
+        Button("Hide", systemImage: "eye.slash") {
+            Task {
+                await vm?.setHidden(person.id, to: true)
+                if let updated = vm?.people.first(where: { $0.id == person.id }), updated.isHidden { onPersonUpdated?(PersonUpdate(person: updated, fields: [.hidden])) }
+            }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbar: some ToolbarContent {
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            if !isEditing {
+                Menu {
+                    ForEach(PeopleSort.allCases, id: \.self) { sort in
+                        Button { organization?.setSort(sort) } label: {
+                            if organization?.value.sort == sort { Label(sort.title, systemImage: "checkmark") }
+                            else { Text(sort.title) }
+                        }
+                    }
+                    Button("Reorder", systemImage: "arrow.up.arrow.down") { showReorder = true }
+                    Button("Hidden People", systemImage: "eye.slash") { showHiddenPeople = true }
+                } label: { Image(systemName: "arrow.up.arrow.down") }
+                .accessibilityLabel("Sort")
+            }
+            Button(isEditing ? "Done" : "Edit") {
+                isEditing.toggle()
+                selectedIDs = []
+            }
+            .disabled(vm?.isMerging == true)
+        }
+        if isEditing {
+            ToolbarItemGroup(placement: .bottomBar) {
+                Button(allSelectedFavorites ? "Unfavorite" : "Favorite", systemImage: allSelectedFavorites ? "heart.slash" : "heart") {
+                    let ids = Array(selectedIDs)
+                    let value = !allSelectedFavorites
+                    Task { await setFavorite(ids, to: value) }
+                }
+                .disabled(selectedIDs.isEmpty || !selectedPeople.allSatisfy { $0.isFavorite != nil }
+                    || isFavoriting || vm?.isMerging == true)
+                Spacer()
+                Text("\(selectedIDs.count) Selected").font(.subheadline)
+                Spacer()
+                Button("Merge", systemImage: "person.2.fill") { showMergeConfirmation = true }
+                    .disabled(selectedIDs.count < 2 || vm?.isMerging == true || isFavoriting)
+                    .confirmationDialog("Merge These People?", isPresented: $showMergeConfirmation,
+                        titleVisibility: .visible) {
+                        Button("Merge Photos") {
+                            let people = orderedPeople.filter { selectedIDs.contains($0.id) }
+                            guard let target = people.first(where: { !$0.name.isEmpty }) ?? people.first else { return }
+                            Task {
+                                if await merge(people.map(\.id), into: target.id) {
+                                    isEditing = false
+                                    selectedIDs = []
+                                }
+                            }
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    } message: { Text("The photos will be combined into one person.") }
+            }
+        }
+    }
+
+    private func publish(_ update: PersonUpdate) {
+        vm?.applyPersonUpdate(update)
+        onPersonUpdated?(update)
+    }
+
+    private var selectedPeople: [PersonDTO] { fullOrderedPeople.filter { selectedIDs.contains($0.id) } }
+    private var allSelectedFavorites: Bool { !selectedPeople.isEmpty && selectedPeople.allSatisfy { $0.isFavorite == true } }
+
+    private func setFavorite(_ ids: [String], to value: Bool) async {
+        guard !isFavoriting, !ids.isEmpty, vm?.isCurrent == true else { return }
+        isFavoriting = true
+        defer { isFavoriting = false }
+        for id in ids {
+            guard !Task.isCancelled, vm?.isCurrent == true else { break }
+            let accepted = await vm?.setFavorite(id, to: value) == true
+            if accepted, let person = vm?.people.first(where: { $0.id == id }) {
+                onPersonUpdated?(PersonUpdate(person: person, fields: [.favorite]))
+            }
+            if vm?.actionError != nil { break }
+        }
+    }
+
+    private func merge(_ ids: [String], into target: String, reportsFailure: Bool = true) async -> Bool {
+        guard let result = await vm?.merge(ids, into: target, reportsFailure: reportsFailure) else { return false }
+        if let person = vm?.people.first(where: { $0.id == target }) {
+            onPersonUpdated?(PersonUpdate(person: person, fields: [.name, .thumbnail]))
+        }
+        if !result.acceptedIDs.isEmpty {
+            groupsStore?.remapMergedPeople(result.acceptedIDs, into: target)
+            onPeopleMerged?(result.acceptedIDs, target)
+        }
+        return result.failedIDs.isEmpty
     }
 }
 
@@ -222,7 +311,6 @@ struct PeoplePortrait: View {
         .accessibilityHidden(true)
     }
 }
-
 
 @MainActor
 struct PersonDetailView: View {

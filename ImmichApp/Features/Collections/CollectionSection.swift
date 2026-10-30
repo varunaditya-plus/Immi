@@ -341,16 +341,13 @@ struct PersonCard: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            AuthImage(
-                assetId: person.id,
-                path: "/people/\(person.id)/thumbnail")
-            .frame(width: side, height: side)
-            .clipShape(.circle)
+            PeoplePortrait(person: person, side: side)
 
-            Text(person.name.isEmpty ? " " : person.name)
+            Text(person.displayName)
                 .font(.caption)
                 .lineLimit(1)
                 .frame(width: side)
         }
+        .accessibilityValue(person.isFavorite == true ? String(localized: "Favorite") : "")
     }
 }

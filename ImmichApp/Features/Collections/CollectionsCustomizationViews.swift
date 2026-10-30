@@ -90,7 +90,7 @@ extension PinnedCollectionReference {
         case .videos: String(localized: "Videos")
         case .recentlyDeleted: String(localized: "Recently Deleted")
         case .albums: String(localized: "Albums")
-        case .people: String(localized: "People & Pets")
+        case .people: String(localized: "People")
         case .memories: String(localized: "Memories")
         case .album(let id): albums.first(where: { $0.id == id })?.albumName ?? String(localized: "Album Unavailable")
         }
