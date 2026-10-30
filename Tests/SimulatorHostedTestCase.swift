@@ -66,6 +66,73 @@ class SimulatorHostedTestCase: XCTestCase {
         return image
     }
 
+    func activateAccessibilityButton(named title: String, in window: UIWindow) async throws {
+        var candidate: NSObject?
+        try await waitUntil("The actual enabled \(title) button is visible and accessible") {
+            var visited = Set<ObjectIdentifier>()
+            let buttons = self.accessibilityButtons(named: title, in: window, visited: &visited, depth: 0)
+            let visible = buttons.compactMap { button -> (NSObject, CGRect)? in
+                let frame: CGRect
+                if let view = button as? UIView {
+                    guard view.window === window else { return nil }
+                    frame = view.convert(view.bounds, to: window)
+                } else {
+                    frame = window.convert(button.accessibilityFrame, from: nil)
+                }
+                guard !frame.isEmpty, window.bounds.intersects(frame) else { return nil }
+                return (button, frame)
+            }
+            candidate = visible.min { $0.1.minY < $1.1.minY }?.0
+            return candidate != nil
+        }
+        let button = try XCTUnwrap(candidate, "The real \(title) action must be exposed; a direct model call is not a substitute")
+        if let control = button as? UIButton {
+            let event: UIControl.Event = control.allControlEvents.contains(.primaryActionTriggered)
+                ? .primaryActionTriggered : .touchUpInside
+            XCTAssertTrue(control.allControlEvents.contains(event), "The real button needs a registered action")
+            guard control.allControlEvents.contains(event) else { throw URLError(.unsupportedURL) }
+            control.sendActions(for: event)
+        } else {
+            let activated = button.accessibilityActivate()
+            XCTAssertTrue(activated, "The real \(title) accessibility action must activate")
+            guard activated else { throw URLError(.unsupportedURL) }
+        }
+    }
+
+    private func accessibilityButtons(named title: String, in object: NSObject,
+                                      visited: inout Set<ObjectIdentifier>, depth: Int) -> [NSObject] {
+        guard depth < 40, visited.insert(ObjectIdentifier(object)).inserted else { return [] }
+        if let view = object as? UIView, view.isHidden || view.alpha <= 0 { return [] }
+        if let control = object as? UIControl, !control.isEnabled { return [] }
+        var buttons: [NSObject] = []
+        if let button = object as? UIButton, button.isEnabled,
+           button.currentTitle == title || button.accessibilityLabel == title {
+            buttons.append(button)
+        } else if object.accessibilityLabel == title,
+                  object.accessibilityTraits.contains(.button),
+                  !object.accessibilityTraits.contains(.notEnabled) {
+            buttons.append(object)
+        }
+        if let view = object as? UIView {
+            for child in view.subviews {
+                buttons += accessibilityButtons(named: title, in: child, visited: &visited, depth: depth + 1)
+            }
+        }
+        if let elements = object.accessibilityElements {
+            for case let child as NSObject in elements {
+                buttons += accessibilityButtons(named: title, in: child, visited: &visited, depth: depth + 1)
+            }
+        }
+        let count = object.accessibilityElementCount()
+        if (1...500).contains(count) {
+            for index in 0..<count {
+                guard let child = object.accessibilityElement(at: index) as? NSObject else { continue }
+                buttons += accessibilityButtons(named: title, in: child, visited: &visited, depth: depth + 1)
+            }
+        }
+        return buttons
+    }
+
     func assertTextContrast(_ text: String, image: UIImage,
                                     file: StaticString = #filePath, line: UInt = #line) throws {
         let cgImage = try XCTUnwrap(image.cgImage, file: file, line: line)

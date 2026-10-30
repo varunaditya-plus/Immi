@@ -32,6 +32,49 @@ final class AssetViewerDatePresentationTests: SimulatorHostedTestCase {
         _ = try await screenshot(window)
     }
 
+    func testActualDateEditorSaveUpdatesTheExistingViewerAndReportsItsTarget() async throws {
+        let original = Date(timeIntervalSince1970: 1_599_999_960)
+        let saved = original.addingTimeInterval(86_400)
+        var updatedIDs: [String] = []
+        let (window, model, repository) = try await showViewer(date: original,
+            onAssetUpdated: { updatedIDs.append($0) })
+        try await waitUntil("The original date appears before editing") {
+            self.titles(window).contains(self.title(original))
+        }
+        try await activateInfo(in: window)
+        try await activateAccessibilityButton(named: "Adjust", in: window)
+        try await waitUntil("The viewer's own Date Editor presents its native picker") {
+            self.visibleViews(in: window).contains { $0 is UIDatePicker }
+        }
+        let picker = try XCTUnwrap(visibleViews(in: window).compactMap { $0 as? UIDatePicker }.first)
+        picker.setDate(saved, animated: false)
+        picker.sendActions(for: .valueChanged)
+        let root = try XCTUnwrap(window.rootViewController)
+        try await waitUntil("Changing the actual picker enables Save") {
+            self.barItems(root).contains { ($0.title == "Save" || $0.accessibilityLabel == "Save") && $0.isEnabled }
+        }
+        XCTAssertTrue(repository.savedDates.isEmpty, "Changing the picker must not save by itself")
+        XCTAssertTrue(updatedIDs.isEmpty)
+        let save = try XCTUnwrap(barItems(root).first {
+            ($0.title == "Save" || $0.accessibilityLabel == "Save") && $0.isEnabled
+        })
+        let action = try XCTUnwrap(save.action)
+        XCTAssertTrue(UIApplication.shared.sendAction(action, to: save.target, from: save, for: nil))
+        try await waitUntil("The actual Save action writes the selected date and reports its photo") {
+            repository.savedDates == [saved] && updatedIDs == [repository.value.id]
+        }
+        XCTAssertEqual(model.detail?.fileCreatedAt, saved)
+        try await waitUntil("The actual Date Editor dismisses after saving") {
+            !self.visibleViews(in: window).contains { $0 is UIDatePicker }
+        }
+        try await activateInfo(in: window)
+        try await waitUntil("The existing viewer header displays the date saved through the actual editor") {
+            self.titles(window).contains(self.title(saved))
+        }
+        XCTAssertFalse(titles(window).contains(title(original)))
+        _ = try await screenshot(window)
+    }
+
     func testFailedDateSaveKeepsTheMountedTitleAndShowsTheMutationError() async throws {
         let original = Date(timeIntervalSince1970: 1_600_000_000)
         let (window, model, repository) = try await showViewer(date: original)
@@ -94,7 +137,8 @@ final class AssetViewerDatePresentationTests: SimulatorHostedTestCase {
         XCTAssertFalse(titles(window).contains(title(otherDate)))
     }
 
-    private func showViewer(date: Date, additional: [AssetLite] = []) async throws
+    private func showViewer(date: Date, additional: [AssetLite] = [],
+                            onAssetUpdated: ((String) -> Void)? = nil) async throws
         -> (UIWindow, AssetDetailViewModel, ViewerDateRepository) {
         let id = UUID().uuidString
         assetIDs.append(id)
@@ -103,7 +147,7 @@ final class AssetViewerDatePresentationTests: SimulatorHostedTestCase {
         let model = AssetDetailViewModel(repo: repository)
         let asset = AssetLite(id: id, isVideo: false, ratio: 1, thumbhash: nil, createdAt: date)
         let viewer = AssetDetailView(currentAsset: asset, assets: [asset] + additional,
-            isModal: true, viewModel: model)
+            isModal: true, onAssetUpdated: onAssetUpdated, viewModel: model)
         return (try await host(NavigationStack { viewer }), model, repository)
     }
 
@@ -111,13 +155,34 @@ final class AssetViewerDatePresentationTests: SimulatorHostedTestCase {
         date.formatted(date: .abbreviated, time: .omitted)
     }
 
+    private func visibleViews(in view: UIView) -> [UIView] {
+        guard !view.isHidden, view.alpha > 0 else { return [] }
+        return [view] + view.subviews.flatMap { visibleViews(in: $0) }
+    }
+
     private func titles(_ window: UIWindow) -> [String] {
-        func collect(_ view: UIView) -> [String] {
-            guard !view.isHidden, view.alpha > 0 else { return [] }
-            let own = [(view as? UINavigationBar)?.topItem?.title].compactMap { $0 }
-            return own + view.subviews.flatMap(collect)
+        visibleViews(in: window).compactMap { ($0 as? UINavigationBar)?.topItem?.title }
+    }
+
+    private func barItems(_ controller: UIViewController) -> [UIBarButtonItem] {
+        let groups = controller.navigationItem.leadingItemGroups + controller.navigationItem.centerItemGroups
+            + controller.navigationItem.trailingItemGroups
+        let own = (controller.navigationItem.leftBarButtonItems ?? []) + (controller.navigationItem.rightBarButtonItems ?? [])
+            + (controller.toolbarItems ?? []) + groups.flatMap(\.barButtonItems)
+        let presented = controller.presentedViewController.map { barItems($0) } ?? []
+        return own + presented + controller.children.flatMap { barItems($0) }
+    }
+
+    private func activateInfo(in window: UIWindow) async throws {
+        let root = try XCTUnwrap(window.rootViewController)
+        try await waitUntil("The real Info action is enabled") {
+            self.barItems(root).contains { ($0.title == "Info" || $0.accessibilityLabel == "Info") && $0.isEnabled }
         }
-        return collect(window)
+        let item = try XCTUnwrap(barItems(root).first {
+            ($0.title == "Info" || $0.accessibilityLabel == "Info") && $0.isEnabled
+        })
+        let action = try XCTUnwrap(item.action)
+        XCTAssertTrue(UIApplication.shared.sendAction(action, to: item.target, from: item, for: nil))
     }
 
     private func findPager(in controller: UIViewController) -> PhotoPagerController? {
