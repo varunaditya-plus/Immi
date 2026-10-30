@@ -586,7 +586,7 @@ struct AlbumsListView: View {
         name: String, description: String, assetIds: [String], using model: AlbumListViewModel
     ) async -> String? {
         await model.createAlbum(name: name, description: description, assetIds: assetIds) { album in
-            scope = .personal
+            scope = folderID == nil ? .personal : .all
             kind = .all
             searchText = ""
             if folderID != nil { organization?.moveAlbum(album.id, to: folderID) }

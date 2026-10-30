@@ -66,11 +66,11 @@ class SimulatorHostedTestCase: XCTestCase {
         return image
     }
 
-    func activateAccessibilityButton(named title: String, in window: UIWindow) async throws {
+    func activateAccessibilityButton(named title: String, in window: UIWindow, within root: UIView? = nil) async throws {
         var candidate: NSObject?
         try await waitUntil("The actual enabled \(title) button is visible and accessible") {
             var visited = Set<ObjectIdentifier>()
-            let buttons = self.accessibilityButtons(named: title, in: window, visited: &visited, depth: 0)
+            let buttons = self.accessibilityButtons(named: title, in: root ?? window, visited: &visited, depth: 0)
             let visible = buttons.compactMap { button -> (NSObject, CGRect)? in
                 let frame: CGRect
                 if let view = button as? UIView {
