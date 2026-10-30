@@ -119,11 +119,15 @@ final class AlbumsOrganizationStore {
     @discardableResult
     func createFolder(name: String, parentID: String?) -> AlbumFolder? {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard isCurrent, !name.isEmpty,
-              parentID == nil || value.folders.contains(where: { $0.id == parentID }) else { return nil }
-        let folder = AlbumFolder(id: UUID().uuidString, name: name, parentID: parentID)
-        change { $0.folders.append(folder) }
-        return folder
+        guard isCurrent, !name.isEmpty else { return nil }
+        var created: AlbumFolder?
+        change { state in
+            guard parentID == nil || state.folders.contains(where: { $0.id == parentID }) else { return }
+            let folder = AlbumFolder(id: UUID().uuidString, name: name, parentID: parentID)
+            state.folders.append(folder)
+            created = folder
+        }
+        return created
     }
 
     func renameFolder(_ id: String, to name: String) {
@@ -153,8 +157,8 @@ final class AlbumsOrganizationStore {
     }
 
     func moveAlbum(_ id: String, to folderID: String?) {
-        guard folderID == nil || value.folders.contains(where: { $0.id == folderID }) else { return }
         change {
+            guard folderID == nil || $0.folders.contains(where: { $0.id == folderID }) else { return }
             $0.albumFolders[id] = folderID
             for container in Array($0.containerOrders.keys) {
                 $0.containerOrders[container]?.removeAll { $0 == AlbumOrganization.albumEntry(id) }
@@ -214,10 +218,14 @@ final class AlbumsOrganizationStore {
 
     private func change(_ operation: (inout AlbumOrganization) -> Void) {
         guard isCurrent else { return }
-        var updated = value
+        // Separate entry points can own stores for the same account. Merge
+        // each mutation into the latest saved state instead of an old copy.
+        let saved = key.flatMap { defaults.data(forKey: $0) }
+            .flatMap { try? JSONDecoder().decode(AlbumOrganization.self, from: $0) } ?? value
+        var updated = saved
         operation(&updated)
-        guard updated != value else { return }
-        value = updated
+        if updated != value { value = updated }
+        guard updated != saved else { return }
         if let key, let data = try? JSONEncoder().encode(value) { defaults.set(data, forKey: key) }
     }
 }

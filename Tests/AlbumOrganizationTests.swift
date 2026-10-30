@@ -80,6 +80,68 @@ final class AlbumOrganizationTests: XCTestCase {
         XCTAssertNil(store().value.photoSorts["album"])
     }
 
+    func testSeparateStoresPreserveEachOthersFolderAndPhotoChanges() throws {
+        let browser = store()
+        let detail = store()
+        detail.setPhotoOrder(["b", "a"], albumID: "album")
+        detail.setPhotoFilter(.favorites, albumID: "album")
+
+        let folder = try XCTUnwrap(browser.createFolder(name: "Saved folder", parentID: nil))
+        detail.setPhotoSort(.newestFirst, albumID: "album")
+        browser.moveAlbum("album", to: folder.id)
+
+        let saved = store().value
+        XCTAssertEqual(saved.photoOrders["album"], ["b", "a"])
+        XCTAssertEqual(saved.photoFilters["album"], .favorites)
+        XCTAssertEqual(saved.photoSorts["album"], .newestFirst)
+        XCTAssertEqual(saved.folders, [folder])
+        XCTAssertEqual(saved.albumFolders["album"], folder.id)
+    }
+
+    func testStaleStoreDoesNotResurrectRemovedFoldersOrSkipAnExplicitPreferenceChange() throws {
+        let browser = store()
+        let folder = try XCTUnwrap(browser.createFolder(name: "Removed", parentID: nil))
+        browser.moveAlbum("album", to: folder.id)
+        browser.setPhotoSort(.oldestFirst, albumID: "album")
+        let detail = store()
+        browser.removeFolder(folder.id)
+        browser.setPhotoSort(.newestFirst, albumID: "album")
+
+        detail.setPhotoSort(.oldestFirst, albumID: "album")
+
+        let saved = store().value
+        XCTAssertTrue(saved.folders.isEmpty)
+        XCTAssertNil(saved.albumFolders["album"])
+        XCTAssertEqual(saved.photoSorts["album"], .oldestFirst,
+            "A requested change must save even when it matches this store's stale value")
+        XCTAssertEqual(detail.value, saved)
+    }
+
+    func testStaleStoresValidateFolderDestinationsAgainstTheLatestSavedState() throws {
+        let browser = store()
+        let detail = store()
+        let moverBeforeCreation = store()
+        let parent = try XCTUnwrap(browser.createFolder(name: "Parent", parentID: nil))
+
+        moverBeforeCreation.moveAlbum("album", to: parent.id)
+        XCTAssertEqual(store().value.albumFolders["album"], parent.id,
+            "Moving must accept a newly saved destination without first refreshing the store")
+        let child = try XCTUnwrap(detail.createFolder(name: "Child", parentID: parent.id))
+        let moverBeforeDeletion = store()
+        browser.removeFolder(parent.id)
+
+        moverBeforeDeletion.moveAlbum("album", to: parent.id)
+        XCTAssertNil(store().value.albumFolders["album"],
+            "Moving must reject a removed destination before any other mutation refreshes the store")
+        XCTAssertNil(detail.createFolder(name: "Unreachable", parentID: parent.id))
+
+        let saved = store()
+        XCTAssertNil(saved.value.albumFolders["album"])
+        XCTAssertEqual(saved.value.folders.map(\.id), [child.id])
+        XCTAssertNil(saved.value.folders.first?.parentID)
+        XCTAssertEqual(saved.orderedAlbums([album("album")]).map(\.id), ["album"])
+    }
+
     func testCustomPhotoOrderFiltersOnlyAfterOrderingAndReconcilesMembership() {
         let store = store()
         let a = photo("a", date: 1)

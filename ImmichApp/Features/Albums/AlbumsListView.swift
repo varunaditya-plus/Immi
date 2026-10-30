@@ -578,7 +578,8 @@ struct AlbumsListView: View {
             onCoverChanged: { albumID, assetID in
                 model.applyAlbumCover(albumID, assetID: assetID)
                 onAlbumCoverChanged?(albumID, assetID)
-            })
+            },
+            organizationStore: organization)
     }
 
     func createAlbum(
