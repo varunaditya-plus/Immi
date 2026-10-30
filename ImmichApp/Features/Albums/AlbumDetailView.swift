@@ -39,6 +39,7 @@ struct AlbumDetailView: View {
     @State private var showKeyPhotoPicker = false
     @State private var showReorderPhotos = false
     @State private var showActivity = false
+    @State private var showsSearch = false
 
     init(
         album: AlbumResponseDTO,
@@ -72,6 +73,9 @@ struct AlbumDetailView: View {
                 }
             }
             .sheet(isPresented: $showActivity) { AlbumActivitySheet(album: currentAlbum) }
+            .sheet(isPresented: $showsSearch) {
+                SearchView(isActive: true, initialTokens: [.album(currentAlbum)], onClose: { showsSearch = false })
+            }
             .sheet(item: $sharedLink) { link in
                 ShareSheet(url: link.url)
             }
@@ -130,6 +134,7 @@ struct AlbumDetailView: View {
                     handler: deleteAlbum)]),
             optionsConfirmationPresented: $showDeleteConfirm,
             options: {
+                Button("Search", systemImage: "magnifyingglass") { showsSearch = true }
                 albumPresentationMenu
                 Divider()
                 // Isinya sama persis dengan context menu di daftar album —

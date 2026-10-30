@@ -327,6 +327,7 @@ struct PersonDetailView: View {
     @State private var sharedLink: SharedLinkPresentation?
     @State private var reassignmentSelection: SelectedAssetIDs?
     @State private var showRenameSheet = false
+    @State private var showsSearch = false
     /// Kabar singkat dari aksi — mis. "sudah ada di album ini". Toast, bukan
     /// alert: ini bukan kegagalan yang menuntut jawaban.
     @State private var actionMessage: ErrorEvent?
@@ -347,6 +348,9 @@ struct PersonDetailView: View {
         screen
             .sheet(isPresented: $showRenameSheet) {
                 PersonIdentityEditor(person: person, repository: repo, detailState: detail, onUpdated: publish)
+            }
+            .sheet(isPresented: $showsSearch) {
+                SearchView(isActive: true, initialTokens: [.person(person)], onClose: { showsSearch = false })
             }
             .sheet(item: $albumPickerAsset) { asset in
                 AlbumPickerLoader { album in
@@ -388,7 +392,7 @@ struct PersonDetailView: View {
     }
 
     private var isPresentingSheet: Bool {
-        showRenameSheet || albumPickerAsset != nil || albumPickerSelection != nil
+        showRenameSheet || showsSearch || albumPickerAsset != nil || albumPickerSelection != nil
             || sharedLink != nil || reassignmentSelection != nil
     }
 
@@ -471,6 +475,9 @@ struct PersonDetailView: View {
 
     @ViewBuilder
     private var personMenu: some View {
+        if !person.isHidden {
+            Button("Search", systemImage: "magnifyingglass") { showsSearch = true }
+        }
         Button {
             detail.renameDraft = person.name
             showRenameSheet = true
