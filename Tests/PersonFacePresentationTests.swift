@@ -5,7 +5,25 @@ import XCTest
 
 @MainActor
 final class PersonFacePresentationTests: SimulatorHostedTestCase {
+    func testInitiallyUnavailableCorrectionSelectionDismissesWithoutReassigningFaces() async throws {
+        let person = PersonDTO(id: UUID().uuidString, name: "Maya Test", birthDate: nil,
+            thumbnailPath: nil, isHidden: false, isFavorite: false)
+        let repository = FaceReassignmentPresentationRepository(person: person)
+        var dismissals = 0
+        var changes = 0
+        let correction = PersonFaceReassignmentView(person: person, assetIDs: ["removed-before-presentation"],
+            repository: repository, assets: { [] }, onChanged: { changes += 1 })
+        let window = try await host(FaceCorrectionPresenter(correction: correction, onDismiss: { dismissals += 1 }))
 
+        try await waitUntil("A correction sheet whose selected photo is already unavailable dismisses itself") {
+            dismissals == 1 && window.rootViewController?.presentedViewController == nil
+        }
+
+        XCTAssertEqual(repository.faceRequests, 0)
+        XCTAssertEqual(repository.createdPeople, 0)
+        XCTAssertEqual(repository.reassignments, 0)
+        XCTAssertEqual(changes, 0, "An unavailable selection cannot publish a successful face correction")
+    }
 
     func testFacesToggleReconfiguresTheActualVisibleCellWithoutChangingItsAssetIdentity() async throws {
         let loader = FacePresentationLoader()
@@ -86,6 +104,43 @@ private struct FacePresentationHost: UIViewControllerRepresentable {
     let controller: PhotoGridController
     func makeUIViewController(context: Context) -> PhotoGridController { controller }
     func updateUIViewController(_ uiViewController: PhotoGridController, context: Context) {}
+}
+
+private struct FaceCorrectionPresenter: View {
+    let correction: PersonFaceReassignmentView
+    let onDismiss: () -> Void
+    @State private var isPresented = true
+
+    var body: some View {
+        Color.clear.sheet(isPresented: $isPresented, onDismiss: onDismiss) { correction }
+    }
+}
+
+private final class FaceReassignmentPresentationRepository: PeopleRepository {
+    let person: PersonDTO
+    var faceRequests = 0
+    var createdPeople = 0
+    var reassignments = 0
+
+    @MainActor
+    init(person: PersonDTO) {
+        self.person = person
+        super.init(api: makeStubAPIClient())
+    }
+
+    override func all(size: Int? = nil) async throws -> [PersonDTO] { [person] }
+    override func faces(in assetID: String) async throws -> [PersonFaceDTO] {
+        faceRequests += 1
+        return []
+    }
+    override func createUnnamedPerson() async throws -> PersonDTO {
+        createdPeople += 1
+        return person
+    }
+    override func reassign(faceID: String, to personID: String) async throws -> PersonDTO {
+        reassignments += 1
+        return person
+    }
 }
 
 @MainActor

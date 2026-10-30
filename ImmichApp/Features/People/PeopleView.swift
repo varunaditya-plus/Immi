@@ -237,6 +237,7 @@ struct PersonDetailView: View {
     @State private var albumPickerAsset: AssetLite?
     @State private var albumPickerSelection: SelectedAssetIDs?
     @State private var sharedLink: SharedLinkPresentation?
+    @State private var reassignmentSelection: SelectedAssetIDs?
     @State private var showRenameSheet = false
     /// Kabar singkat dari aksi — mis. "sudah ada di album ini". Toast, bukan
     /// alert: ini bukan kegagalan yang menuntut jawaban.
@@ -286,6 +287,13 @@ struct PersonDetailView: View {
                 }
             }
             .sheet(item: $sharedLink) { ShareSheet(url: $0.url) }
+            .sheet(item: $reassignmentSelection) { selection in
+                PersonFaceReassignmentView(person: person, assetIDs: selection.ids, repository: repo,
+                    assets: { vm?.assets ?? [] }) {
+                    await vm?.load()
+                    await listVM?.loadPeople()
+                }
+            }
             .errorToast($actionMessage)
             .onChange(of: session.accountGeneration) { _, _ in dismiss() }
             .task { await start() }
@@ -293,7 +301,7 @@ struct PersonDetailView: View {
 
     private var isPresentingSheet: Bool {
         showRenameSheet || albumPickerAsset != nil || albumPickerSelection != nil
-            || sharedLink != nil
+            || sharedLink != nil || reassignmentSelection != nil
     }
 
     @ViewBuilder
@@ -348,6 +356,9 @@ struct PersonDetailView: View {
                 }
             })
         }
+        actions.append(SelectionMenuAction(title: "This is Not \(person.displayName)", systemImage: "person.crop.circle.badge.xmark") {
+            reassignmentSelection = SelectedAssetIDs(ids: Array(ids))
+        })
         return actions
     }
 
