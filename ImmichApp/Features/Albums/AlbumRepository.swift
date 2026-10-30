@@ -137,6 +137,13 @@ class AlbumRepository {
             body: AlbumUpdateDTO(albumName: name, description: description)))
     }
 
+    func setKeyPhoto(_ assetID: String, for albumID: String) async throws {
+        struct Body: Encodable { let albumThumbnailAssetId: String }
+        try await api.sendVoid(.json(
+            "/albums/\(albumID)", method: .patch,
+            body: Body(albumThumbnailAssetId: assetID)))
+    }
+
     /// Peran "editor" mengikuti bawaan Immich saat menambahkan lewat UI.
     func addUsers(_ userIds: [String], to albumId: String) async throws {
         struct AlbumUser: Encodable {

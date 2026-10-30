@@ -7,6 +7,7 @@ final class AlbumListViewModel {
     private let snapshotGeneration = LocalSnapshot.generation
 
     var albums: [AlbumResponseDTO] = []
+    private(set) var hasLoadedAlbums = false
     /// Kegagalan aksi sheet — sunting, tambah pengguna. Sengaja TERPISAH dari
     /// `phase`: itu milik daftar album, dan mengubahnya berarti seluruh daftar
     /// berganti jadi layar error hanya karena satu sheet gagal.
@@ -54,6 +55,7 @@ final class AlbumListViewModel {
             guard isCurrentLoad(requestID) else { return }
             try Task.checkCancellation()
             LocalSnapshot.save(fetched, for: LocalSnapshot.Key.albumsList, expectedGeneration: snapshotGeneration)
+            hasLoadedAlbums = true
             albums = fetched
             phase = .loaded(())
             phaseBeforeLoad = phase
@@ -139,6 +141,14 @@ final class AlbumListViewModel {
         merged.description = updated.description
         merged.updatedAt = updated.updatedAt
         albums[index] = merged
+        persist()
+    }
+
+    func applyAlbumCover(_ id: String, assetID: String) {
+        guard canPublish, let index = albums.firstIndex(where: { $0.id == id }) else { return }
+        invalidateLoads()
+        albums[index].albumThumbnailAssetId = assetID
+        AlbumCoverStore.shared.invalidate(id)
         persist()
     }
 
