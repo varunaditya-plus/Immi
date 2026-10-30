@@ -7,6 +7,7 @@ struct SearchRequestDTO: Encodable {
     var order: String? = nil
     var type: String? = nil
     var isFavorite: Bool? = nil
+    var isNotInAlbum: Bool? = nil
     var takenAfter: String? = nil
     var takenBefore: String? = nil
     var city: String? = nil

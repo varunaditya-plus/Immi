@@ -17,6 +17,8 @@ struct AssetResponseDTO: Codable, Identifiable {
     let type: String
     let originalFileName: String
     var fileCreatedAt: Date
+    var addedAt: Date?
+    var isEdited: Bool?
     var isFavorite: Bool
     var isArchived: Bool
     /// Missing only in older API responses and existing offline snapshots.
@@ -56,6 +58,8 @@ struct AssetResponseDTO: Codable, Identifiable {
         case id, type, originalFileName, fileCreatedAt, isFavorite, isArchived, visibility
         case isTrashed, duration, thumbhash, localDateTime, exifInfo, people
         case livePhotoVideoId
+        case addedAt = "createdAt"
+        case isEdited
     }
 
     init(from decoder: Decoder) throws {
@@ -64,6 +68,8 @@ struct AssetResponseDTO: Codable, Identifiable {
         type = try c.decode(String.self, forKey: .type)
         originalFileName = try c.decode(String.self, forKey: .originalFileName)
         fileCreatedAt = try c.decode(Date.self, forKey: .fileCreatedAt)
+        addedAt = try c.decodeIfPresent(Date.self, forKey: .addedAt)
+        isEdited = try c.decodeIfPresent(Bool.self, forKey: .isEdited)
         isFavorite = try c.decode(Bool.self, forKey: .isFavorite)
         isArchived = try c.decode(Bool.self, forKey: .isArchived)
         visibility = try c.decodeIfPresent(String.self, forKey: .visibility)
@@ -141,12 +147,16 @@ extension AssetResponseDTO {
         exifInfo: ExifDTO?,
         people: [PersonDTO]?,
         livePhotoVideoId: String? = nil,
-        visibility: String? = nil
+        visibility: String? = nil,
+        addedAt: Date? = nil,
+        isEdited: Bool? = nil
     ) {
         self.id = id
         self.type = type
         self.originalFileName = originalFileName
         self.fileCreatedAt = fileCreatedAt
+        self.addedAt = addedAt
+        self.isEdited = isEdited
         self.isFavorite = isFavorite
         self.isArchived = isArchived
         self.visibility = visibility

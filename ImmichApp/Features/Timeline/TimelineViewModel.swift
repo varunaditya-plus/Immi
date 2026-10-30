@@ -33,7 +33,10 @@ final class TimelineViewModel {
     private var content = TimelineContent()
     var sections: [TimelineSection] {
         get { content.sections }
-        set { content = Self.makeContent(sections: newValue, calendar: calendar) }
+        set {
+            content = Self.makeContent(sections: newValue, calendar: calendar)
+            refreshLibraryPresentation()
+        }
     }
     /// Daftar datar seluruh foto, disimpan bukan dihitung.
     ///
@@ -46,11 +49,143 @@ final class TimelineViewModel {
     private var assetStorage = AssetStorage()
     private(set) var allAssets: [AssetLite] {
         get { assetStorage.assets }
-        set { assetStorage = AssetStorage(assets: newValue) }
+        set {
+            assetStorage = AssetStorage(assets: newValue)
+            refreshLibraryPresentation()
+        }
     }
     var phase: LoadingPhase<Void> = .idle
     var albums: [AlbumResponseDTO] = []
     var actionError: String?
+    private(set) var libraryOptions = LibraryBrowseOptions()
+    private(set) var libraryAssets: [AssetLite] = [] {
+        didSet { libraryVideoCount = libraryAssets.reduce(0) { $0 + ($1.isVideo ? 1 : 0) } }
+    }
+    private(set) var libraryVideoCount = 0
+    private(set) var librarySections: [TimelineSection] = []
+    private(set) var isUpdatingLibraryOptions = false
+    private var libraryMetadataIndex: LibraryMetadataIndex?
+    // A complete metadata query can reveal server photos before the timeline
+    // cache catches up. Changing filters must not forget that capability limit.
+    private var hasKnownServerPhotos = false
+    private(set) var supportsScreenshotFilter = false
+    private var libraryOptionsRevision = 0
+    private var libraryMetadataMutationRevision: UUID?
+    private var libraryNavigationContent = TimelineContent()
+    var libraryMonthNavigationItems: [TimelineNavigationItem] { libraryNavigationContent.months }
+    var libraryYearNavigationItems: [TimelineNavigationItem] { libraryNavigationContent.years }
+    private let libraryMetadataRepository: (any LibraryMetadataProviding)?
+    private let libraryDeviceMetadata: @MainActor ([AssetLite]) -> [String: LibraryAssetMetadata]
+
+    private var actionAssets: [AssetLite] {
+        let base = allAssets.isEmpty ? sections.flatMap(\.assets) : allAssets
+        let ids = Set(base.map(\.id))
+        return base + (libraryMetadataIndex?.assets.filter { !ids.contains($0.id) } ?? [])
+    }
+
+    func updateLibraryOptions(_ options: LibraryBrowseOptions) async {
+        guard accountGeneration == LocalSnapshot.generation else { return }
+        libraryOptionsRevision &+= 1
+        let revision = libraryOptionsRevision
+        let mutationRevision = dataManager?.assetMutationRevision
+        isUpdatingLibraryOptions = true
+        defer {
+            if revision == libraryOptionsRevision { isUpdatingLibraryOptions = false }
+        }
+        do {
+            if options.filters.contains(.screenshots) || !options.showsScreenshots {
+                guard supportsScreenshotFilter else {
+                    throw APIError.server(status: 200,
+                        message: String(localized: "Screenshots filtering is unavailable for server photos."))
+                }
+            }
+            if options.sort == .recentlyAdded {
+                let local = actionAssets.filter { LocalPhotoLibrary.isLocal($0.id) }
+                let metadata = libraryDeviceMetadata(local)
+                guard local.allSatisfy({ metadata[$0.id]?.addedAt != nil }) else {
+                    throw APIError.server(status: 200, message: String(localized: "Recently Added is unavailable for device photos."))
+                }
+            }
+            var index: LibraryMetadataIndex?
+            if options.needsServerMetadata, let repository = libraryMetadataRepository {
+                index = try await repository.load(includingAlbumMembership: options.filters.contains(.notInAlbum))
+            } else if options.needsServerMetadata, allAssets.contains(where: { !LocalPhotoLibrary.isLocal($0.id) }) {
+                throw URLError(.resourceUnavailable)
+            }
+            try Task.checkCancellation()
+            guard accountGeneration == LocalSnapshot.generation, revision == libraryOptionsRevision else { return }
+            if mutationRevision != dataManager?.assetMutationRevision {
+                await updateLibraryOptions(options)
+                return
+            }
+            if options.sort == .recentlyAdded,
+               index?.assets.contains(where: { index?.metadata[$0.id]?.addedAt == nil }) == true {
+                throw APIError.server(status: 200, message: String(localized: "The server did not provide added dates for every photo."))
+            }
+            if options.filters.contains(.edited),
+               index?.assets.contains(where: { index?.metadata[$0.id]?.isEdited == nil }) == true {
+                throw APIError.server(status: 200, message: String(localized: "The server did not provide edit information for every photo."))
+            }
+            if let index { hasKnownServerPhotos = !index.assets.isEmpty }
+            libraryMetadataIndex = index
+            libraryMetadataMutationRevision = dataManager?.assetMutationRevision
+            libraryOptions = options
+            refreshLibraryPresentation()
+        } catch is CancellationError {
+        } catch {
+            guard accountGeneration == LocalSnapshot.generation, revision == libraryOptionsRevision else { return }
+            actionError = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    private func invalidateLibraryOptionsRequest() {
+        libraryOptionsRevision &+= 1
+        isUpdatingLibraryOptions = false
+    }
+
+    private func refreshLibraryPresentation() {
+        let base = allAssets.isEmpty ? sections.flatMap(\.assets) : allAssets
+        if libraryOptions == LibraryBrowseOptions(), libraryMetadataIndex == nil {
+            supportsScreenshotFilter = !hasKnownServerPhotos && !base.isEmpty
+                && base.allSatisfy { LocalPhotoLibrary.isLocal($0.id) }
+            libraryAssets = base
+            librarySections = sections
+            libraryNavigationContent = content
+            return
+        }
+        var values = libraryMetadataIndex?.metadata ?? [:]
+        var sources = base
+        if let index = libraryMetadataIndex {
+            let baseByID = Dictionary(uniqueKeysWithValues: base.map { ($0.id, $0) })
+            let local = base.filter { LocalPhotoLibrary.isLocal($0.id) }
+            let mappings = dataManager?.serverAssetIDsByLocalIdentifier() ?? [:]
+            let localServerIDs = Set(local.compactMap { mappings[LocalPhotoLibrary.localIdentifier(from: $0.id)] })
+            let serverIDs = Set(index.assets.map(\.id))
+            sources = index.assets.map { asset in
+                var value = asset
+                value.origin = localServerIDs.contains(asset.id) ? .both : baseByID[asset.id]?.origin ?? .server
+                return value
+            }
+            sources.append(contentsOf: local.filter {
+                !serverIDs.contains(mappings[LocalPhotoLibrary.localIdentifier(from: $0.id)] ?? "")
+            })
+        }
+        values.merge(libraryDeviceMetadata(sources), uniquingKeysWith: { _, local in local })
+        sources = AssetVisibilityPolicy(scope: .timeline, dataManager: dataManager).filter(sources)
+        supportsScreenshotFilter = !hasKnownServerPhotos && !sources.isEmpty
+            && sources.allSatisfy { LocalPhotoLibrary.isLocal($0.id) }
+        if !supportsScreenshotFilter {
+            libraryOptions.filters.remove(.screenshots)
+            libraryOptions.showsScreenshots = true
+        }
+        libraryAssets = LibraryPresentation.assets(sources, options: libraryOptions, metadata: values)
+        librarySections = LibraryPresentation.sections(libraryAssets, sort: libraryOptions.sort)
+        let chronological = libraryOptions.sort == .dateCaptured ? libraryAssets : libraryAssets.sorted {
+            $0.createdAt == $1.createdAt ? $0.id < $1.id : $0.createdAt < $1.createdAt
+        }
+        libraryNavigationContent = Self.makeContent(
+            sections: LibraryPresentation.sections(chronological, sort: .dateCaptured), calendar: calendar)
+    }
 
     /// Ada foto di cache lokal, diketahui SEBELUM apa pun dibaca.
     ///
@@ -107,12 +242,16 @@ final class TimelineViewModel {
         albumRepo: AlbumRepository? = nil,
         matcher: DeviceAssetMatcher? = nil,
         calendar: Calendar = .current,
+        libraryMetadataRepository: (any LibraryMetadataProviding)? = nil,
+        libraryDeviceMetadata: @escaping @MainActor ([AssetLite]) -> [String: LibraryAssetMetadata] = LibraryPresentation.deviceMetadata,
         localOriginalFile: @escaping @MainActor (String) async -> (url: URL, filename: String)? = {
             await LocalPhotoLibrary.shared.originalFile(for: $0)
         },
         localPhotos: @escaping @MainActor () -> [LocalPhoto] = { LocalPhotoLibrary.shared.photos }
     ) {
         self.dataManager = dataManager
+        self.libraryMetadataRepository = libraryMetadataRepository
+        self.libraryDeviceMetadata = libraryDeviceMetadata
         self.assetRepo = assetRepo
         self.albumRepo = albumRepo
         self.matcher = matcher
@@ -149,7 +288,7 @@ final class TimelineViewModel {
         // Tanpa penjaga ini, satu gelombang kegagalan di layar lain menjalankan
         // animasi pembuangan yang tidak membuang apa pun DAN membatalkan sidik
         // jari linimasa, yang berarti seluruh cache dibaca ulang percuma.
-        guard allAssets.contains(where: { ids.contains($0.id) }) else { return }
+        guard actionAssets.contains(where: { ids.contains($0.id) }) else { return }
         removeAssets(ids)
     }
 
@@ -215,6 +354,9 @@ final class TimelineViewModel {
         // perangkat dan tidak ada yang sedang diunduh.
         if sections.isEmpty, !hasLocalData { phase = .loading }
         await rebuild()
+        if libraryMetadataIndex != nil, libraryMetadataMutationRevision != dataManager?.assetMutationRevision {
+            await updateLibraryOptions(libraryOptions)
+        }
     }
 
     /// Reuse loaded content unless a committed local mutation made it stale.
@@ -407,7 +549,7 @@ final class TimelineViewModel {
     /// tidak berubah. Pencarian linier di sini tidak masalah: yang memanggilnya
     /// cuma ketukan dan tekan-lama, bukan penggambaran sel.
     func asset(for id: String) -> AssetLite? {
-        allAssets.first { $0.id == id }
+        allAssets.first { $0.id == id } ?? libraryAssets.first { $0.id == id }
     }
 
     /// Mengelompokkan per bulan dalam SATU lintasan, di luar main actor.
@@ -564,9 +706,9 @@ final class TimelineViewModel {
     }
 
     private func removeServerAsset(_ serverID: String) {
-        let localMappings = allAssets.contains(where: { LocalPhotoLibrary.isLocal($0.id) })
+        let localMappings = actionAssets.contains(where: { LocalPhotoLibrary.isLocal($0.id) })
             ? (dataManager?.serverAssetIDsByLocalIdentifier() ?? [:]) : [:]
-        let ids = Set(allAssets.filter {
+        let ids = Set(actionAssets.filter {
             AssetServerIdentity.resolve($0, using: dataManager, localMappings: localMappings) == serverID
         }.map(\.id))
         removeAssets(ids)
@@ -613,14 +755,15 @@ final class TimelineViewModel {
     /// "Favorite", tidak pernah "Unfavorite".
     func setFavorite(_ id: String, to value: Bool) {
         guard accountGeneration == LocalSnapshot.generation else { return }
-        let localMappings = allAssets.contains(where: { LocalPhotoLibrary.isLocal($0.id) })
+        invalidateLibraryOptionsRequest()
+        let localMappings = actionAssets.contains(where: { LocalPhotoLibrary.isLocal($0.id) })
             ? (dataManager?.serverAssetIDsByLocalIdentifier() ?? [:]) : [:]
         let serverID = asset(for: id).flatMap {
             AssetServerIdentity.resolve($0, using: dataManager, localMappings: localMappings)
         }
             ?? (LocalPhotoLibrary.isLocal(id) ? nil : id)
         guard let serverID else { return }
-        let displayIDs = Set(allAssets.filter {
+        let displayIDs = Set(actionAssets.filter {
             AssetServerIdentity.resolve($0, using: dataManager, localMappings: localMappings) == serverID
         }.map(\.id)).union([id])
         if dataManager?.getCachedAsset(id: serverID) == nil,
@@ -652,12 +795,20 @@ final class TimelineViewModel {
             updated.years[index].cover.isFavorite = value
         }
         content = updated
+        if var index = libraryMetadataIndex {
+            for offset in index.assets.indices where displayIDs.contains(index.assets[offset].id) {
+                index.assets[offset].isFavorite = value
+                index.metadata[index.assets[offset].id]?.isFavorite = value
+            }
+            libraryMetadataIndex = index
+        }
         for index in allAssets.indices where displayIDs.contains(allAssets[index].id) {
             allAssets[index].isFavorite = value
         }
         if let cached = dataManager?.getCachedAsset(id: serverID), cached.isFavorite != value {
             try? dataManager?.patchCachedAsset(serverID, isFavorite: value)
         }
+        refreshLibraryPresentation()
     }
 
     private func cacheVisibilityIfNeeded(_ id: String, visibility: AssetDetailRepository.Visibility) {
@@ -911,7 +1062,7 @@ final class TimelineViewModel {
         guard let assetRepo, accountGeneration == LocalSnapshot.generation,
               !Task.isCancelled, ids.allSatisfy({ policy.allows(id: $0) }) else { return [] }
         let selected = Set(ids)
-        let candidates = Dictionary(uniqueKeysWithValues: allAssets.filter { selected.contains($0.id) }.map { ($0.id, $0) })
+        let candidates = Dictionary(uniqueKeysWithValues: actionAssets.filter { selected.contains($0.id) }.map { ($0.id, $0) })
         let urls = await assetRepo.shareFiles(ids, preparingFile: { id in
             let asset = candidates[id] ?? AssetLite(id: id, isVideo: false, ratio: 1, thumbhash: nil, createdAt: .distantPast)
             return try await self.prepareShareFile(for: asset, using: assetRepo)
@@ -936,6 +1087,9 @@ final class TimelineViewModel {
         do {
             let duplicates = try await albumRepo.addAssets(targets.map(\.serverID), to: album.id)
             guard canMutate, targets.allSatisfy(targetIsCurrent) else { return false }
+            invalidateLibraryOptionsRequest()
+            for target in targets { libraryMetadataIndex?.metadata[target.serverID]?.isNotInAlbum = false }
+            refreshLibraryPresentation()
             if !duplicates.isEmpty {
                 // "Sudah ada di album" bukan kegagalan, tapi tetap harus
                 // terdengar — tanpa itu aksinya tidak menghasilkan apa pun
@@ -1033,7 +1187,12 @@ final class TimelineViewModel {
     /// tidak cukup ditambal per sel — linimasanya disusun ulang. Sumbernya cache
     /// lokal, jadi ini murni pekerjaan di perangkat, bukan permintaan baru.
     func assetWasUpdated(_ id: String) async {
+        invalidateLibraryOptionsRequest()
+        let optionsRevision = libraryOptionsRevision
         await loadTimeline()
+        if libraryMetadataIndex != nil, libraryOptionsRevision == optionsRevision {
+            await updateLibraryOptions(libraryOptions)
+        }
     }
 
     /// Menghapus banyak aset dalam SATU transaksi animasi.
@@ -1042,6 +1201,14 @@ final class TimelineViewModel {
     /// foto, sehingga grid terlihat berkedut menyusun ulang berkali-kali.
     private func removeAssets(_ ids: Set<String>) {
         guard !ids.isEmpty else { return }
+        invalidateLibraryOptionsRequest()
+        if var index = libraryMetadataIndex {
+            index.assets.removeAll { ids.contains($0.id) }
+            for id in ids { index.metadata.removeValue(forKey: id) }
+            hasKnownServerPhotos = !index.assets.isEmpty
+            libraryMetadataIndex = index
+            refreshLibraryPresentation()
+        }
         rebuildRevision &+= 1
         withAnimation(.easeInOut(duration: 0.25)) {
             var updatedSections = sections
