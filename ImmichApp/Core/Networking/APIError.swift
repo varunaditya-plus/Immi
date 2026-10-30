@@ -3,6 +3,7 @@ import Foundation
 enum APIError: Error, LocalizedError {
     case invalidURL
     case notConnected
+    case connectionFailed(URLError)
     case unauthorized
     case decoding(Error)
     case server(status: Int, message: String?)
@@ -12,6 +13,17 @@ enum APIError: Error, LocalizedError {
         switch self {
         case .invalidURL:      return String(localized: "Invalid server address.")
         case .notConnected:    return String(localized: "No internet connection.")
+        case .connectionFailed(let error):
+            switch error.code {
+            case .timedOut:
+                return String(localized: "The server took too long to respond. Try again.")
+            case .networkConnectionLost:
+                return String(localized: "The connection to the server was lost. Try again.")
+            case .dataNotAllowed, .internationalRoamingOff:
+                return String(localized: "Network access is restricted. Check your connection settings.")
+            default:
+                return String(localized: "Couldn't reach that server.")
+            }
         case .unauthorized:    return String(localized: "Session expired, please sign in again.")
         case .decoding:        return String(localized: "Failed to read data from server.")
         case .server(_, let m):return m ?? String(localized: "A server error occurred.")

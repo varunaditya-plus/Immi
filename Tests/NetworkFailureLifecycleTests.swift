@@ -1,0 +1,62 @@
+import XCTest
+@testable import ImmichApp
+
+@MainActor
+final class NetworkFailureLifecycleTests: XCTestCase {
+    func testAPreviousServerFailureIsCancelledBeforeItCanPublishFeedback() async throws {
+        for kind in ["data", "file", "stream"] {
+            let probe = HeldConnectionFailureProbe(started: expectation(description: "\(kind) started"))
+            HeldConnectionFailureProtocol.probe = probe
+            defer { HeldConnectionFailureProtocol.probe = nil }
+            let session = MockSessionManager()
+            try session.setServer("https://previous-feedback.example")
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.protocolClasses = [HeldConnectionFailureProtocol.self]
+            let transport = URLSession(configuration: configuration)
+            defer { transport.invalidateAndCancel() }
+            let api = APIClient(session: session, urlSession: transport)
+            let request = Task {
+                let endpoint = Endpoint(path: "/server/ping")
+                switch kind {
+                case "data": _ = try await api.rawData(endpoint)
+                case "file": _ = try await api.rawFile(endpoint)
+                default: _ = try await api.streamLines(endpoint)
+                }
+            }
+            await fulfillment(of: [probe.started], timeout: 2)
+            try session.setServer("https://current-feedback.example")
+            try XCTUnwrap(probe.connection).fail(URLError(.cannotConnectToHost))
+            do {
+                try await request.value
+                XCTFail("A stale connection must not succeed")
+            } catch is CancellationError {
+            } catch {
+                XCTFail("A previous server must not report feedback in the current session: \(error)")
+            }
+            XCTAssertEqual(session.baseURL?.host, "current-feedback.example")
+        }
+    }
+}
+
+@MainActor
+private final class HeldConnectionFailureProbe {
+    let started: XCTestExpectation
+    var connection: HeldConnectionFailureProtocol?
+
+    init(started: XCTestExpectation) { self.started = started }
+    func receive(_ connection: HeldConnectionFailureProtocol) {
+        self.connection = connection
+        started.fulfill()
+    }
+}
+
+private final class HeldConnectionFailureProtocol: URLProtocol {
+    @MainActor static var probe: HeldConnectionFailureProbe?
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Task { @MainActor in Self.probe?.receive(self) }
+    }
+    override func stopLoading() {}
+    func fail(_ error: Error) { client?.urlProtocol(self, didFailWithError: error) }
+}

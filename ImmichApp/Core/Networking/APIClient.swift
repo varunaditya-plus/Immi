@@ -100,8 +100,10 @@ class APIClient {
                 .appendingPathComponent("download-\(UUID().uuidString)")
             try FileManager.default.moveItem(at: temporaryURL, to: destination)
             return DownloadedFile(url: destination, response: http)
-        } catch let error as URLError where Self.meansOffline(error.code) {
-            throw APIError.notConnected
+        } catch let error as URLError {
+            try Task.checkCancellation()
+            try checkCurrent(context)
+            throw Self.connectionError(error)
         }
     }
 
@@ -112,8 +114,10 @@ class APIClient {
         let result: (URLSession.AsyncBytes, URLResponse)
         do {
             result = try await urlSession.bytes(for: req)
-        } catch let e as URLError where Self.meansOffline(e.code) {
-            throw APIError.notConnected
+        } catch let error as URLError {
+            try Task.checkCancellation()
+            try checkCurrent(context)
+            throw Self.connectionError(error)
         }
         let (bytes, resp) = result
         guard let http = resp as? HTTPURLResponse else { throw APIError.unknown }
@@ -121,22 +125,15 @@ class APIClient {
         return bytes.lines
     }
 
-    /// "Tidak sampai ke server" — LEBIH LUAS dari sekadar tidak ada internet.
-    ///
-    /// Sebelumnya hanya `.notConnectedToInternet` yang dikenali, dan itu kasus
-    /// yang justru paling jarang: server Immich biasanya di jaringan sendiri.
-    /// Keluar dari jangkauan Wi‑Fi rumah menghasilkan `.cannotConnectToHost`
-    /// atau `.timedOut`, dan keduanya dulu lolos sebagai `URLError` mentah —
-    /// lapisan di atasnya tidak bisa membedakan "sedang di luar" dari "ada yang
-    /// rusak", dan menampilkan pesan gagal yang membingungkan untuk keadaan yang
-    /// sepenuhnya wajar.
-    private static func meansOffline(_ code: URLError.Code) -> Bool {
-        switch code {
-        case .notConnectedToInternet, .networkConnectionLost, .cannotConnectToHost,
-             .cannotFindHost, .timedOut, .dataNotAllowed, .internationalRoamingOff:
-            return true
+    private static func connectionError(_ error: URLError) -> Error {
+        switch error.code {
+        case .notConnectedToInternet:
+            return APIError.notConnected
+        case .networkConnectionLost, .cannotConnectToHost, .cannotFindHost,
+             .dnsLookupFailed, .timedOut, .dataNotAllowed, .internationalRoamingOff:
+            return APIError.connectionFailed(error)
         default:
-            return false
+            return error
         }
     }
 
@@ -147,8 +144,10 @@ class APIClient {
             let (data, resp) = try await urlSession.data(for: req)
             guard let http = resp as? HTTPURLResponse else { throw APIError.unknown }
             return (data, http, context)
-        } catch let e as URLError where Self.meansOffline(e.code) {
-            throw APIError.notConnected
+        } catch let error as URLError {
+            try Task.checkCancellation()
+            try checkCurrent(context)
+            throw Self.connectionError(error)
         }
     }
 

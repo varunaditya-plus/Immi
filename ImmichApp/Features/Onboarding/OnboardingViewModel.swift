@@ -209,8 +209,6 @@ final class OnboardingViewModel {
         switch apiError {
         case .unauthorized:
             return String(localized: "Wrong email or password.")
-        case .notConnected:
-            return String(localized: "No internet connection.")
         case .invalidURL:
             return String(localized: "That server address doesn't look right.")
         default:

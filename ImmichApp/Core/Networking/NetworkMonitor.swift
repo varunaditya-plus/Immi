@@ -21,7 +21,7 @@ final class NetworkMonitor {
 
     /// Ada jalur jaringan yang siap. BUKAN berarti server Immich terjangkau:
     /// server di jaringan rumah tetap tidak terjawab saat kita di luar, padahal
-    /// jalurnya "siap". Untuk itulah `APIError.notConnected` diperlebar.
+    /// jalurnya "siap".
     private(set) var isOnline = true
     /// Jalurnya BERBAYAR — seluler, atau hotspot.
     ///

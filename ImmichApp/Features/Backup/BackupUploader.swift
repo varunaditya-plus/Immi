@@ -90,7 +90,7 @@ extension BackupUploadFailureDisposition {
             switch apiError {
             case .unauthorized:
                 return .authenticationRequired
-            case .notConnected:
+            case .notConnected, .connectionFailed:
                 return .retryNetwork
             case .server(let status, _):
                 if status == 401 { return .authenticationRequired }

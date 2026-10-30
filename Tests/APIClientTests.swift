@@ -33,6 +33,76 @@ final class APIClientTests: XCTestCase {
         )
     }
 
+    func testTransportFailuresKeepTheirCauseAcrossDataFileAndStreamRequests() async throws {
+        let cases: [(URLError.Code, String)] = [
+            (.notConnectedToInternet, expected("No internet connection.", "Aucune connexion Internet.")),
+            (.cannotConnectToHost, expected("Couldn't reach that server.", "Impossible de joindre ce serveur.")),
+            (.cannotFindHost, expected("Couldn't reach that server.", "Impossible de joindre ce serveur.")),
+            (.dnsLookupFailed, expected("Couldn't reach that server.", "Impossible de joindre ce serveur.")),
+            (.timedOut, expected("The server took too long to respond. Try again.",
+                "Le serveur a mis trop de temps à répondre. Réessayez.")),
+            (.networkConnectionLost, expected("The connection to the server was lost. Try again.",
+                "La connexion au serveur a été interrompue. Réessayez.")),
+            (.dataNotAllowed, expected("Network access is restricted. Check your connection settings.",
+                "L'accès au réseau est restreint. Vérifiez vos réglages de connexion.")),
+            (.internationalRoamingOff, expected("Network access is restricted. Check your connection settings.",
+                "L'accès au réseau est restreint. Vérifiez vos réglages de connexion."))
+        ]
+        for kind in ["data", "file", "stream"] {
+            for (code, message) in cases {
+                MockURLProtocol.mockError = URLError(code)
+                do {
+                    try await request(kind)
+                    XCTFail("\(kind) must report \(code)")
+                } catch let error as APIError {
+                    if code == .notConnectedToInternet {
+                        guard case .notConnected = error else { return XCTFail("Expected offline error: \(error)") }
+                    } else {
+                        guard case .connectionFailed(let underlying) = error else {
+                            return XCTFail("Expected server connection error for \(code): \(error)")
+                        }
+                        XCTAssertEqual(underlying.code, code)
+                    }
+                    XCTAssertEqual(error.localizedDescription, message, "\(kind): \(code)")
+                    XCTAssertEqual(BackupUploadFailureDisposition.classify(error), .retryNetwork)
+                    XCTAssertFalse(error.meansAssetIsUnreadable)
+                } catch {
+                    XCTFail("Unexpected \(kind) error for \(code): \(error)")
+                }
+            }
+        }
+    }
+
+    func testCancellationAndUnclassifiedTransportErrorsAreNotRelabeledOffline() async {
+        for kind in ["data", "file", "stream"] {
+            for code: URLError.Code in [.cancelled, .badServerResponse, .serverCertificateUntrusted] {
+                MockURLProtocol.mockError = URLError(code)
+                do {
+                    try await request(kind)
+                    XCTFail("The injected transport error must fail")
+                } catch let error as URLError {
+                    XCTAssertEqual(error.code, code)
+                } catch {
+                    XCTFail("\(kind) changed \(code) to \(error)")
+                }
+            }
+        }
+    }
+
+    private func request(_ kind: String) async throws {
+        let endpoint = Endpoint(path: "/server/ping")
+        switch kind {
+        case "data": _ = try await apiClient.rawData(endpoint)
+        case "file": _ = try await apiClient.rawFile(endpoint)
+        case "stream": _ = try await apiClient.streamLines(endpoint)
+        default: preconditionFailure("Unknown test transport")
+        }
+    }
+
+    private func expected(_ english: String, _ french: String) -> String {
+        Bundle.main.preferredLocalizations.first?.hasPrefix("fr") == true ? french : english
+    }
+
     func testPingSuccess() async throws {
         stub(status: 200, data: #"{"res":"pong"}"#.data(using: .utf8)!)
 
