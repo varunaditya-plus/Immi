@@ -102,6 +102,7 @@ struct PhotoCropEditor: View {
                 await loadImage()
             }
         }
+        .environment(\.colorScheme, .dark)
     }
 
     @ViewBuilder
