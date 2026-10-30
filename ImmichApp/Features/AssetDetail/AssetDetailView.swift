@@ -107,6 +107,7 @@ struct AssetDetailView: View {
     /// selama satu frame transisi pager.
     @State private var currentLivePhotoContextAssetID: String? = nil
     @State private var metadataKey: MetadataKey?
+    @State private var recentlyViewedStore: RecentlyViewedStore?
 
     init(
         currentAsset: AssetLite,
@@ -118,10 +119,12 @@ struct AssetDetailView: View {
         onAssetUpdated: ((String) -> Void)? = nil,
         onFavoriteChanged: ((String, Bool) -> Void)? = nil,
         trashActions: TrashViewerActions? = nil,
-        viewModel: AssetDetailViewModel? = nil
+        viewModel: AssetDetailViewModel? = nil,
+        recentlyViewedStore: RecentlyViewedStore? = nil
     ) {
         _viewer = State(initialValue: AssetViewerState(currentAsset: currentAsset, assets: assets))
         _vm = State(initialValue: viewModel)
+        _recentlyViewedStore = State(initialValue: recentlyViewedStore)
         self.visibilityPolicy = visibilityPolicy ?? AssetVisibilityPolicy()
         self.isModal = isModal
         self.onAssetChange = onAssetChange
@@ -388,6 +391,7 @@ struct AssetDetailView: View {
             AssetDateEditor(initialDate: detail.fileCreatedAt) { newDate in
                 Task {
                     if await vm?.updateDate(serverID, to: newDate) == true {
+                        recentlyViewedStore?.updateCaptureDate(serverID, to: newDate)
                         if serverAssetID(for: target.asset) == serverID {
                             viewer.setCaptureDate(newDate, for: target.asset.id)
                         }
@@ -818,6 +822,7 @@ struct AssetDetailView: View {
     // MARK: - Jendela halaman
 
     private func start() async {
+        if recentlyViewedStore == nil { recentlyViewedStore = .forAccount(session.accountOwner) }
         if vm == nil {
             let api = APIClient(session: session)
             vm = AssetDetailViewModel(repo: AssetDetailRepository(api: api), albumRepo: AlbumRepository(api: api))
@@ -853,7 +858,11 @@ struct AssetDetailView: View {
     private func loadMetadata(_ target: AssetViewerState.Target,
         selection: AssetDetailViewModel.Selection, model: AssetDetailViewModel) async {
         await model.load(selection)
-        guard viewer.isCurrent(target), model.isCurrent(selection) else { return }
+        guard !Task.isCancelled, viewer.isCurrent(target), model.isCurrent(selection) else { return }
+        if trashActions == nil, visibilityPolicy.scope != .locked, visibilityPolicy.removalScope != .trash,
+           case .loaded = model.phase, let detail = model.detail, detail.id == target.serverID {
+            recentlyViewedStore?.record(detail)
+        }
         if trashActions == nil, target.serverID != nil { await model.loadContainingAlbums(selection) }
     }
 
@@ -1180,6 +1189,7 @@ struct AssetDetailView: View {
             let value = !(target.detail?.isFavorite ?? target.asset.isFavorite)
             Task {
                 if await vm?.toggleFavorite(id, to: value) == true {
+                    recentlyViewedStore?.updateFavorite(id, to: value)
                     viewer.setFavorite(value, for: target.asset.id)
                     if viewer.isCurrent(target) {
                         isFavorite = value
@@ -1192,6 +1202,7 @@ struct AssetDetailView: View {
             favoriteIcon
         }
         .disabled(currentServerAssetID == nil)
+        .accessibilityLabel(isFavorite ? Text("Unfavorite") : Text("Favorite"))
 
     }
 
