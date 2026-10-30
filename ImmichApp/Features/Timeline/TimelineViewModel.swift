@@ -549,7 +549,7 @@ final class TimelineViewModel {
     /// tidak berubah. Pencarian linier di sini tidak masalah: yang memanggilnya
     /// cuma ketukan dan tekan-lama, bukan penggambaran sel.
     func asset(for id: String) -> AssetLite? {
-        allAssets.first { $0.id == id } ?? libraryAssets.first { $0.id == id }
+        libraryAssets.first { $0.id == id } ?? allAssets.first { $0.id == id }
     }
 
     /// Mengelompokkan per bulan dalam SATU lintasan, di luar main actor.

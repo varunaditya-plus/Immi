@@ -63,6 +63,39 @@ final class LibraryBrowsingTests: XCTestCase {
         XCTAssertTrue(source.membershipRequests.isEmpty)
     }
 
+    func testActionsUseVisibleMetadataWhileTheTimelineCacheCatchesUp() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("library-visible-metadata-\(UUID())")
+        directories.append(directory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let manager = SwiftDataManager(storeURL: directory.appendingPathComponent("test.store"),
+            backupJournalURL: directory.appendingPathComponent("backup.json"))
+        let item = asset("updated-metadata", captured: 20, favorite: true)
+        try manager.insertOrUpdateCachedAsset(CachedAsset(id: item.id, assetId: item.id, type: "IMAGE",
+            isFavorite: false, createdAt: Date(timeIntervalSince1970: 1)))
+        let source = LibraryMetadataStub(index: .init(assets: [item], metadata: [
+            item.id: .init(isEdited: true, isFavorite: true),
+        ]))
+        let mutations = LibraryActionRepository(api: makeStubAPIClient())
+        let model = TimelineViewModel(dataManager: manager, assetRepo: mutations, libraryMetadataRepository: source)
+        await model.loadTimeline()
+        await model.updateLibraryOptions(.init(filters: [.favorites, .edited]))
+
+        XCTAssertEqual(model.allAssets.first?.isFavorite, false,
+            "The fixture must retain stale cached values while complete metadata is visible")
+        XCTAssertEqual(model.libraryAssets.map(\.id), [item.id])
+        let visible = try XCTUnwrap(model.asset(for: item.id))
+        XCTAssertEqual(visible.isFavorite, true)
+        XCTAssertEqual(visible.createdAt, item.createdAt)
+
+        let accepted = await model.toggleFavorite(visible)
+
+        XCTAssertTrue(accepted)
+        XCTAssertEqual(mutations.favoriteUpdates, [false],
+            "Unfavorite must remove the visible favorite instead of resending the stale cache value")
+        XCTAssertTrue(model.libraryAssets.isEmpty)
+        XCTAssertEqual(manager.getCachedAsset(id: item.id)?.isFavorite, false)
+    }
+
     func testMissingAddedOrEditedMetadataPreservesThePreviousViewAndReportsFailure() async {
         let item = asset("missing-fields", captured: 2)
         let source = LibraryMetadataStub(index: .init(assets: [item], metadata: [:]))
