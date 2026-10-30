@@ -60,7 +60,7 @@ final class TimelineOriginalSharingTests: XCTestCase {
 
             XCTAssertEqual(capture.ids, ["device:\(localID)"])
             XCTAssertEqual(try Data(contentsOf: file), Data(localID.utf8))
-            XCTAssertTrue(file.lastPathComponent.hasSuffix("-\(localID).heic"))
+            XCTAssertEqual(file.lastPathComponent, "\(localID).heic")
             XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
             XCTAssertNil(MockURLProtocol.lastRequest)
             XCTAssertNil(model.actionError)
@@ -218,10 +218,8 @@ final class TimelineOriginalSharingTests: XCTestCase {
         }
         addTeardownBlock { release.signal(); _ = await task.value }
         await fulfillment(of: [started], timeout: 2)
-        let shareDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("selfphotos-share")
         if bulk {
-            let prefix = try FileManager.default.contentsOfDirectory(at: shareDirectory, includingPropertiesForKeys: nil)
-                .filter { $0.lastPathComponent.contains(token) }
+            let prefix = try managedShareFiles { $0.lastPathComponent.contains(token) }
             XCTAssertEqual(prefix.count, 1, "The batch prefix must be prepared before the mapping changes")
             files.append(contentsOf: prefix)
         }
@@ -241,8 +239,7 @@ final class TimelineOriginalSharingTests: XCTestCase {
         XCTAssertEqual(capture.ids, [displayID])
         XCTAssertEqual(requests, (bulk ? ["/api/assets/\(prefixID)/original"] : [])
             + ["/api/assets/\(originalServerID)/original"])
-        let remaining = (try? FileManager.default.contentsOfDirectory(at: shareDirectory, includingPropertiesForKeys: nil))?
-            .filter { $0.lastPathComponent.contains(token) } ?? []
+        let remaining = try managedShareFiles { $0.lastPathComponent.contains(token) }
         files.append(contentsOf: remaining)
         XCTAssertTrue(remaining.isEmpty, "The obsolete original and any prepared prefix must be removed")
     }

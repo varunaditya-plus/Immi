@@ -19,28 +19,31 @@ enum TemporaryMediaStore {
     static func adoptShareFile(at source: URL, suggestedFilename: String) throws -> URL {
         guard source.isFileURL else { throw CocoaError(.fileReadUnsupportedScheme) }
         let fileManager = FileManager.default
+        let root = shareDirectory.standardizedFileURL.path + "/"
         if Task.isCancelled {
-            try? fileManager.removeItem(at: source)
+            if source.standardizedFileURL.path.hasPrefix(root) {
+                remove(source)
+            } else {
+                try? fileManager.removeItem(at: source)
+            }
             throw CancellationError()
         }
-        let root = shareDirectory.standardizedFileURL.path + "/"
         if source.standardizedFileURL.path.hasPrefix(root) { return source }
         defer { try? fileManager.removeItem(at: source) }
-        try fileManager.createDirectory(
-            at: shareDirectory,
-            withIntermediateDirectories: true)
 
         let safeName = URL(fileURLWithPath:
             suggestedFilename.replacingOccurrences(of: "\\", with: "/")).lastPathComponent
         let filename = safeName.isEmpty || safeName == "." || safeName == ".." ? "media" : safeName
-        let url = shareDirectory
-            .appendingPathComponent(UUID().uuidString + "-" + filename)
+        // Isolate collisions in the parent so recipients retain the original basename.
+        let directory = shareDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let url = directory.appendingPathComponent(filename)
         do {
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
             try fileManager.moveItem(at: source, to: url)
             try Task.checkCancellation()
             return url
         } catch {
-            try? fileManager.removeItem(at: url)
+            try? fileManager.removeItem(at: directory)
             throw error
         }
     }
@@ -54,6 +57,12 @@ enum TemporaryMediaStore {
             let candidate = url.standardizedFileURL
             guard candidate.isFileURL, candidate.path.hasPrefix(root) else { continue }
             try? FileManager.default.removeItem(at: candidate)
+            let parent = candidate.deletingLastPathComponent()
+            if parent.deletingLastPathComponent().standardizedFileURL == shareDirectory.standardizedFileURL,
+               let contents = try? FileManager.default.contentsOfDirectory(atPath: parent.path),
+               contents.isEmpty {
+                try? FileManager.default.removeItem(at: parent)
+            }
         }
     }
 

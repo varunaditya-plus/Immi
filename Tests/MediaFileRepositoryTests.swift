@@ -38,7 +38,7 @@ final class MediaFileRepositoryTests: XCTestCase {
             let file = try await repository.shareFile("asset")
             prepared.append(file)
 
-            XCTAssertTrue(file.lastPathComponent.hasSuffix("-" + filename), file.lastPathComponent)
+            XCTAssertEqual(file.lastPathComponent, filename)
             XCTAssertEqual(try Data(contentsOf: file), Data("original bytes".utf8))
             XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
         }
@@ -56,7 +56,7 @@ final class MediaFileRepositoryTests: XCTestCase {
         prepared.append(file)
 
         XCTAssertEqual(file.pathExtension, "jpg")
-        XCTAssertTrue(file.lastPathComponent.hasSuffix("-edited-photo.jpg"))
+        XCTAssertEqual(file.lastPathComponent, "edited-photo.jpg")
         XCTAssertEqual(try Data(contentsOf: file), Data("original bytes".utf8))
     }
 
@@ -83,15 +83,37 @@ final class MediaFileRepositoryTests: XCTestCase {
     }
 
     func testFilenameFromTheServerCannotEscapeTheManagedDirectory() async throws {
-        let source = try sourceFile()
-        client.handler = { _ in self.download(source, filename: "../../photo.png", mimeType: "image/png") }
-        let file = try await repository.shareFile("asset")
-        prepared.append(file)
-        XCTAssertEqual(file.deletingLastPathComponent().lastPathComponent, "selfphotos-share")
-        XCTAssertEqual(file.pathExtension, "png")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
-        TemporaryMediaStore.remove(file)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+        for filename in ["../../photo.png", #"..\..\photo.png"#, #"C:\Photos\photo.png"#] {
+            let source = try sourceFile()
+            client.handler = { _ in self.download(source, filename: filename, mimeType: "image/png") }
+            let file = try await repository.shareFile("asset")
+            prepared.append(file)
+            XCTAssertEqual(file.deletingLastPathComponent().deletingLastPathComponent().lastPathComponent, "selfphotos-share")
+            XCTAssertEqual(file.lastPathComponent, "photo.png")
+            XCTAssertEqual(file.pathExtension, "png")
+            XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
+            TemporaryMediaStore.remove(file)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: file.deletingLastPathComponent().path))
+        }
+    }
+
+    func testQuotedFilenamesPreserveSemicolonsAndEscapedQuotesWithoutDirectoryPrefixes() async throws {
+        for (header, expected) in [
+            (#"attachment; filename="../../holiday; portrait.png""#, "holiday; portrait.png"),
+            (#"attachment; filename="..\..\photo \"QA\".png""#, "photo \"QA\".png"),
+            (#"attachment; filename="photo; filename*=UTF-8''literal.png""#, "photo; filename*=UTF-8''literal.png"),
+            (#"attachment; filename="fallback.png"; filename*=UTF-8'en'..%2F..%2Fcaf%C3%A9%20photo.png"#, "café photo.png"),
+        ] {
+            let source = try sourceFile()
+            client.handler = { _ in self.download(source, mimeType: "image/png", disposition: header) }
+
+            let file = try await repository.shareFile("asset")
+            prepared.append(file)
+
+            XCTAssertEqual(file.lastPathComponent, expected)
+            XCTAssertEqual(try Data(contentsOf: file), Data("original bytes".utf8))
+        }
     }
 
     func testCanceledLateDownloadIsRemovedInsteadOfBeingReturned() async throws {
@@ -152,21 +174,13 @@ final class MediaFileRepositoryTests: XCTestCase {
         let token = "batch-context-\(UUID())"
         let firstSource = try sourceFile()
         let secondSource = try sourceFile()
-        let controlSource = try sourceFile()
-        client.handler = { _ in self.download(controlSource, filename: "control.jpg") }
-        let control = try await repository.shareFile("control")
-        let shareDirectory = control.deletingLastPathComponent()
-        TemporaryMediaStore.remove(control)
-        client.requests.removeAll()
         var preparedPrefix: [URL] = []
         client.handler = { endpoint in
             if endpoint.path == "/assets/first/original" {
                 return self.download(firstSource, filename: "\(token)-first.heic")
             }
             XCTAssertEqual(endpoint.path, "/assets/second/original")
-            preparedPrefix = try FileManager.default.contentsOfDirectory(
-                at: shareDirectory, includingPropertiesForKeys: nil)
-                .filter { $0.lastPathComponent.contains(token) }
+            preparedPrefix = try managedShareFiles { $0.lastPathComponent.contains(token) }
             self.prepared.append(contentsOf: preparedPrefix)
             try self.client.session.setServer("https://next-account.example.com")
             return self.download(secondSource, filename: "\(token)-second.mp4")
@@ -181,9 +195,7 @@ final class MediaFileRepositoryTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: firstSource.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: secondSource.path))
         XCTAssertTrue(preparedPrefix.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) })
-        let remaining = try FileManager.default.contentsOfDirectory(
-            at: shareDirectory, includingPropertiesForKeys: nil)
-            .filter { $0.lastPathComponent.contains(token) }
+        let remaining = try managedShareFiles { $0.lastPathComponent.contains(token) }
         prepared.append(contentsOf: remaining)
         XCTAssertTrue(remaining.isEmpty)
     }
@@ -194,9 +206,11 @@ final class MediaFileRepositoryTests: XCTestCase {
         return file
     }
 
-    private func download(_ source: URL, filename: String? = nil, mimeType: String = "application/octet-stream") -> APIClient.DownloadedFile {
+    private func download(_ source: URL, filename: String? = nil, mimeType: String = "application/octet-stream",
+                          disposition: String? = nil) -> APIClient.DownloadedFile {
         var headers = ["Content-Type": mimeType]
-        if let filename {
+        if let disposition { headers["Content-Disposition"] = disposition }
+        else if let filename {
             headers["Content-Disposition"] = "inline; filename*=UTF-8''" + filename.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)!
         }
         let response = HTTPURLResponse(url: URL(string: "https://media.example.com/api/assets/asset/original")!,

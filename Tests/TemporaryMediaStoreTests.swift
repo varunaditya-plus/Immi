@@ -33,7 +33,10 @@ final class TemporaryMediaStoreTests: XCTestCase {
         defer { TemporaryMediaStore.remove([first, second]) }
 
         XCTAssertNotEqual(first, second)
-        XCTAssertTrue(first.lastPathComponent.hasSuffix("-photo.jpg"))
+        XCTAssertEqual(first.lastPathComponent, "photo.jpg")
+        XCTAssertEqual(second.lastPathComponent, "photo.jpg")
+        XCTAssertNotEqual(first.deletingLastPathComponent(), second.deletingLastPathComponent())
+        XCTAssertEqual(first.deletingLastPathComponent().deletingLastPathComponent().lastPathComponent, "selfphotos-share")
         XCTAssertEqual(try Data(contentsOf: first), Data("one".utf8))
         XCTAssertEqual(try Data(contentsOf: second), Data("two".utf8))
         XCTAssertFalse(FileManager.default.fileExists(atPath: firstSource.path))
@@ -41,7 +44,32 @@ final class TemporaryMediaStoreTests: XCTestCase {
 
         TemporaryMediaStore.remove(first)
         XCTAssertFalse(FileManager.default.fileExists(atPath: first.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: first.deletingLastPathComponent().path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: second.path))
+    }
+
+    func testRemovingASharePreservesOtherFilesAndThenReclaimsTheEmptyContainer() throws {
+        let source = directory.appendingPathComponent("source")
+        try Data("photo".utf8).write(to: source)
+        let shared = try TemporaryMediaStore.adoptShareFile(at: source, suggestedFilename: "photo.jpg")
+        let sibling = shared.deletingLastPathComponent().appendingPathComponent("another-file")
+        try Data("preserve".utf8).write(to: sibling)
+        defer { TemporaryMediaStore.remove([shared, sibling]) }
+
+        TemporaryMediaStore.remove(shared)
+
+        XCTAssertEqual(try Data(contentsOf: sibling), Data("preserve".utf8))
+        TemporaryMediaStore.remove(sibling)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sibling.deletingLastPathComponent().path))
+    }
+
+    func testRemovingUnmanagedFilesLeavesThemUntouched() throws {
+        let source = directory.appendingPathComponent("not-a-share.jpg")
+        try Data("preserve".utf8).write(to: source)
+
+        TemporaryMediaStore.remove(source)
+
+        XCTAssertEqual(try Data(contentsOf: source), Data("preserve".utf8))
     }
 
     func testAdoptingAManagedShareDoesNotMoveOrDeleteIt() throws {
@@ -84,6 +112,9 @@ final class TemporaryMediaStoreTests: XCTestCase {
                 XCTAssertTrue(error is CancellationError)
             }
             XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
+            if alreadyManaged {
+                XCTAssertFalse(FileManager.default.fileExists(atPath: source.deletingLastPathComponent().path))
+            }
         }
     }
 

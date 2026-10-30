@@ -126,10 +126,7 @@ final class AssetViewerShareFeedbackTests: XCTestCase {
     }
 
     private func preparedFiles(named filename: String) throws -> [URL] {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("selfphotos-share", isDirectory: true)
-        guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
-        return try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            .filter { $0.lastPathComponent.hasSuffix("-" + filename) }
+        try managedShareFiles { $0.lastPathComponent == filename }
     }
 
     private func shareToolbarItem() async throws -> UIBarButtonItem {

@@ -55,14 +55,14 @@ final class MediaSharingCallerTests: XCTestCase {
     func testCanceledBulkSharingRemovesPreviouslyPreparedAndCurrentFiles() async throws {
         for screen in BulkScreen.allCases {
             let fixture = try fixture()
-            let control = try await fixture.repository.shareFile("raw")
-            let shareDirectory = control.deletingLastPathComponent()
-            TemporaryMediaStore.remove(control)
-            fixture.api.requests.removeAll()
             let share = bulkShare(screen, repository: fixture.repository, api: fixture.api)
             var operation: Task<[URL], Never>?
+            var preparedPrefix: [URL] = []
             fixture.api.onDownload = { id in
-                if id == "video" { operation?.cancel() }
+                if id == "video" {
+                    preparedPrefix = (try? managedShareFiles { $0.lastPathComponent.contains(fixture.token) }) ?? []
+                    operation?.cancel()
+                }
             }
             operation = Task { await share(["photo", "video", "raw"]) }
 
@@ -70,11 +70,11 @@ final class MediaSharingCallerTests: XCTestCase {
             preparedURLs.append(contentsOf: urls)
 
             XCTAssertTrue(urls.isEmpty, "A canceled share must not publish its completed prefix")
+            XCTAssertEqual(preparedPrefix.count, 1, "A real file must have been prepared before cancellation")
+            preparedURLs.append(contentsOf: preparedPrefix)
             XCTAssertEqual(fixture.api.requests.map(\.path), ["/assets/photo/original", "/assets/video/original"])
             XCTAssertTrue(fixture.api.sources.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) })
-            let remaining = try FileManager.default.contentsOfDirectory(
-                at: shareDirectory, includingPropertiesForKeys: nil)
-                .filter { $0.lastPathComponent.contains(fixture.token) }
+            let remaining = try managedShareFiles { $0.lastPathComponent.contains(fixture.token) }
             preparedURLs.append(contentsOf: remaining)
             XCTAssertTrue(remaining.isEmpty, "Completed files from the canceled operation must be removed")
         }
@@ -133,7 +133,7 @@ final class MediaSharingCallerTests: XCTestCase {
         XCTAssertEqual(urls.count, ids.count)
         for (url, id) in zip(urls, ids) {
             let media = try XCTUnwrap(fixture.api.media[id])
-            XCTAssertTrue(url.lastPathComponent.hasSuffix(media.filename), url.lastPathComponent)
+            XCTAssertEqual(url.lastPathComponent, media.filename)
             XCTAssertEqual(try Data(contentsOf: url), media.bytes)
         }
     }

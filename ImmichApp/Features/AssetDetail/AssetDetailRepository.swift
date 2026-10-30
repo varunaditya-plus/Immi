@@ -247,10 +247,17 @@ class AssetDetailRepository {
     }
 
     private func filename(for response: HTTPURLResponse, fallback: String) -> String {
-        if let disposition = response.value(forHTTPHeaderField: "Content-Disposition"),
-           disposition.range(of: "filename\\*?\\s*=", options: [.regularExpression, .caseInsensitive]) != nil,
-           let suggested = response.suggestedFilename {
-            return suggested
+        if let disposition = response.value(forHTTPHeaderField: "Content-Disposition") {
+            if let encoded = dispositionParameter("filename*", in: disposition) {
+                let parts = encoded.split(separator: "'", maxSplits: 2, omittingEmptySubsequences: false)
+                if parts.count == 3, parts[0].lowercased() == "utf-8",
+                   let decoded = String(parts[2]).removingPercentEncoding, !decoded.isEmpty {
+                    return decoded
+                }
+            }
+            if let name = dispositionParameter("filename", in: disposition) { return name }
+            if disposition.range(of: "filename\\*?\\s*=", options: [.regularExpression, .caseInsensitive]) != nil,
+               let suggested = response.suggestedFilename { return suggested }
         }
         guard let mimeType = response.mimeType, mimeType != "application/octet-stream",
               let type = UTType(mimeType: mimeType), let ext = type.preferredFilenameExtension
@@ -260,6 +267,38 @@ class AssetDetailRepository {
             return fallback
         }
         return file.deletingPathExtension().lastPathComponent + "." + ext
+    }
+
+    private func dispositionParameter(_ name: String, in header: String) -> String? {
+        var parameters: [String] = []
+        var current = ""
+        var quoted = false
+        var escaped = false
+        for character in header {
+            if character == ";", !quoted {
+                parameters.append(current)
+                current = ""
+                continue
+            }
+            current.append(character)
+            if escaped { escaped = false }
+            else if character == "\\", quoted { escaped = true }
+            else if character == "\"" { quoted.toggle() }
+        }
+        parameters.append(current)
+        for parameter in parameters {
+            let parts = parameter.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            guard parts.count == 2,
+                  parts[0].trimmingCharacters(in: .whitespaces).lowercased() == name.lowercased()
+            else { continue }
+            let raw = parts[1].trimmingCharacters(in: .whitespaces)
+            let value = raw.hasPrefix("\"") && raw.hasSuffix("\"") && raw.count >= 2
+                ? String(raw.dropFirst().dropLast()).replacingOccurrences(of: #"\""#, with: "\"")
+                    .replacingOccurrences(of: #"\\"#, with: #"\"#)
+                : raw
+            return value.isEmpty ? nil : value
+        }
+        return nil
     }
 
     @MainActor

@@ -197,15 +197,18 @@ final class DatabaseExportSharingTests: XCTestCase {
         XCTAssertFalse(sharing.isPreparing)
     }
 
-    func testPreparationFailureReportsItsErrorAndAllowsRetryWithoutLeakingTheFailedSource() async throws {
+    func testMissingExportReportsItsErrorAndAllowsRetry() async throws {
         let sharing = DatabaseExportSharing()
         let session = try session()
-        let invalid = try file(String(repeating: "x", count: 240))
-        // The source filename itself is valid, but the store's UUID prefix
-        // makes its managed destination too long for the filesystem.
-        let error = await sharing.prepare(session: session) { invalid }
+        let missing = try file("missing.sqlite")
+        let error = await sharing.prepare(session: session) {
+            XCTAssertTrue(self.exists(missing))
+            try FileManager.default.removeItem(at: missing)
+            return missing
+        }
         XCTAssertNotNil(error)
-        XCTAssertFalse(exists(invalid))
+        XCTAssertFalse(error?.isEmpty ?? true)
+        XCTAssertFalse(exists(missing))
         XCTAssertNil(sharing.presentation)
         XCTAssertFalse(sharing.isPreparing)
         let retry = try file("retry.sqlite")
@@ -214,6 +217,25 @@ final class DatabaseExportSharingTests: XCTestCase {
         let item = try XCTUnwrap(sharing.presentation)
         managedFiles.append(item.url)
         XCTAssertTrue(exists(item.url))
+    }
+
+    func testValidLongExportFilenameKeepsItsNameAndCleansUpAfterSharing() async throws {
+        let sharing = DatabaseExportSharing()
+        let session = try session()
+        let name = String(repeating: "x", count: 240)
+        let source = try file(name, bytes: "long-name database")
+
+        let error = await sharing.prepare(session: session) { source }
+
+        XCTAssertNil(error)
+        let item = try XCTUnwrap(sharing.presentation)
+        managedFiles.append(item.url)
+        XCTAssertEqual(item.url.lastPathComponent, name)
+        XCTAssertEqual(try Data(contentsOf: item.url), Data("long-name database".utf8))
+        XCTAssertFalse(exists(source))
+        sharing.finish(item.id)
+        XCTAssertFalse(exists(item.url))
+        XCTAssertFalse(exists(item.url.deletingLastPathComponent()))
     }
 
     func testAnAlreadyManagedExportStaysAvailableUntilFinished() async throws {
