@@ -198,14 +198,15 @@ final class PeopleSnapshotStateTests: XCTestCase {
             let model = PeopleListViewModel(repo: PeopleStateRepository(driver: driver))
             let load = worker { await model.loadPeople() }
             await fulfillment(of: [held.started], timeout: 2)
-            if rename { model.applyRename("person", to: "Accepted name") }
+            let accepted = makePeopleStatePerson(name: "Accepted name")
+            if rename { model.applyPersonUpdate(PersonUpdate(person: accepted, fields: [.name])) }
             else { model.applyHidden("person", to: true) }
             held.complete(.success([makePeopleStatePerson()]))
             await load.value
 
-            XCTAssertTrue(model.people.isEmpty)
+            XCTAssertEqual(model.people, rename ? [accepted] : [])
             XCTAssertTrue(model.phase.isIdle)
-            XCTAssertNil(LocalSnapshot.load([PersonDTO].self, for: LocalSnapshot.Key.peopleList))
+            XCTAssertEqual(LocalSnapshot.load([PersonDTO].self, for: LocalSnapshot.Key.peopleList), rename ? [accepted] : nil)
             let current = [makePeopleStatePerson(name: "Accepted name", hidden: true)]
             driver.fetch = { current }
             await model.loadPeople()
@@ -223,7 +224,7 @@ final class PeopleSnapshotStateTests: XCTestCase {
         let load = worker { await model.loadPeople() }
         await fulfillment(of: [held.started], timeout: 2)
 
-        model.applyRename("person", to: "Confirmed rename")
+        model.applyPersonUpdate(PersonUpdate(person: makePeopleStatePerson(name: "Confirmed rename"), fields: [.name]))
         held.complete(.success([makePeopleStatePerson()]))
         await load.value
 
@@ -364,7 +365,7 @@ final class PeopleSnapshotStateTests: XCTestCase {
         let next = [makePeopleStatePerson("next", name: "Next account")]
         LocalSnapshot.save(next, for: LocalSnapshot.Key.peopleList)
 
-        model.applyRename("person", to: "Previous account rename")
+        model.applyPersonUpdate(PersonUpdate(person: makePeopleStatePerson(name: "Previous account rename"), fields: [.name]))
         model.applyHidden("person", to: true)
         held.complete(.success([makePeopleStatePerson()]))
         await load.value

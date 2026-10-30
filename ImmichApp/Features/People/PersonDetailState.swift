@@ -4,6 +4,8 @@ import Observation
 @MainActor
 @Observable
 final class PersonDetailState {
+
+
     struct RenameRequest: Sendable {
         let personID: String
         let name: String
@@ -17,7 +19,10 @@ final class PersonDetailState {
     private var renameID = UUID()
     private var hiddenID = UUID()
     private var detailID = UUID()
+    private var favoriteID = UUID()
+    private var keyPhotoID = UUID()
     private let snapshotGeneration = LocalSnapshot.generation
+    var isCurrent: Bool { snapshotGeneration == LocalSnapshot.generation }
 
     init(person: PersonDTO) {
         self.person = person
@@ -88,6 +93,57 @@ final class PersonDetailState {
             guard !Task.isCancelled, !(error is CancellationError), hiddenID == requestID,
                   person.id == personID, generation == LocalSnapshot.generation else { return }
             actionError = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    func setFavorite(
+        _ value: Bool, using repository: PeopleRepository,
+        onUpdated: ((PersonUpdate) -> Void)? = nil
+    ) async {
+        guard !Task.isCancelled, snapshotGeneration == LocalSnapshot.generation else { return }
+        let request = UUID()
+        favoriteID = request
+        actionError = nil
+        do {
+            try await repository.setFavorite(person.id, to: value)
+            guard !Task.isCancelled, snapshotGeneration == LocalSnapshot.generation,
+                  favoriteID == request else { return }
+            detailID = UUID()
+            var updated = person
+            updated.isFavorite = value
+            person = updated
+            onUpdated?(PersonUpdate(person: updated, fields: [.favorite]))
+        } catch {
+            guard !Task.isCancelled, !(error is CancellationError),
+                  snapshotGeneration == LocalSnapshot.generation, favoriteID == request else { return }
+            actionError = (error as? APIError)?.errorDescription ?? String(localized: "Failed to update person")
+        }
+    }
+
+    func chooseKeyPhoto(
+        _ assetID: String, from assets: [AssetLite], using repository: PeopleRepository,
+        onUpdated: ((PersonUpdate) -> Void)? = nil
+    ) async -> String? {
+        let policy = AssetVisibilityPolicy(scope: .timeline)
+        guard !Task.isCancelled, snapshotGeneration == LocalSnapshot.generation,
+              assets.contains(where: { $0.id == assetID }), policy.allows(id: assetID),
+              !LocalPhotoLibrary.isLocal(assetID) else { return String(localized: "This photo is no longer available.") }
+        let request = UUID()
+        keyPhotoID = request
+        do {
+            try await repository.setKeyPhoto(person.id, assetID: assetID)
+            guard !Task.isCancelled, snapshotGeneration == LocalSnapshot.generation,
+                  keyPhotoID == request, policy.allows(id: assetID) else { return String(localized: "This photo is no longer available.") }
+            detailID = UUID()
+            var updated = person
+            updated.updatedAt = Date()
+            person = updated
+            onUpdated?(PersonUpdate(person: updated, fields: [.thumbnail]))
+            return nil
+        } catch {
+            guard !Task.isCancelled, !(error is CancellationError),
+                  snapshotGeneration == LocalSnapshot.generation, keyPhotoID == request else { return nil }
+            return (error as? APIError)?.errorDescription ?? String(localized: "Failed to update person")
         }
     }
 

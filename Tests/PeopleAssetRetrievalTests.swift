@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import XCTest
 @testable import ImmichApp
 
@@ -255,6 +256,90 @@ final class PeopleAssetRetrievalTests: XCTestCase {
         return AssetGridViewModel(assetRepo: AssetDetailRepository(api: api),
             albumRepo: AlbumRepository(api: api), snapshotKey: snapshotKey,
             loader: { try await people.assets(personId: personID).map(AssetLite.init) })
+    }
+
+    func testFavoriteAndDelayedKeyFaceUseStableBulkUpdatesAndRefreshTheCachedThumbnail() async throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2), format: format)
+        let old = renderer.pngData { context in UIColor.red.setFill(); context.fill(CGRect(x: 0, y: 0, width: 2, height: 2)) }
+        let fresh = renderer.pngData { context in UIColor.blue.setFill(); context.fill(CGRect(x: 0, y: 0, width: 2, height: 2)) }
+        let id = UUID().uuidString, chosen = UUID().uuidString
+        var writes: [[String: Any]] = []
+        var thumbnails = 0
+        let accepted = try JSONSerialization.data(withJSONObject: [["id": id, "success": true]])
+        MockURLProtocol.responseProvider = { request in
+            if request.url?.path == "/api/people/\(id)/thumbnail" {
+                thumbnails += 1
+                return Self.response(request, data: thumbnails < 3 ? old : fresh)
+            }
+            XCTAssertEqual(request.httpMethod, "PUT")
+            XCTAssertEqual(request.url?.path, "/api/people")
+            guard let item = (Self.body(request)["people"] as? [[String: Any]])?.first else {
+                XCTFail("The bulk update must contain a person item")
+                return Self.response(request, status: 400, data: Data())
+            }
+            XCTAssertEqual(item["id"] as? String, id)
+            writes.append(item)
+            return Self.response(request, data: accepted)
+        }
+        let repository = PeopleRepository(api: api)
+        try await repository.setFavorite(id, to: true)
+        try await repository.setKeyPhoto(id, assetID: chosen)
+        XCTAssertEqual(writes.count, 2)
+        XCTAssertEqual(writes[0]["isFavorite"] as? Bool, true)
+        XCTAssertNil(writes[0]["featureFaceAssetId"])
+        XCTAssertEqual(writes[1]["featureFaceAssetId"] as? String, chosen)
+        XCTAssertGreaterThanOrEqual(thumbnails, 3, "The accepted update must wait past the worker's old thumbnail")
+        let key = "/people/\(id)/thumbnail"
+        let image = try XCTUnwrap(ImageMemoryCache.shared.image(for: ImageCache.memoryKey(key, 600)))
+        XCTAssertEqual(Self.centerPixel(image), Self.centerPixel(try XCTUnwrap(UIImage(data: fresh))))
+        XCTAssertNotEqual(Self.centerPixel(image), Self.centerPixel(try XCTUnwrap(UIImage(data: old))))
+        await ImageCache.shared.remove(key: key, maxPixelSize: 600)
+    }
+
+    func testFaceReadsAndReassignmentUseTheAssetAndDestinationPersonContracts() async throws {
+        let assetID = UUID().uuidString, target = UUID().uuidString, face = UUID().uuidString
+        let encoded = try JSONEncoder.immich.encode(PersonDTO(id: target, name: "Target", birthDate: nil, thumbnailPath: nil, isHidden: false))
+        var reads = 0, writes = 0
+        let faceData = try JSONSerialization.data(withJSONObject: [[
+            "id": face, "imageWidth": 200, "imageHeight": 100, "boundingBoxX1": 10,
+            "boundingBoxY1": 10, "boundingBoxX2": 60, "boundingBoxY2": 60, "person": NSNull(),
+        ]])
+        MockURLProtocol.responseProvider = { request in
+            if request.httpMethod == "GET" {
+                reads += 1
+                XCTAssertEqual(request.url?.path, "/api/faces")
+                let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems
+                XCTAssertEqual(query?.first(where: { $0.name == "id" })?.value, assetID)
+                return Self.response(request, data: faceData)
+            }
+            writes += 1
+            XCTAssertEqual(request.httpMethod, "PUT")
+            XCTAssertEqual(request.url?.path, "/api/faces/\(target)")
+            XCTAssertEqual(Self.body(request)["id"] as? String, face)
+            return Self.response(request, data: encoded)
+        }
+        let repository = PeopleRepository(api: api)
+        let faces = try await repository.faces(in: assetID)
+        XCTAssertEqual(faces.map(\.id), [face])
+        let updated = try await repository.reassign(faceID: face, to: target)
+        XCTAssertEqual(updated.id, target)
+        XCTAssertEqual(reads, 1)
+        XCTAssertEqual(writes, 1)
+    }
+
+    private static func centerPixel(_ image: UIImage) -> [UInt8] {
+        var bytes = [UInt8](repeating: 0, count: 4)
+        guard let source = image.cgImage else { XCTFail("The fixture must decode real pixels"); return [] }
+        bytes.withUnsafeMutableBytes { raw in
+            guard let context = CGContext(data: raw.baseAddress, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+                XCTFail("The pixel buffer must be usable"); return
+            }
+            context.draw(source, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        }
+        return bytes
     }
 
     private func newSnapshotKey() -> String {
