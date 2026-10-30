@@ -20,6 +20,39 @@ final class LibraryViewModel {
         }
         set { loadedMemories = newValue }
     }
+    private(set) var hasLoadedAlbums = false
+    private var loadedRecentDays: [RecentDayCollection] = []
+    private struct CollectionAssetStorage { var assets: [AssetLite] = [] }
+    private var featuredStorage = CollectionAssetStorage()
+    private var collectionSource = CollectionAssetStorage()
+    private var loadedMapPreviewMarker: MapMarkerDTO?
+    var recentDays: [RecentDayCollection] {
+        guard snapshotGeneration == LocalSnapshot.generation else { return [] }
+        return loadedRecentDays.compactMap { day in
+            let members = admittedCollectionAssets(day.assets)
+            return members.isEmpty ? nil : RecentDayCollection(start: day.start, end: day.end, assets: members)
+        }
+    }
+    var featuredPhotos: [AssetLite] { admittedCollectionAssets(featuredStorage.assets) }
+
+    func assets(in interval: DateInterval) -> [AssetLite] {
+        admittedCollectionAssets(collectionSource.assets).filter { $0.createdAt >= interval.start && $0.createdAt < interval.end }
+            .sorted { $0.createdAt == $1.createdAt ? $0.id < $1.id : $0.createdAt > $1.createdAt }
+    }
+
+    private func admittedCollectionAssets(_ assets: [AssetLite]) -> [AssetLite] {
+        guard snapshotGeneration == LocalSnapshot.generation else { return [] }
+        let selected = Set(localPhotos().map(\.id))
+        return AssetVisibilityPolicy(scope: .timeline, dataManager: dataManager).filter(assets).filter {
+            !LocalPhotoLibrary.isLocal($0.id) || selected.contains(LocalPhotoLibrary.localIdentifier(from: $0.id))
+        }
+    }
+
+    var mapPreviewMarker: MapMarkerDTO? {
+        guard snapshotGeneration == LocalSnapshot.generation, let marker = loadedMapPreviewMarker,
+              AssetVisibilityPolicy(scope: .timeline, dataManager: dataManager).allows(id: marker.id) else { return nil }
+        return marker
+    }
     var albums: [AlbumResponseDTO] = []
     var recentAlbums: [AlbumResponseDTO] { Array(albums.prefix(Self.rowLimit)) }
     // AssetLite equality compares IDs; this storage also publishes metadata changes.
@@ -54,6 +87,7 @@ final class LibraryViewModel {
     private let searchRepo: SearchRepository
     private let assetRepo: AssetDetailRepository
     private let dataManager: SwiftDataManager
+    private let localPhotos: @MainActor () -> [LocalPhoto]
 
     init(
         memoriesRepo: MemoriesRepository,
@@ -61,7 +95,8 @@ final class LibraryViewModel {
         peopleRepo: PeopleRepository,
         searchRepo: SearchRepository,
         assetRepo: AssetDetailRepository,
-        dataManager: SwiftDataManager? = nil
+        dataManager: SwiftDataManager? = nil,
+        localPhotos: @escaping @MainActor () -> [LocalPhoto] = { @MainActor in LocalPhotoLibrary.shared.photos }
     ) {
         self.memoriesRepo = memoriesRepo
         self.albumRepo = albumRepo
@@ -69,6 +104,7 @@ final class LibraryViewModel {
         self.searchRepo = searchRepo
         self.assetRepo = assetRepo
         self.dataManager = dataManager ?? .shared
+        self.localPhotos = localPhotos
     }
 
     /// Dipakai `task` layar, yang berjalan ulang SETIAP KALI tab dibuka lagi.
@@ -103,6 +139,7 @@ final class LibraryViewModel {
         // sehingga yang sudah tergambar dibiarkan berdiri; `[]` yang tegas hanya
         // datang dari server yang benar-benar menjawab "memang tidak ada".
         restoreSnapshots()
+        refreshRecentDays()
 
         async let memories = fetchMemories()
         async let albums = fetchAlbums()
@@ -127,6 +164,7 @@ final class LibraryViewModel {
         let acceptedPeople = peopleRequest == peopleID ? loadedPeople : nil
         let acceptedFavorites = loadedFavorites?.revision == favoriteRequest ? loadedFavorites : nil
         apply(acceptedAlbums, to: \.albums, key: LocalSnapshot.Key.libraryAlbums)
+        if acceptedAlbums != nil { hasLoadedAlbums = true }
         applyFavorites(acceptedFavorites)
         apply(acceptedPeople, to: \.people, key: LocalSnapshot.Key.libraryPeople)
 
@@ -301,6 +339,28 @@ final class LibraryViewModel {
         let fetched = await fetchAlbums()
         guard canPublish, albumRequest == request else { return }
         apply(fetched, to: \.albums, key: LocalSnapshot.Key.libraryAlbums)
+        if fetched != nil { hasLoadedAlbums = true }
+    }
+
+    func refreshRecentDays(calendar: Calendar = .current) {
+        guard canPublish else { return }
+        let policy = AssetVisibilityPolicy(scope: .timeline, dataManager: dataManager)
+        let sources = CollectionsAssetSources.merge(
+            server: dataManager.timelineAssets().map(\.asset), selectedLocal: localPhotos(),
+            mappings: dataManager.serverAssetIDsByLocalIdentifier(), policy: policy)
+        collectionSource = CollectionAssetStorage(assets: sources)
+        loadedRecentDays = RecentDayCollection.build(from: sources, calendar: calendar)
+        featuredStorage = CollectionAssetStorage(assets: FeaturedPhotoSelection.select(from: sources, calendar: calendar))
+        loadedMapPreviewMarker = LocalSnapshot.load([MapMarkerDTO].self, for: LocalSnapshot.Key.places)?
+            .first(where: { policy.allows(id: $0.id) })
+    }
+
+    func applyAlbumCover(albumID: String, assetID: String) {
+        guard canPublish, let index = albums.firstIndex(where: { $0.id == albumID }) else { return }
+        albumRequest = UUID()
+        albums[index].albumThumbnailAssetId = assetID
+        AlbumCoverStore.shared.invalidate(albumID)
+        LocalSnapshot.save(albums, for: LocalSnapshot.Key.libraryAlbums, expectedGeneration: snapshotGeneration)
     }
 
     func applyPersonRename(_ id: String, to name: String) {
@@ -343,6 +403,16 @@ final class LibraryViewModel {
     /// Baris Favorites berisi HANYA foto favorit, jadi mencabut favorit berarti
     /// foto itu keluar dari baris — bukan sekadar berganti ikon hati.
     func toggleFavorite(_ asset: AssetLite) async {
+        guard canPublish else { return }
+        if LocalPhotoLibrary.isLocal(asset.id) {
+            let actions = localActions(for: asset)
+            _ = await actions.toggleFavorite(asset)
+            guard canPublish else { return }
+            actionError = actions.actionError
+            refreshRecentDays()
+            await refreshFavorites()
+            return
+        }
         actionError = nil
         let newValue = !asset.isFavorite
         do {
@@ -359,6 +429,15 @@ final class LibraryViewModel {
     }
 
     func archive(_ asset: AssetLite) async {
+        guard canPublish else { return }
+        if LocalPhotoLibrary.isLocal(asset.id) {
+            let actions = localActions(for: asset)
+            await actions.archive(asset)
+            guard canPublish else { return }
+            actionError = actions.actionError
+            refreshRecentDays()
+            return
+        }
         actionError = nil
         do {
             try await assetRepo.toggleArchive(asset.id, to: true)
@@ -370,6 +449,15 @@ final class LibraryViewModel {
     }
 
     func delete(_ asset: AssetLite) async -> Bool {
+        guard canPublish else { return false }
+        if LocalPhotoLibrary.isLocal(asset.id) {
+            let actions = localActions(for: asset)
+            let deleted = await actions.delete(asset)
+            guard canPublish else { return false }
+            actionError = actions.actionError
+            refreshRecentDays()
+            return deleted
+        }
         actionError = nil
         do {
             try await assetRepo.delete(asset.id)
@@ -383,6 +471,14 @@ final class LibraryViewModel {
     }
 
     func addToAlbum(_ asset: AssetLite, album: AlbumResponseDTO) async {
+        guard canPublish else { return }
+        if LocalPhotoLibrary.isLocal(asset.id) {
+            let actions = localActions(for: asset)
+            await actions.addToAlbum(asset, album: album)
+            guard canPublish else { return }
+            actionError = actions.actionError
+            return
+        }
         actionError = nil
         do {
             let duplicates = try await albumRepo.addAssets([asset.id], to: album.id)
@@ -403,6 +499,12 @@ final class LibraryViewModel {
     func shareURL(for asset: AssetLite, reportsErrors: Bool = true) async -> URL? {
         guard snapshotGeneration == LocalSnapshot.generation, !Task.isCancelled,
               AssetVisibilityPolicy(scope: .timeline, dataManager: dataManager).allows(id: asset.id) else { return nil }
+        if LocalPhotoLibrary.isLocal(asset.id) {
+            let actions = localActions(for: asset)
+            let urls = await actions.shareURLs(for: [asset.id])
+            if reportsErrors, canPublish { actionError = actions.actionError }
+            return urls.first
+        }
         do {
             let url = try await assetRepo.shareFile(asset.id)
             guard snapshotGeneration == LocalSnapshot.generation, !Task.isCancelled,
@@ -421,6 +523,13 @@ final class LibraryViewModel {
             }
             return nil
         }
+    }
+
+    private func localActions(for asset: AssetLite) -> TimelineViewModel {
+        let model = TimelineViewModel(dataManager: dataManager, assetRepo: assetRepo, albumRepo: albumRepo,
+            localPhotos: localPhotos)
+        model.sections = [TimelineSection(id: "collection-action", title: "", assets: [asset], count: 1)]
+        return model
     }
 
     /// Setiap baris di Library hanya deretan mendatar — belasan kartu sudah
