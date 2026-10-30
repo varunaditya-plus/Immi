@@ -53,6 +53,7 @@ struct TimelineView: View {
     @State private var initialNewestContentReady = false
     @State private var isFinishingInitialTimelineLoad = false
     @State private var libraryOptionsTask: Task<Void, Never>?
+    @State private var contentWidth: CGFloat = 390
 
     /// Mode pilih dibagi dengan AppRouter karena picker compact iPhone hidup
     /// sebagai overlay di luar TimelineView.
@@ -66,6 +67,7 @@ struct TimelineView: View {
 
     var body: some View {
         screen
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { contentWidth = $0 }
         .task {
             if vm == nil {
                 let api = APIClient(session: session)
@@ -461,11 +463,6 @@ struct TimelineView: View {
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
     }
 
-    private var titleStack: some View {
-        TimelineLibraryHeader(count: libraryCount, itemCount: vm?.libraryAssets.count ?? 0,
-            mode: timelineNavigation.mode)
-    }
-
     private var libraryCount: String {
         let assets = vm?.libraryAssets ?? []
         let videos = vm?.libraryVideoCount ?? 0
@@ -599,25 +596,17 @@ struct TimelineView: View {
 
     @ToolbarContentBuilder
     private var timelineToolbar: some ToolbarContent {
-        // Judul sebagai toolbar item, bukan navigationTitle: posisinya tetap,
-        // tidak ikut menyusut ke inline saat di-scroll.
-        // Judul disembunyikan selama memilih: jumlah terpilih menempati posisi
-        // principal, dan UIKit memusatkan `titleView` di antara item bar — dengan
-        // judul besar masih di kiri, jumlahnya terjepit sampai terpotong.
-        if !isSelecting {
-            ToolbarItem(placement: .topBarLeading) { titleStack }
-                // Judul tidak boleh dapat latar kapsul seperti tombol.
-                .sharedBackgroundVisibility(.hidden)
-        }
-
-        // Pada iPad bar tetap terlihat di Years/Months supaya segmented control
-        // dapat dipakai, tetapi aksi milik grid All tidak ikut ditampilkan.
         if timelineNavigation.mode == .all {
-            if !isSelecting {
-                ToolbarItem(placement: .topBarTrailing) { libraryMenu }
-                ToolbarSpacer(.fixed, placement: .topBarTrailing)
+            if isSelecting {
+                ToolbarItem(placement: .topBarTrailing) { selectButton }
+            } else {
+                ToolbarItem(placement: .principal) {
+                    TimelineLibraryToolbar(width: contentWidth, count: libraryCount,
+                        itemCount: vm?.libraryAssets.count ?? 0,
+                        sort: { libraryMenu }, select: { selectButton })
+                }
+                .sharedBackgroundVisibility(.hidden)
             }
-            ToolbarItem(placement: .topBarTrailing) { selectButton }
         }
         if isSelecting {
             // Jumlahnya pindah ke bar ATAS: bar bawah sekarang penuh aksi, dan
@@ -894,28 +883,53 @@ struct TimelineView: View {
     }
 }
 
+struct TimelineLibraryToolbar<Sort: View, Select: View>: View {
+    let width: CGFloat
+    let count: String
+    let itemCount: Int
+    @ViewBuilder let sort: () -> Sort
+    @ViewBuilder let select: () -> Select
+
+    var body: some View {
+        HStack(spacing: 12) {
+            TimelineLibraryHeader(count: count, itemCount: itemCount)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            sort()
+                .buttonStyle(.plain)
+                .frame(width: 44, height: 44)
+                .glassEffect(.regular, in: .circle)
+                .fixedSize()
+            select()
+                .buttonStyle(.plain)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+                .padding(.horizontal, 16)
+                .frame(height: 44)
+                .glassEffect(.regular, in: .capsule)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+        .frame(width: max(1, width - 40))
+    }
+}
+
 struct TimelineLibraryHeader: View {
     let count: String
     let itemCount: Int
-    var mode: TimelineMode = .all
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Library")
                 .font(.largeTitle.bold())
-                .minimumScaleFactor(0.6)
-            if mode == .all {
-                ViewThatFits(in: .horizontal) {
-                    Text(count).fixedSize(horizontal: true, vertical: false)
-                    Text("^[\(itemCount) item](inflect: true)")
-                        .minimumScaleFactor(0.75)
-                }
-                .font(.headline.weight(.semibold))
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(count)
-            } else {
-                Text(mode.title).font(.headline.bold()).minimumScaleFactor(0.75)
+                .minimumScaleFactor(0.35)
+            ViewThatFits(in: .horizontal) {
+                Text(count).fixedSize(horizontal: true, vertical: false)
+                Text("^[\(itemCount) item](inflect: true)")
+                    .minimumScaleFactor(0.5)
             }
+            .font(.headline.weight(.semibold))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(count)
         }
         .lineLimit(1)
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
