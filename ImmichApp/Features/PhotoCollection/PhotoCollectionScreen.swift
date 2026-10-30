@@ -110,6 +110,7 @@ struct PhotoCollectionScreen<Options: View>: View {
     var visibilityScope: AssetVisibilityPolicy.Scope = .collection
     var canPerformServerActions: (AssetLite) -> Bool = { _ in true }
     var facePersonID: String? = nil
+    var viewOptions: (() -> AnyView)? = nil
     /// Detail album di iPad tetap membutuhkan sidebar sebagai jalan kembali ke
     /// All Albums. Di compact/iPhone, tab bar tetap disembunyikan seperti biasa.
     var keepsTabBarVisibleOnRegularWidth = false
@@ -879,6 +880,7 @@ struct PhotoCollectionScreen<Options: View>: View {
                             }
                             Divider()
                         }
+                        if let viewOptions { viewOptions() }
                         Button("Zoom In", systemImage: "plus.magnifyingglass") {
                             gridController?.zoomDensity(in: true)
                         }
@@ -898,6 +900,7 @@ struct PhotoCollectionScreen<Options: View>: View {
             } label: {
                 Image(systemName: "ellipsis")
             }
+            .accessibilityLabel("More")
             .confirmationDialog(
                 optionsConfirmation?.title ?? "",
                 isPresented: optionsConfirmationPresented ?? .constant(false),
