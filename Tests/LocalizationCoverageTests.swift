@@ -40,6 +40,21 @@ final class LocalizationCoverageTests: XCTestCase {
         }
     }
 
+    func testPhotosBrowsingAndAlbumControlsAreInEveryCompiledLocalization() throws {
+        let keys = ["Collections", "All Items", "Recently Added", "Date Captured", "View Options",
+            "Aspect Ratio Grid", "Edited", "Not in an Album", "Pinned", "New Folder", "Custom Order",
+            "Choose Key Photo", "Activity", "Send Comment", "View Personal Albums", "Collapse %@", "Expand %@",
+            "Recently Added is unavailable for device photos.", "Screenshots filtering is unavailable for server photos."]
+        for language in languages {
+            let bundle = try localizedBundle(Bundle.main, language: language)
+            for key in keys { assertCompiled(key, in: bundle) }
+        }
+        let french = try localizedBundle(Bundle.main, language: "fr")
+        XCTAssertEqual(french.localizedString(forKey: "New Folder", value: nil, table: nil), "Nouveau dossier")
+        let arabic = try localizedBundle(Bundle.main, language: "ar")
+        XCTAssertNotEqual(arabic.localizedString(forKey: "Send Comment", value: nil, table: nil), "Send Comment")
+    }
+
     func testRecentUserFacingErrorsAndPaginationAreInCompiledAppResources() throws {
         let keys = ["The server took too long to respond. Try again.",
             "The connection to the server was lost. Try again.",
