@@ -545,14 +545,16 @@ struct PeopleGroupDetailView: View {
     }
 }
 
-private struct PeopleGroupKeyPhotoPicker: View {
+struct PeopleGroupKeyPhotoPicker: View {
     let personIDs: [String]
     let selectedID: String?
+    var assetLoader: (([String]) async throws -> [AssetLite])? = nil
     let onSave: (String) async -> String?
     @Environment(SessionManager.self) private var session
     @Environment(\.dismiss) private var dismiss
     @State private var phase: LoadingPhase<[AssetLite]> = .loading
     @State private var loadedQuery: SelectionQuery?
+    @State private var loadRequest = UUID()
 
     private var query: SelectionQuery {
         SelectionQuery(people: personIDs.sorted(), revisions: PeopleGroupMembership.revisions(for: personIDs),
@@ -561,9 +563,9 @@ private struct PeopleGroupKeyPhotoPicker: View {
 
     var body: some View {
         Group {
-            if let assets = phase.value, loadedQuery == query {
+            if let assets = phase.value, let loadedQuery, loadedQuery == query {
                 AlbumKeyPhotoPicker(assets: AssetVisibilityPolicy(scope: .timeline).filter(assets), selectedID: selectedID) { id in
-                    guard AssetVisibilityPolicy(scope: .timeline).allows(id: id) else {
+                    guard loadedQuery == query, AssetVisibilityPolicy(scope: .timeline).allows(id: id) else {
                         return String(localized: "This photo is no longer available.")
                     }
                     return await onSave(id)
@@ -588,16 +590,23 @@ private struct PeopleGroupKeyPhotoPicker: View {
     }
 
     private func load() async {
+        let request = UUID()
+        let currentQuery = query
+        loadRequest = request
         phase = .loading
-        loadedQuery = query
+        loadedQuery = currentQuery
         let api = APIClient(session: session)
         do {
-            let assets = try await PeopleGroupRepository(repository: SearchRepository(api: api))
-                .assets(personIDs: personIDs, includingOtherPeople: false)
-            guard !Task.isCancelled else { return }
+            let assets: [AssetLite]
+            if let assetLoader { assets = try await assetLoader(currentQuery.people) }
+            else {
+                assets = try await PeopleGroupRepository(repository: SearchRepository(api: api))
+                    .assets(personIDs: currentQuery.people, includingOtherPeople: false)
+            }
+            guard !Task.isCancelled, loadRequest == request, query == currentQuery else { return }
             phase = .loaded(assets)
         } catch {
-            guard !Task.isCancelled, !(error is CancellationError) else { return }
+            guard !Task.isCancelled, !(error is CancellationError), loadRequest == request, query == currentQuery else { return }
             phase = .failed((error as? APIError)?.errorDescription ?? String(localized: "Failed to load photos"))
         }
     }
