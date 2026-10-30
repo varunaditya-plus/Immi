@@ -358,10 +358,9 @@ struct SettingsView: View {
                 get: { vm.gridColumns },
                 set: { vm.updateGridColumns($0) }
             )) {
-                Text("2 Columns").tag(2)
-                Text("3 Columns").tag(3)
-                Text("4 Columns").tag(4)
-                Text("5 Columns").tag(5)
+                ForEach([1, 2, 3, 4, 5, 10], id: \.self) { columns in
+                    Text(columns.formatted()).tag(columns)
+                }
             } label: {
                 Label("Grid Columns", systemImage: "square.grid.3x3")
             }

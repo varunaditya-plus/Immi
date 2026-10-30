@@ -19,6 +19,7 @@ enum PhotoGridLayoutStyle: Equatable {
 struct PhotoGridConfiguration: Equatable {
     var layoutStyle: PhotoGridLayoutStyle = .square
     var columns: Int = 3
+    var allowsDensityZoom = false
     /// Judul bulan yang menempel di tepi atas.
     ///
     /// Sekaligus menentukan apakah gridnya DIPECAH per bulan. Batas section-lah
@@ -116,6 +117,7 @@ struct PhotoGridView: UIViewControllerRepresentable {
     /// Menyerahkan controller-nya ke pemanggil, untuk perintah yang datang dari
     /// luar (mis. "kembali ke foto terbaru" saat tab ditekan ulang).
     var onControllerReady: ((PhotoGridController) -> Void)? = nil
+    var onDensityChanged: ((Int) -> Void)? = nil
     var visibilityPolicy = AssetVisibilityPolicy()
 
     let session: SessionManager
@@ -145,6 +147,7 @@ struct PhotoGridView: UIViewControllerRepresentable {
     private func bind(_ controller: PhotoGridController) {
         controller.visibilityPolicy = visibilityPolicy
         controller.onOpen = onOpen
+        controller.onDensityChanged = onDensityChanged
         controller.makeDetail = detailScreen.map { build in
             { id in UIHostingController(rootView: build(id)) }
         }
@@ -276,6 +279,18 @@ final class PhotoGridController: UIViewController {
     private var assetsByID: [String: AssetLite] = [:]
     private var sectionTitles: [SectionID: String] = [:]
     private var configuration = PhotoGridConfiguration()
+    private var densityPinch: UIPinchGestureRecognizer?
+    private var densityTransition: UICollectionViewTransitionLayout?
+    private var densityStartColumns = 3
+    private var densityTargetColumns = 3
+    private var densityAlignment: PhotoGridDensityAlignment?
+    private var densityGeneration: UUID?
+    private var densityAnchor: PhotoGridDensityAnchor?
+    private var pendingDensityAnchor: PhotoGridDensityAnchor?
+    private var pendingDensityColumns: Int?
+    private var densityIsFinishing = false
+    private var densityCommitCancelled = false
+    var onDensityChanged: ((Int) -> Void)?
     private var hero: AnyView?
     /// Isi untuk tata letak justified; dibaca closure layout, ditulis di sini.
     private let justifiedStore = JustifiedLayoutStore()
@@ -415,7 +430,7 @@ final class PhotoGridController: UIViewController {
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        scrollToNewestIfNeeded()
+        if densityTransition == nil, !densityIsFinishing { scrollToNewestIfNeeded() }
         // Terbang yang tidak pernah selesai — aplikasi masuk latar di tengah
         // jalan, misalnya — akan meninggalkan penahanan dan penghentian pemuat
         // menyala selamanya: grid berhenti diperbarui dan setiap thumbnail
@@ -468,6 +483,10 @@ final class PhotoGridController: UIViewController {
         // Seleksi banyak BAWAAN — termasuk seret dua jari untuk memilih rentang.
         // Ini menggantikan seluruh recognizer kustom kita beserta auto-scroll-nya.
         collectionView.allowsMultipleSelectionDuringEditing = true
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handleDensityPinch(_:)))
+        pinch.delegate = self
+        collectionView.addGestureRecognizer(pinch)
+        densityPinch = pinch
 
         view.addSubview(collectionView)
         applyContentInsets()
@@ -514,20 +533,18 @@ final class PhotoGridController: UIViewController {
 
     /// The layout owns its configuration. A weak controller reference only
     /// identifies the add-only section, which has no month header.
-    private func makeLayout() -> UICollectionViewCompositionalLayout {
-        let config = configuration
-
+    private func makeLayout(
+        configuration override: PhotoGridConfiguration? = nil,
+        alignment: PhotoGridDensityAlignment? = nil,
+        anchor: PhotoGridDensityAnchor? = nil
+    ) -> UICollectionViewCompositionalLayout {
+        let config = override ?? configuration
         let layoutConfiguration = UICollectionViewCompositionalLayoutConfiguration()
         layoutConfiguration.interSectionSpacing = gridSpacing
-
         let store = justifiedStore
-
-        return UICollectionViewCompositionalLayout(
+        let layout = PhotoGridDensityLayout(
             sectionProvider: { [weak self] index, environment in
-                // Sampul selalu section pertama kalau ada — lihat `apply`.
-                if config.heroHeight > 0 && index == 0 {
-                    return heroLayoutSection(config)
-                }
+                if config.heroHeight > 0 && index == 0 { return heroLayoutSection(config) }
                 if self?.dataSource?.sectionIdentifier(for: index) == .add {
                     var addConfiguration = config
                     addConfiguration.showsSectionHeaders = false
@@ -535,12 +552,23 @@ final class PhotoGridController: UIViewController {
                 }
                 switch config.layoutStyle {
                 case .square:
+                    if let alignment, alignment.section == index,
+                       let collection = self?.collectionView {
+                        return focalPhotoLayoutSection(config, environment,
+                            itemCount: collection.numberOfItems(inSection: index),
+                            leadingAdjustment: alignment.leadingAdjustment)
+                    }
                     return photoLayoutSection(config, environment)
                 case .justified:
                     return justifiedLayoutSection(config, environment, store)
                 }
-            },
-            configuration: layoutConfiguration)
+            }, configuration: layoutConfiguration)
+        if let anchor, let path = dataSource?.indexPath(for: anchor.assetID) {
+            layout.anchorPath = path
+            layout.anchorFractionY = anchor.fractionY
+            layout.anchorViewportY = anchor.viewportPoint.y
+        }
+        return layout
     }
 
     // MARK: - Sumber data
@@ -598,11 +626,16 @@ final class PhotoGridController: UIViewController {
         else { return cell }
 
         configure(photoCell, with: asset)
-        photoCell.contentView.isHidden = (itemID == hiddenZoomID)
+        photoCell.contentView.isHidden = itemID == hiddenZoomID || !visibilityPolicy.allows(id: itemID)
         return photoCell
     }
 
     private func configure(_ cell: PhotoGridCell, with asset: AssetLite) {
+        guard visibilityPolicy.allows(id: asset.id) else {
+            cell.prepareForReuse()
+            cell.contentView.isHidden = true
+            return
+        }
         cell.configure(with: asset, loader: loader)
         guard cell.isAccessibilityElement else { return }
         let isPicked = dataSource.indexPath(for: asset.id).map {
@@ -637,6 +670,13 @@ final class PhotoGridController: UIViewController {
     ) {
         let newSections = visibilityPolicy.filterSections(newSections)
         refreshPrivacyVisibility()
+        if densityGeneration != nil,
+           densityGeneration != LocalSnapshot.generation || densityAnchor.map({ anchor in
+               !visibilityPolicy.allows(id: anchor.assetID)
+                   || !newSections.contains(where: { $0.assets.contains(where: { $0.id == anchor.assetID }) })
+           }) == true {
+            finishDensityTransition(committing: false)
+        }
         // Sampulnya SwiftUI dan boleh berubah tiap frame (animasi zoom lambat di
         // dalamnya); yang penting hanya sel hosting-nya membaca nilai terbaru.
         hero = newHero
@@ -752,7 +792,7 @@ final class PhotoGridController: UIViewController {
         // ribu item adalah kerja main thread yang panjang; menjalankannya di
         // tengah animasi menghasilkan gerakan yang macet lalu lanjut lagi.
         guard !isScrolling, !collectionView.isDragging, !collectionView.isDecelerating,
-              applyingSnapshotRevision == nil
+              applyingSnapshotRevision == nil, densityGeneration == nil, densityTransition == nil, !densityIsFinishing
         else { return }
 
         self.pending = nil
@@ -807,7 +847,10 @@ final class PhotoGridController: UIViewController {
             self.refreshVisibleHeaders()
             let canRestore = !self.isScrolling && !self.collectionView.isDragging
                 && !self.collectionView.isDecelerating
-            if canRestore, let anchor {
+            if canRestore, let densityAnchor = self.pendingDensityAnchor {
+                self.restoreDensityAnchor(densityAnchor)
+                self.pendingDensityAnchor = nil
+            } else if canRestore, let anchor {
                 self.restorePosition(anchor)
             } else if canRestore, self.isAnchoredToNewest {
                 // Jalur inilah yang hilang: diff kecil dari auto-backup memakai
@@ -817,6 +860,10 @@ final class PhotoGridController: UIViewController {
                 _ = self.scrollToNewestIfNeeded()
             }
             self.applyingSnapshotRevision = nil
+            if let columns = self.pendingDensityColumns {
+                self.pendingDensityColumns = nil
+                self.onDensityChanged?(columns)
+            }
             self.scheduleInitialNewestRevealIfNeeded()
             self.flushPendingSnapshot()
         }
@@ -1404,6 +1451,7 @@ final class PhotoGridController: UIViewController {
     // MARK: - Seleksi
 
     func setSelecting(_ selecting: Bool) {
+        if selecting { finishDensityTransition(committing: false) }
         guard isViewLoaded, collectionView.isEditing != selecting else { return }
         collectionView.isEditing = selecting
 
@@ -1455,6 +1503,256 @@ final class PhotoGridController: UIViewController {
 }
 
 // MARK: - Sumber transisi zoom
+
+private struct PhotoGridDensityAlignment: Equatable {
+    let section: Int
+    let leadingAdjustment: Int
+}
+
+private final class PhotoGridDensityLayout: UICollectionViewCompositionalLayout {
+    var anchorPath: IndexPath?
+    var anchorFractionY: CGFloat = 0
+    var anchorViewportY: CGFloat = 0
+
+    override func targetContentOffset(forProposedContentOffset proposedContentOffset: CGPoint) -> CGPoint {
+        guard let collection = collectionView, let anchorPath,
+              let frame = layoutAttributesForItem(at: anchorPath)?.frame else {
+            return super.targetContentOffset(forProposedContentOffset: proposedContentOffset)
+        }
+        let low = -collection.adjustedContentInset.top
+        let high = max(low, collectionViewContentSize.height - collection.bounds.height + collection.adjustedContentInset.bottom)
+        let y = frame.minY + frame.height * anchorFractionY - anchorViewportY
+        return CGPoint(x: 0, y: min(high, max(low, y)))
+    }
+}
+
+struct PhotoGridDensityAnchor {
+    let assetID: String
+    let fractionY: CGFloat
+    var viewportPoint: CGPoint
+}
+
+enum PhotoGridDensity {
+    static let levels = [1, 3, 5, 10]
+
+    static func next(columns: Int, zoomingIn: Bool) -> Int? {
+        zoomingIn ? levels.last(where: { $0 < columns }) : levels.first(where: { $0 > columns })
+    }
+
+    static func progress(scale: CGFloat, from: Int, to: Int) -> CGFloat {
+        guard scale > 0, from > 0, to > 0, from != to else { return 0 }
+        return min(1, max(0, log(scale) / log(CGFloat(from) / CGFloat(to))))
+    }
+}
+
+extension PhotoGridController: UIGestureRecognizerDelegate {
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer === densityPinch else { return true }
+        return configuration.allowsDensityZoom && !collectionView.isEditing
+            && !assetsByID.isEmpty && applyingSnapshotRevision == nil
+            && densityTransition == nil && !densityIsFinishing
+            && presentedViewController == nil
+    }
+
+    func zoomDensity(in zoomingIn: Bool) {
+        guard isViewLoaded, configuration.allowsDensityZoom, applyingSnapshotRevision == nil,
+              densityGeneration == nil, densityTransition == nil, !densityIsFinishing,
+              let columns = PhotoGridDensity.next(columns: configuration.columns, zoomingIn: zoomingIn)
+        else { return }
+        endReturnLink()
+        finishReturningToNewest(settle: false)
+        isAnchoredToNewest = false
+        isScrolling = false
+        collectionView.setContentOffset(collectionView.contentOffset, animated: false)
+        densityAnchor = makeDensityAnchor(at: CGPoint(x: collectionView.bounds.midX, y: collectionView.bounds.midY))
+        densityGeneration = LocalSnapshot.generation
+        densityCommitCancelled = false
+        densityTargetColumns = columns
+        var next = configuration
+        next.columns = columns
+        densityAlignment = normalDensityAlignment(columns: columns)
+        densityIsFinishing = true
+        collectionView.setCollectionViewLayout(
+            makeLayout(configuration: next, alignment: densityAlignment, anchor: densityAnchor),
+            animated: !UIAccessibility.isReduceMotionEnabled
+        ) { [weak self] _ in self?.completeDensityChange(committed: true) }
+    }
+
+    private func normalDensityAlignment(columns: Int) -> PhotoGridDensityAlignment? {
+        guard configuration.layoutStyle == .square, let anchor = densityAnchor,
+              let path = dataSource.indexPath(for: anchor.assetID) else { return nil }
+        let desiredPad: Int
+        if !configuration.showsSectionHeaders, configuration.padsFirstRow {
+            desiredPad = (columns - assetsByID.count % columns) % columns
+        } else {
+            desiredPad = 0
+        }
+        return PhotoGridDensityAlignment(section: path.section,
+            leadingAdjustment: desiredPad - (configuration.showsSectionHeaders ? 0 : flatPadCount))
+    }
+
+    private func focalDensityAlignment(columns: Int) -> PhotoGridDensityAlignment? {
+        guard configuration.layoutStyle == .square, let anchor = densityAnchor,
+              let path = dataSource.indexPath(for: anchor.assetID) else { return nil }
+        let width = collectionView.bounds.width
+        let side = max(1, (width - gridSpacing * CGFloat(columns - 1)) / CGFloat(columns))
+        // Keep the same photo under the fingers; arbitrary fractional pixels cannot
+        // all stay fixed when a regular grid changes its discrete column count.
+        let desiredColumn = Int(((anchor.viewportPoint.x + gridSpacing / 2) / (side + gridSpacing)).rounded(.down))
+        let column = min(columns - 1, max(0, desiredColumn))
+        let oldPad = configuration.showsSectionHeaders ? 0 : flatPadCount
+        let assetIndex = path.item - oldPad
+        let desiredPad = (column - assetIndex % columns + columns) % columns
+        return PhotoGridDensityAlignment(section: path.section, leadingAdjustment: desiredPad - oldPad)
+    }
+
+    private func makeDensityAnchor(at contentPoint: CGPoint) -> PhotoGridDensityAnchor? {
+        let paths = collectionView.indexPathsForVisibleItems
+        let candidates = paths.compactMap { path -> (String, CGRect)? in
+            guard let id = dataSource.itemIdentifier(for: path), assetsByID[id] != nil,
+                  let attributes = collectionView.layoutAttributesForItem(at: path) else { return nil }
+            return (id, attributes.frame)
+        }
+        let picked = candidates.first(where: { $0.1.contains(contentPoint) })
+            ?? candidates.min { distanceSquared(from: contentPoint, to: $0.1) < distanceSquared(from: contentPoint, to: $1.1) }
+        guard let (id, frame) = picked, frame.height > 0 else { return nil }
+        return PhotoGridDensityAnchor(assetID: id,
+            fractionY: min(1, max(0, (contentPoint.y - frame.minY) / frame.height)),
+            viewportPoint: CGPoint(x: contentPoint.x - collectionView.contentOffset.x,
+                y: contentPoint.y - collectionView.contentOffset.y))
+    }
+
+    private func distanceSquared(from point: CGPoint, to frame: CGRect) -> CGFloat {
+        let dx = max(max(frame.minX - point.x, 0), point.x - frame.maxX)
+        let dy = max(max(frame.minY - point.y, 0), point.y - frame.maxY)
+        return dx * dx + dy * dy
+    }
+
+    private func restoreDensityAnchor(_ anchor: PhotoGridDensityAnchor) {
+        collectionView.layoutIfNeeded()
+        guard let path = dataSource.indexPath(for: anchor.assetID),
+              let attributes = collectionView.layoutAttributesForItem(at: path) else { return }
+        let offset = attributes.frame.minY + attributes.frame.height * anchor.fractionY - anchor.viewportPoint.y
+        collectionView.setContentOffset(CGPoint(x: 0,
+            y: min(max(offset, -collectionView.adjustedContentInset.top), maxContentOffsetY())), animated: false)
+    }
+
+    @objc private func handleDensityPinch(_ recognizer: UIPinchGestureRecognizer) {
+        switch recognizer.state {
+        case .began: beginDensityZoom(at: recognizer.location(in: collectionView))
+        case .changed: updateDensityZoom(scale: recognizer.scale, at: recognizer.location(in: collectionView))
+        case .ended: finishDensityZoom(committing: (densityTransition?.transitionProgress ?? 0) >= 0.45)
+        case .cancelled, .failed: finishDensityZoom(committing: false)
+        default: break
+        }
+    }
+
+    func beginDensityZoom(at contentPoint: CGPoint) {
+        guard isViewLoaded, configuration.allowsDensityZoom, !collectionView.isEditing,
+              applyingSnapshotRevision == nil, densityTransition == nil, !densityIsFinishing else { return }
+        endReturnLink()
+        finishReturningToNewest(settle: false)
+        isAnchoredToNewest = false
+        isScrolling = false
+        collectionView.setContentOffset(collectionView.contentOffset, animated: false)
+        densityStartColumns = configuration.columns
+        // Snapshot updates must wait even before the pinch crosses its first threshold.
+        densityGeneration = LocalSnapshot.generation
+        densityCommitCancelled = false
+        densityAnchor = makeDensityAnchor(at: contentPoint)
+    }
+
+    func updateDensityZoom(scale: CGFloat, at contentPoint: CGPoint) {
+        guard densityGeneration == LocalSnapshot.generation,
+              let anchor = densityAnchor, visibilityPolicy.allows(id: anchor.assetID) else {
+            finishDensityTransition(committing: false)
+            return
+        }
+        densityAnchor?.viewportPoint = CGPoint(
+            x: contentPoint.x - collectionView.contentOffset.x,
+            y: contentPoint.y - collectionView.contentOffset.y)
+        if densityTransition == nil {
+            guard abs(scale - 1) > 0.025,
+                  let target = PhotoGridDensity.next(columns: densityStartColumns,
+                      zoomingIn: scale > 1) else { return }
+            densityTargetColumns = target
+            var next = configuration
+            next.columns = target
+            densityAlignment = focalDensityAlignment(columns: target)
+            densityTransition = collectionView.startInteractiveTransition(to:
+                makeLayout(configuration: next, alignment: densityAlignment, anchor: densityAnchor)) { [weak self] completed, finished in
+                self?.densityTransitionCompleted(committed: completed && finished)
+            }
+        }
+        if let target = densityTransition?.nextLayout as? PhotoGridDensityLayout,
+           let anchor = densityAnchor { target.anchorViewportY = anchor.viewportPoint.y }
+        densityTransition?.transitionProgress = PhotoGridDensity.progress(
+            scale: scale, from: densityStartColumns, to: densityTargetColumns)
+        densityTransition?.invalidateLayout()
+        if let anchor = densityAnchor { restoreDensityAnchor(anchor) }
+    }
+
+    func finishDensityZoom(committing: Bool) {
+        finishDensityTransition(committing: committing)
+    }
+
+    private func finishDensityTransition(committing: Bool) {
+        if densityIsFinishing {
+            if !committing { densityCommitCancelled = true }
+            return
+        }
+        guard densityTransition != nil else {
+            densityAnchor = nil
+            densityGeneration = nil
+            flushPendingSnapshot()
+            return
+        }
+        densityIsFinishing = true
+        if committing { collectionView.finishInteractiveTransition() }
+        else { collectionView.cancelInteractiveTransition() }
+    }
+
+    private func densityTransitionCompleted(committed: Bool) {
+        densityTransition = nil
+        let normalAlignment = normalDensityAlignment(columns: densityTargetColumns)
+        if committed, !densityCommitCancelled, densityGeneration == LocalSnapshot.generation,
+           normalAlignment != densityAlignment {
+            // Follow the touched column while pinching, then settle to the normal
+            // grid after release. Temporary empty slots never enter the snapshot.
+            densityIsFinishing = true
+            var next = configuration
+            next.columns = densityTargetColumns
+            collectionView.setCollectionViewLayout(
+                makeLayout(configuration: next, alignment: normalAlignment, anchor: densityAnchor),
+                animated: !UIAccessibility.isReduceMotionEnabled
+            ) { [weak self] _ in self?.completeDensityChange(committed: true) }
+        } else {
+            completeDensityChange(committed: committed)
+        }
+    }
+
+    private func completeDensityChange(committed: Bool) {
+        let anchor = densityAnchor
+        let valid = densityGeneration == LocalSnapshot.generation && !densityCommitCancelled
+        densityIsFinishing = false
+        densityAnchor = nil
+        densityGeneration = nil
+        densityAlignment = nil
+        densityCommitCancelled = false
+        if committed, valid {
+            var next = pending?.configuration ?? configuration
+            next.columns = densityTargetColumns
+            pendingDensityAnchor = anchor
+            pendingDensityColumns = next.columns
+            apply(sections: pending?.sections ?? sections, configuration: next, hero: hero)
+            flushPendingSnapshot()
+        } else {
+            collectionView.setCollectionViewLayout(makeLayout(), animated: false)
+            if let anchor, valid { restoreDensityAnchor(anchor) }
+            flushPendingSnapshot()
+        }
+    }
+}
 
 extension PhotoGridController: PhotoZoomTransitionSource {
     /// Gambar dan kotak sel, dalam koordinat window.
@@ -1917,6 +2215,51 @@ private func justifiedLayoutSection(
 ///
 /// Ukuran absolut tidak punya celah tafsir: n petak plus (n-1) sela harus persis
 /// sama dengan lebar container, jadi hasilnya rata penuh sampai kedua tepi.
+private func focalPhotoLayoutSection(
+    _ configuration: PhotoGridConfiguration,
+    _ environment: NSCollectionLayoutEnvironment,
+    itemCount: Int,
+    leadingAdjustment: Int
+) -> NSCollectionLayoutSection {
+    guard leadingAdjustment != 0, itemCount > 0 else {
+        return photoLayoutSection(configuration, environment)
+    }
+    let columns = max(configuration.columns, 1)
+    let width = environment.container.effectiveContentSize.width
+    let side = max(1, (width - gridSpacing * CGFloat(columns - 1)) / CGFloat(columns))
+    let firstCount = min(itemCount, columns - leadingAdjustment)
+    let frames = (0..<firstCount).map { index -> NSCollectionLayoutGroupCustomItem in
+        let slot = index + leadingAdjustment
+        // Negative slots are old transparent padding cells, not real assets.
+        let frame = slot < 0 ? CGRect(x: 0, y: 0, width: 1, height: 1)
+            : CGRect(x: CGFloat(slot) * (side + gridSpacing), y: 0, width: side, height: side)
+        return NSCollectionLayoutGroupCustomItem(frame: frame)
+    }
+    let first = NSCollectionLayoutGroup.custom(layoutSize: .init(
+        widthDimension: .fractionalWidth(1), heightDimension: .absolute(side))) { _ in frames }
+    let remainingRows = (itemCount - firstCount + columns - 1) / columns
+    let group: NSCollectionLayoutGroup
+    if remainingRows > 0 {
+        let item = NSCollectionLayoutItem(layoutSize: .init(
+            widthDimension: .absolute(side), heightDimension: .absolute(side)))
+        let row = NSCollectionLayoutGroup.horizontal(layoutSize: .init(
+            widthDimension: .fractionalWidth(1), heightDimension: .absolute(side)), repeatingSubitem: item, count: columns)
+        row.interItemSpacing = .fixed(gridSpacing)
+        let tailHeight = CGFloat(remainingRows) * side + CGFloat(remainingRows - 1) * gridSpacing
+        let tail = NSCollectionLayoutGroup.vertical(layoutSize: .init(
+            widthDimension: .fractionalWidth(1), heightDimension: .absolute(tailHeight)), repeatingSubitem: row, count: remainingRows)
+        tail.interItemSpacing = .fixed(gridSpacing)
+        group = NSCollectionLayoutGroup.vertical(layoutSize: .init(
+            widthDimension: .fractionalWidth(1), heightDimension: .absolute(side + gridSpacing + tailHeight)), subitems: [first, tail])
+        group.interItemSpacing = .fixed(gridSpacing)
+    } else {
+        group = first
+    }
+    let section = NSCollectionLayoutSection(group: group)
+    addPhotoHeader(to: section, configuration: configuration)
+    return section
+}
+
 private func photoLayoutSection(
     _ configuration: PhotoGridConfiguration,
     _ environment: NSCollectionLayoutEnvironment
@@ -1941,17 +2284,18 @@ private func photoLayoutSection(
     let section = NSCollectionLayoutSection(group: group)
     section.interGroupSpacing = gridSpacing
 
-    guard configuration.showsSectionHeaders else { return section }
+    addPhotoHeader(to: section, configuration: configuration)
+    return section
+}
 
+private func addPhotoHeader(to section: NSCollectionLayoutSection, configuration: PhotoGridConfiguration) {
+    guard configuration.showsSectionHeaders else { return }
     let header = NSCollectionLayoutBoundarySupplementaryItem(
-        layoutSize: .init(
-            widthDimension: .fractionalWidth(1),
-            heightDimension: .absolute(38)),
+        layoutSize: .init(widthDimension: .fractionalWidth(1), heightDimension: .absolute(38)),
         elementKind: UICollectionView.elementKindSectionHeader,
         alignment: .top)
     header.pinToVisibleBounds = true
     section.boundarySupplementaryItems = [header]
-    return section
 }
 
 /// Petak kosong perata baris pertama — tidak menggambar apa pun.
