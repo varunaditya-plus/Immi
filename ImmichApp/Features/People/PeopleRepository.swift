@@ -129,7 +129,12 @@ class PeopleRepository {
         var seen: Set<String> = [targetID]
         let sources = sourceIDs.filter { seen.insert($0).inserted }
         guard !sources.isEmpty else { throw URLError(.badURL) }
-        return try await api.send(.json("/people/\(targetID)/merge", method: .post, body: Body(ids: sources)))
+        let generation = await LocalSnapshot.generation
+        let response: [BulkIDResponseDTO] = try await api.send(.json("/people/\(targetID)/merge", method: .post, body: Body(ids: sources)))
+        if response.contains(where: { sources.contains($0.id) && $0.success }) {
+            await LocalSnapshot.remove(LocalSnapshot.Key.peopleList, expectedGeneration: generation)
+        }
+        return response
     }
 
     func faces(in assetID: String) async throws -> [PersonFaceDTO] {
@@ -156,6 +161,7 @@ class PeopleRepository {
                 throw APIError.server(status: 409, message: String(localized: "This photo is no longer available."))
             }
         }
+        let generation = LocalSnapshot.generation
         let response: [BulkIDResponseDTO] = try await api.send(.json(
             "/people", method: .put,
             body: PeopleUpdateRequestDTO(people: [item])))
@@ -166,5 +172,6 @@ class PeopleRepository {
                 status: 422,
                 message: failure?.errorMessage ?? failure?.error ?? "Failed to update person")
         }
+        LocalSnapshot.remove(LocalSnapshot.Key.peopleList, expectedGeneration: generation)
     }
 }

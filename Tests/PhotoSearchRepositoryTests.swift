@@ -453,6 +453,45 @@ final class PhotoSearchRepositoryTests: XCTestCase {
         } catch PhotoSearchError.missingAddedDates {}
     }
 
+    func testExactNativeCountsApplyUnseenPrivacyAndLocalTombstonesBeforeAndAfterContinuation() async throws {
+        let api = try api()
+        let source = ScriptedPhotoSearchRepository(api: api)
+        var queries = 0
+        let photos = (0..<201).map {
+            asset("count-\($0)", captured: 1_700_000_000 + Double(201 - $0))
+        }
+        source.handler = { _, smart in
+            XCTAssertFalse(smart)
+            queries += 1
+            return Self.response(photos)
+        }
+        let repository = PhotoSearchRepository(api: api, dataManager: store, source: source)
+        let model = SearchViewModel(repo: repository, assetRepo: AssetDetailRepository(api: api),
+            albumRepo: AlbumRepository(api: api), dataManager: store)
+        model.filters.city = "Barcelona"
+        await model.search()
+        XCTAssertEqual(model.results.map(\.id), Array(photos.prefix(100)).map(\.id))
+        XCTAssertEqual(model.totalResults, 201)
+        XCTAssertEqual(model.nextPage, "2")
+
+        try store.setAssetVisibility(["count-0", "count-150"], to: "locked")
+        XCTAssertEqual(model.totalResults, 199, "A private unseen photo must reduce the full-index count immediately")
+        XCTAssertEqual(model.results.count, 99)
+        model.removeLocally(["count-160"])
+        XCTAssertEqual(model.totalResults, 198, "An unseen local tombstone must be counted without waiting for its page")
+
+        await model.loadMore()
+
+        XCTAssertEqual(model.totalResults, 198, "Loaded private rows must not be subtracted twice from an exact count")
+        XCTAssertEqual(model.nextPage, "3")
+        XCTAssertFalse(model.results.contains { ["count-0", "count-150", "count-160"].contains($0.id) })
+        await model.loadMore()
+        XCTAssertEqual(model.totalResults, 198)
+        XCTAssertEqual(model.results.count, 198)
+        XCTAssertNil(model.nextPage)
+        XCTAssertEqual(queries, 1)
+    }
+
     func testExactCountsRequireTheSameQueryOptionsAndLiveAccountContext() async throws {
         let api = try api()
         let source = ScriptedPhotoSearchRepository(api: api)
@@ -472,6 +511,29 @@ final class PhotoSearchRepositoryTests: XCTestCase {
         XCTAssertNil(repository.exactResultCount(for: request, options: .init(), excluding: []))
         LocalSnapshot.clearAll()
         XCTAssertNil(repository.exactResultCount(for: request, options: .init(), excluding: []))
+    }
+
+    func testTheRealAdapterAndViewModelFindCaptionAndOCRHitsWithoutSemanticMatches() async throws {
+        let api = try api()
+        let log = PhotoSearchRequestLog()
+        let caption = asset("caption-only", captured: 1)
+        let ocr = asset("ocr-only", captured: 2)
+        PhotoSearchURLProtocol.handler = { request, bytes in
+            let body = try log.record(request, data: bytes)
+            if body["description"] != nil { return try Self.data([caption]) }
+            if body["ocr"] != nil { return try Self.data([ocr]) }
+            return try Self.data([])
+        }
+        let model = SearchViewModel(repo: PhotoSearchRepository(api: api, dataManager: store),
+            assetRepo: AssetDetailRepository(api: api), albumRepo: AlbumRepository(api: api), dataManager: store)
+        model.searchText = "receipt"
+
+        await model.search()
+
+        XCTAssertEqual(model.results.map(\.id), ["ocr-only", "caption-only"])
+        XCTAssertEqual(model.totalResults, 2)
+        XCTAssertEqual(log.entries.count, 4, "Production model searches must use the complete adapter instead of raw smart search")
+        guard case .loaded = model.phase else { return XCTFail("Independent metadata hits must load successfully") }
     }
 
     private func api() throws -> APIClient {
