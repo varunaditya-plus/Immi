@@ -69,6 +69,56 @@ final class PhotoMapSelectionTests: XCTestCase {
         XCTAssertEqual(queries, 1)
     }
 
+    func testConcurrentRetriesAfterASharedFailureKeepOneReplacementMetadataRequest() async throws {
+        let model = model()
+        await model.load { [self.marker("first"), self.marker("second")] }
+        let failed = MapAssetResponseGate()
+        let replacement = MapAssetResponseGate()
+        let retrying = XCTestExpectation(description: "Both location queries retry after the shared failure")
+        retrying.expectedFulfillmentCount = 2
+        var queries = 0
+        let fetch: @MainActor () async throws -> [AssetLite] = {
+            queries += 1
+            switch queries {
+            case 1: return try await failed.value()
+            case 2: return try await replacement.value()
+            default: return [self.asset("first"), self.asset("second")]
+            }
+        }
+        let query: @MainActor (String) async throws -> [AssetLite] = { id in
+            do { return try await model.assets(for: [id], using: fetch) }
+            catch APIError.notConnected {
+                retrying.fulfill()
+                return try await model.assets(for: [id], using: fetch)
+            }
+        }
+        let first = Task { try await query("first") }
+        addTeardownBlock {
+            await failed.finish(.failure(CancellationError()))
+            await replacement.finish(.failure(CancellationError()))
+            _ = try? await first.value
+        }
+        await fulfillment(of: [failed.started], timeout: 2)
+        let entered = XCTestExpectation(description: "The second location query joins the failing request")
+        let second = Task {
+            entered.fulfill()
+            return try await query("second")
+        }
+        addTeardownBlock {
+            await failed.finish(.failure(CancellationError()))
+            await replacement.finish(.failure(CancellationError()))
+            _ = try? await second.value
+        }
+        await fulfillment(of: [entered], timeout: 2)
+        failed.finish(.failure(APIError.notConnected))
+        await fulfillment(of: [retrying, replacement.started], timeout: 2)
+        replacement.finish(.success([asset("first"), asset("second")]))
+        let a = try await first.value, b = try await second.value
+        XCTAssertEqual(a.map(\.id), ["first"])
+        XCTAssertEqual(b.map(\.id), ["second"])
+        XCTAssertEqual(queries, 2, "Failed waiters must not clear a newer shared metadata request")
+    }
+
     func testUnknownOrPrivateSelectionDoesNotFetchAndCachedResultsRecheckCurrentPrivacy() async throws {
         let model = model()
         await model.load { [self.marker("public"), self.marker("private")] }

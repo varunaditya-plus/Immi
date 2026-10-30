@@ -126,14 +126,15 @@ final class PhotoMapViewModel {
         if let cachedAssets {
             loaded = cachedAssets
         } else {
-            let request = assetRequestID
             let task: Task<[AssetLite], Error>
             if let assetTask {
                 task = assetTask
             } else {
+                assetRequestID = UUID()
                 task = Task { try await fetch() }
                 assetTask = task
             }
+            let request = assetRequestID
             do {
                 loaded = try await task.value
                 try Task.checkCancellation()
