@@ -150,7 +150,8 @@ struct JourneyProfileButton: View {
     var isActive = true
     let openSettings: () -> Void
 
-    @State private var journey = BackupSetupJourney.shared
+    @Environment(\.layoutDirection) private var layoutDirection
+    @State private var journey: BackupSetupJourney
     @State private var launch = AppLaunchState.shared
     @State private var anchorFrame = CGRect.zero
     @State private var isVisible = false
@@ -159,6 +160,13 @@ struct JourneyProfileButton: View {
     @State private var isOpeningSettings = false
     @State private var settingsPresentationTask: Task<Void, Never>?
     private let tip = BackupSetupProfileTip()
+
+    init(isActive: Bool = true, journey: BackupSetupJourney = .shared,
+         openSettings: @escaping () -> Void) {
+        self.isActive = isActive
+        self.openSettings = openSettings
+        _journey = State(initialValue: journey)
+    }
 
     var body: some View {
         Button(action: proceedToSettings) {
@@ -245,16 +253,17 @@ struct JourneyProfileButton: View {
         let y = Int(anchorFrame.minY.rounded())
         let width = Int(anchorFrame.width.rounded())
         let height = Int(anchorFrame.height.rounded())
-        return "\(journey.presentationRequest)-\(isVisible)-\(isActive)-\(launch.isReady)-\(x)-\(y)-\(width)-\(height)"
+        return "\(journey.presentationRequest)-\(layoutDirection)-\(isVisible)-\(isActive)-\(launch.isReady)-\(x)-\(y)-\(width)-\(height)"
     }
 
-    /// Frame sementara toolbar pada login pertama biasanya nol atau berada di
-    /// tepi kiri. Avatar profile valid selalu punya ukuran dan berada lebih
-    /// jauh dari leading edge daripada lebarnya sendiri.
+    /// Reject the temporary left-edge frame during LTR toolbar installation.
+    /// In RTL the trailing avatar legitimately occupies that edge; both layouts
+    /// still wait for a nonempty, stable frame before presenting the tip.
     private var hasUsableAnchorFrame: Bool {
         anchorFrame.width > 0
             && anchorFrame.height > 0
-            && anchorFrame.minX > anchorFrame.width
+            && anchorFrame.minX >= 0
+            && (layoutDirection == .rightToLeft || anchorFrame.minX > anchorFrame.width)
             && anchorFrame.minY > 0
     }
 
