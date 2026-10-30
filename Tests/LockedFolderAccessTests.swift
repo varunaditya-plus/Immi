@@ -204,6 +204,50 @@ final class LockedFolderAccessTests: XCTestCase {
         XCTAssertEqual(access.status?.pinCode, true)
     }
 
+    func testPINCreationFinishingAfterBackgroundDoesNotSendAnUnlock() async throws {
+        let repo = LifecyclePinRepository(api: makeStubAPIClient())
+        repo.hasPIN = false
+        let gate = LifecyclePinGate(started: expectation(description: "PIN creation started"))
+        repo.createGate = gate
+        let access = LockedFolderAccess(repo: repo)
+        await access.enter()
+        let creating = Task { try await access.unlock(pin: "1234", visit: access.visitID) }
+        await fulfillment(of: [gate.started], timeout: 2)
+        access.deactivate()
+        let returning = Task { await access.activate() }
+        gate.resume()
+        do {
+            try await creating.value
+            XCTFail("Background setup must not unlock")
+        } catch is CancellationError { }
+        await returning.value
+        XCTAssertEqual(repo.events, ["lock", "status", "create:1234", "lock", "lock", "status"])
+        XCTAssertFalse(access.isUnlocked)
+        XCTAssertEqual(access.status?.pinCode, true)
+        XCTAssertTrue(access.showPinSheet)
+    }
+
+    func testConfirmedPINCreationSurvivesAnUnlockFailureAndIsNotRepeatedOnRetry() async throws {
+        let repo = LifecyclePinRepository(api: makeStubAPIClient())
+        repo.hasPIN = false
+        repo.unlockError = APIError.connectionFailed(URLError(.timedOut))
+        let access = LockedFolderAccess(repo: repo)
+        await access.enter()
+
+        do {
+            try await access.unlock(pin: "12345", visit: access.visitID)
+            XCTFail("The first unlock must fail")
+        } catch APIError.connectionFailed { }
+        XCTAssertFalse(access.isUnlocked)
+        XCTAssertEqual(access.status?.pinCode, true)
+        XCTAssertTrue(access.showPinSheet)
+
+        repo.unlockError = nil
+        try await access.unlock(pin: "12345", visit: access.visitID)
+        XCTAssertEqual(repo.events.filter { $0.hasPrefix("create:") }, ["create:12345"])
+        XCTAssertTrue(access.isUnlocked)
+    }
+
     func testRejectedPINKeepsPromptAvailableAndNeverPublishesAccess() async {
         let repo = LifecyclePinRepository(api: makeStubAPIClient())
         repo.unlockError = APIError.unauthorized
@@ -231,6 +275,7 @@ private final class LifecyclePinRepository: PinRepository {
     var statusError: Error?
     var unlockError: Error?
     var unlockGate: LifecyclePinGate?
+    var createGate: LifecyclePinGate?
     var statusGate: LifecyclePinGate?
 
     override func status() async throws -> AuthStatusDTO {
@@ -251,6 +296,10 @@ private final class LifecyclePinRepository: PinRepository {
 
     override func createPin(_ pin: String) async throws {
         events.append("create:\(pin)")
+        if let gate = createGate {
+            createGate = nil
+            await gate.wait()
+        }
         hasPIN = true
     }
 

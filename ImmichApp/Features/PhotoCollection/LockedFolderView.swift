@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Status PIN sesi, dari `GET /auth/status`.
 struct AuthStatusDTO: Decodable {
@@ -26,8 +27,12 @@ class PinRepository {
     /// Elevasinya melekat pada SESI, bukan pada permintaan — karena itu tidak
     /// ada yang perlu disimpan di sisi klien setelah ini berhasil.
     func unlock(pin: String) async throws {
-        try await api.sendVoid(
-            .json("/auth/session/unlock", method: .post, body: ["pinCode": pin]))
+        do {
+            try await api.sendVoid(
+                .json("/auth/session/unlock", method: .post, body: ["pinCode": pin]))
+        } catch APIError.server(status: 403, message: _) {
+            throw PinUnlockError.incorrectPIN
+        }
     }
 
     func lock() async throws {
@@ -38,6 +43,14 @@ class PinRepository {
     func createPin(_ pin: String) async throws {
         try await api.sendVoid(
             .json("/auth/pin-code", method: .post, body: ["pinCode": pin]))
+    }
+}
+
+enum PinUnlockError: LocalizedError {
+    case incorrectPIN
+
+    var errorDescription: String? {
+        String(localized: "Incorrect PIN. Try again.")
     }
 }
 
@@ -112,8 +125,15 @@ final class LockedFolderAccess {
             if visitID == expectedVisit { isVerifying = false }
         }
         let repo = repo
-        let operation = enqueue {
-            if !status.pinCode { try await repo.createPin(pin) }
+        let operation = enqueue { [weak self] in
+            if !status.pinCode {
+                try await repo.createPin(pin)
+                guard let self, self.isActive, self.visitID == expectedVisit else {
+                    throw CancellationError()
+                }
+                // A failed unlock must not make Retry create an already-confirmed PIN again.
+                self.status = AuthStatusDTO(pinCode: true, isElevated: false)
+            }
             try await repo.unlock(pin: pin)
             return nil
         }
@@ -248,10 +268,10 @@ struct LockedFolderView: View {
             let visit = access.visitID
             PinPromptSheet(
                 needsSetup: access.status?.pinCode == false,
-                unlock: { try await access.unlock(pin: $0, visit: visit) })
+                model: PinPromptModel(unlock: { try await access.unlock(pin: $0, visit: visit) }))
                 .id(visit)
                 .interactiveDismissDisabled(access.isVerifying)
-                .presentationDetents([.height(360)])
+                .presentationDetents([.height(420), .large])
                 .presentationDragIndicator(.visible)
         }
     }
@@ -275,6 +295,65 @@ enum PinCodeContract {
     }
 }
 
+@MainActor
+@Observable
+final class PinPromptModel {
+    private let unlock: (String) async throws -> Void
+    private var operationID: UUID?
+    private var isActive = true
+    private(set) var pin = ""
+    private(set) var isWorking = false
+    private(set) var failureCount = 0
+    private(set) var errorMessage: String?
+
+    init(unlock: @escaping (String) async throws -> Void) {
+        self.unlock = unlock
+    }
+
+    func updatePIN(_ value: String) {
+        guard !isWorking else { return }
+        let sanitized = PinCodeContract.sanitized(value)
+        guard pin != sanitized else { return }
+        pin = sanitized
+        errorMessage = nil
+    }
+
+    func activate() { isActive = true }
+
+    func deactivate() {
+        isActive = false
+        operationID = nil
+        isWorking = false
+        pin = ""
+        errorMessage = nil
+    }
+
+    func submit() async {
+        guard isActive, !isWorking, PinCodeContract.isValid(pin) else { return }
+        let operation = UUID()
+        operationID = operation
+        isWorking = true
+        errorMessage = nil
+        defer {
+            if operationID == operation {
+                isWorking = false
+                operationID = nil
+            }
+        }
+        do {
+            try await unlock(pin)
+            guard isActive, operationID == operation, !Task.isCancelled else { return }
+            pin = ""
+        } catch {
+            guard isActive, operationID == operation, !Task.isCancelled else { return }
+            guard !(error is CancellationError), (error as? URLError)?.code != .cancelled else { return }
+            errorMessage = error.localizedDescription
+            pin = ""
+            withAnimation(.linear(duration: shakeDuration)) { failureCount += 1 }
+        }
+    }
+}
+
 /// Sheet masukan PIN sesuai kontrak Immich: empat sampai enam digit.
 ///
 /// Enam digit tetap terkirim otomatis seperti perilaku lama. Untuk PIN empat
@@ -283,60 +362,85 @@ enum PinCodeContract {
 struct PinPromptSheet: View {
     /// true kalau pengguna belum pernah membuat PIN sama sekali.
     let needsSetup: Bool
-    var unlock: (String) async throws -> Void
-
-    @State private var pin = ""
-    @State private var isWorking = false
-    @State private var failureCount = 0
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var model: PinPromptModel
     @FocusState private var isFocused: Bool
 
+    init(needsSetup: Bool, model: PinPromptModel) {
+        self.needsSetup = needsSetup
+        _model = State(initialValue: model)
+    }
+
     var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "lock.fill")
-                .font(.system(size: 34))
-                .foregroundStyle(.secondary)
+        ScrollView {
+            VStack(spacing: 20) {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 34))
+                    .foregroundStyle(.secondary)
 
-            Text(needsSetup ? "Create a PIN" : "Enter your PIN")
-                .font(.title3.bold())
+                Text(needsSetup ? "Create a PIN" : "Enter your PIN")
+                    .font(.title3.bold())
 
-            Text(needsSetup
-                 ? "This PIN protects the photos in your locked folder."
-                 : "Your locked folder is protected by a PIN.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
+                Text(needsSetup
+                     ? "This PIN protects the photos in your locked folder."
+                     : "Your locked folder is protected by a PIN.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 40)
 
-            Text("Use 4 to 6 digits.")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+                Text("Use 4 to 6 digits.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
 
-            pinField
+                pinField
 
-            Button {
-                Task { await submit() }
-            } label: {
-                Group {
-                    if isWorking {
-                        ProgressView()
-                    } else {
-                        Text("Continue")
-                    }
+                if let message = model.errorMessage {
+                    Text(verbatim: message)
+                        .font(.footnote)
+                        .foregroundStyle(.primary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 40)
+                        .accessibilityIdentifier("pinFailureMessage")
                 }
-                .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .padding(.horizontal, 40)
-            .disabled(!PinCodeContract.isValid(pin) || isWorking)
 
-            Spacer(minLength: 0)
+                Button {
+                    Task { await model.submit() }
+                } label: {
+                    Group {
+                        if model.isWorking {
+                            ProgressView()
+                        } else {
+                            Text("Continue")
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .padding(.horizontal, 40)
+                .disabled(!PinCodeContract.isValid(model.pin) || model.isWorking)
+
+            }
+            .padding(.vertical, 32)
+            .frame(maxWidth: .infinity)
         }
-        .padding(.top, 32)
-        .frame(maxWidth: .infinity)
-        // Ketukan salah diberi umpan balik taktil juga, bukan hanya goyangan —
-        // jari pengguna sedang menutupi layar saat itu.
-        .sensoryFeedback(.error, trigger: failureCount)
-        .onAppear { isFocused = true }
+        .scrollBounceBehavior(.basedOnSize)
+        .sensoryFeedback(.error, trigger: model.failureCount)
+        .onAppear {
+            model.activate()
+            isFocused = true
+        }
+        .onDisappear { model.deactivate() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { model.activate() }
+            else { model.deactivate() }
+        }
+        .onChange(of: model.errorMessage) { _, message in
+            if let message, scenePhase == .active {
+                isFocused = true
+                UIAccessibility.post(notification: .announcement, argument: message)
+            }
+        }
     }
 
     /// Lingkaran-lingkaran di atas satu `TextField` tak terlihat.
@@ -345,28 +449,26 @@ struct PinPromptSheet: View {
     /// ketik angka serta autofill dari sistem.
     private var pinField: some View {
         ZStack {
-            TextField("", text: $pin)
+            TextField("", text: Binding(get: { model.pin }, set: { model.updatePIN($0) }))
                 .keyboardType(.numberPad)
                 .textContentType(.oneTimeCode)
                 .focused($isFocused)
                 .opacity(0.01)
-                .onChange(of: pin) { _, newValue in
-                    let sanitized = PinCodeContract.sanitized(newValue)
-                    if pin != sanitized {
-                        pin = sanitized
-                    }
-                    if sanitized.count == PinCodeContract.maximumLength {
-                        Task { await submit() }
+                .disabled(model.isWorking)
+                .accessibilityLabel(needsSetup ? "Create a PIN" : "Enter your PIN")
+                .onChange(of: model.pin) { _, value in
+                    if value.count == PinCodeContract.maximumLength {
+                        Task { await model.submit() }
                     }
                 }
 
             HStack(spacing: 16) {
                 ForEach(0..<PinCodeContract.maximumLength, id: \.self) { index in
-                    dot(filled: index < pin.count)
+                    dot(filled: index < model.pin.count)
                 }
             }
             .allowsHitTesting(false)
-            .modifier(ShakeEffect(animatableData: CGFloat(failureCount)))
+            .modifier(ShakeEffect(animatableData: CGFloat(model.failureCount)))
         }
         .contentShape(Rectangle())
         .onTapGesture { isFocused = true }
@@ -378,25 +480,6 @@ struct PinPromptSheet: View {
             .background(Circle().fill(filled ? AnyShapeStyle(.tint) : AnyShapeStyle(.clear)))
             .frame(width: 16, height: 16)
             .animation(.easeOut(duration: 0.12), value: filled)
-    }
-
-    private func submit() async {
-        guard !isWorking, PinCodeContract.isValid(pin) else { return }
-        isWorking = true
-        defer { isWorking = false }
-
-        do {
-            try await unlock(pin)
-        } catch {
-            // Digoyang lebih dulu, baru dikosongkan setelah goyangannya selesai
-            // — kalau langsung dikosongkan, lingkarannya sudah putih sebelum
-            // pengguna sempat melihat penolakannya.
-            withAnimation(.linear(duration: shakeDuration)) {
-                failureCount += 1
-            }
-            try? await Task.sleep(for: .seconds(shakeDuration))
-            pin = ""
-        }
     }
 }
 

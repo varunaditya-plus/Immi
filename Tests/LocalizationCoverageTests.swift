@@ -43,7 +43,7 @@ final class LocalizationCoverageTests: XCTestCase {
     func testRecentUserFacingErrorsAndPaginationAreInCompiledAppResources() throws {
         let keys = ["The server took too long to respond. Try again.",
             "The connection to the server was lost. Try again.",
-            "Network access is restricted. Check your connection settings.", "Load More", "Loading More…", "Failed to load more photos",
+            "Network access is restricted. Check your connection settings.", "Incorrect PIN. Try again.", "Load More", "Loading More…", "Failed to load more photos",
             "Search returned an incomplete page. Please try again.", "Selects this item.",
             "Deselects this item.", "Opens the viewer.", "Shows this item in the viewer.",
             "Unable to play video. Try again.", "Unable to play Live Photo. Touch and hold to try again.",
