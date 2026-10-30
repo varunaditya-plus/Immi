@@ -395,11 +395,11 @@ final class AssetDetailViewModel {
         }
     }
 
-    func downloadOriginalFile(_ id: String, filename: String) async -> URL? {
+    func downloadCurrentFile(_ id: String, filename: String) async -> URL? {
         guard snapshotGeneration == LocalSnapshot.generation, !Task.isCancelled else { return nil }
         let selected = selection
         do {
-            let file = try await repo.downloadOriginalFile(id, filename: filename)
+            let file = try await repo.downloadCurrentFile(id, filename: filename)
             guard snapshotGeneration == LocalSnapshot.generation, !Task.isCancelled else {
                 TemporaryMediaStore.remove(file)
                 return nil

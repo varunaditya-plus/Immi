@@ -128,7 +128,7 @@ final class AssetDetailViewModelTests: XCTestCase {
         XCTAssertNotNil(viewModel.actionError)
     }
 
-    func testDownloadOriginalFileSuccessPreservesTheFileAndFilename() async throws {
+    func testDownloadCurrentFileSuccessPreservesTheFileAndFilename() async throws {
         let file = FileManager.default.temporaryDirectory
             .appendingPathComponent("asset-detail-\(UUID().uuidString).heic")
         let expected = Data([0x00, 0x01, 0x02, 0x03])
@@ -136,7 +136,7 @@ final class AssetDetailViewModelTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: file) }
         mockRepo.mockDownloadFile = file
 
-        let downloaded = await viewModel.downloadOriginalFile("asset-123", filename: "portrait.heic")
+        let downloaded = await viewModel.downloadCurrentFile("asset-123", filename: "portrait.heic")
 
         XCTAssertEqual(downloaded, file)
         XCTAssertEqual(mockRepo.downloadRequests.map(\.id), ["asset-123"])
@@ -145,10 +145,10 @@ final class AssetDetailViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.actionError)
     }
 
-    func testDownloadOriginalFileFailureReturnsNilAndShowsFeedback() async {
+    func testDownloadCurrentFileFailureReturnsNilAndShowsFeedback() async {
         mockRepo.shouldFail = true
 
-        let file = await viewModel.downloadOriginalFile("asset-123", filename: "portrait.heic")
+        let file = await viewModel.downloadCurrentFile("asset-123", filename: "portrait.heic")
 
         XCTAssertNil(file)
         XCTAssertEqual(mockRepo.downloadRequests.map(\.id), ["asset-123"])
@@ -222,7 +222,7 @@ class MockAssetDetailRepository: AssetDetailRepository {
         deletedIds.append(id)
     }
 
-    override func downloadOriginalFile(_ id: String, filename: String) async throws -> URL {
+    override func downloadCurrentFile(_ id: String, filename: String) async throws -> URL {
         downloadRequests.append((id, filename))
         guard !shouldFail, let mockDownloadFile else { throw APIError.unknown }
         return mockDownloadFile

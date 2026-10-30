@@ -225,7 +225,7 @@ final class SharePreparationTests: XCTestCase {
 
     private nonisolated static func response(_ request: URLRequest, status: Int) -> (Data?, URLResponse?, Error?) {
         XCTAssertEqual(request.httpMethod, "GET")
-        XCTAssertNil(request.url?.query, "Sharing must retain the unedited-original contract")
+        XCTAssertEqual(request.url?.query, "edited=true", "Normal sharing must use the current rendition")
         let id = request.url!.path.split(separator: "/").dropLast().last.map(String.init)!
         let data = status == 200 ? Data("original-\(id)".utf8) : Data(#"{"message":"Original unavailable"}"#.utf8)
         let headers = ["Content-Type": "image/heic", "Content-Disposition": "attachment; filename=\"\(id).heic\""]

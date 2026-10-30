@@ -196,7 +196,7 @@ final class TimelineOriginalSharingTests: XCTestCase {
             let path = request.url?.path ?? ""
             requests.append(path)
             XCTAssertEqual(request.httpMethod, "GET")
-            XCTAssertNil(request.url?.query)
+            XCTAssertEqual(request.url?.query, "edited=true")
             XCTAssertFalse(path.contains("device:"))
             if path == "/api/assets/\(originalServerID)/original" {
                 started.fulfill()
@@ -264,7 +264,7 @@ final class TimelineOriginalSharingTests: XCTestCase {
 
     private nonisolated static func serverResponse(_ request: URLRequest) -> (Data?, URLResponse?, Error?) {
         XCTAssertEqual(request.httpMethod, "GET")
-        XCTAssertNil(request.url?.query)
+        XCTAssertEqual(request.url?.query, "edited=true")
         XCTAssertFalse(request.url!.path.contains("device:"))
         return (Data("server-original".utf8), HTTPURLResponse(url: request.url!, statusCode: 200,
             httpVersion: nil, headerFields: ["Content-Type": "video/mp4",

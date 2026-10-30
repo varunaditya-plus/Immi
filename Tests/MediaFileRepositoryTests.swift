@@ -26,12 +26,12 @@ final class MediaFileRepositoryTests: XCTestCase {
         try await super.tearDown()
     }
 
-    func testSharesPreserveOriginalNamesFormatsAndBytesWithoutMetadataRequests() async throws {
+    func testSharesPreserveCurrentNamesFormatsAndBytesWithoutMetadataRequests() async throws {
         for filename in ["photo.HEIC", "image.png", "scan.tiff", "raw.DNG", "movie.mp4", "holiday clip.mkv", "café.jpeg"] {
             let source = try sourceFile()
             client.handler = { endpoint in
                 XCTAssertEqual(endpoint.path, "/assets/asset/original")
-                XCTAssertTrue(endpoint.query.isEmpty, "Ordinary sharing must preserve the unedited-original contract")
+                XCTAssertEqual(endpoint.query, [.init(name: "edited", value: "true")])
                 return self.download(source, filename: filename)
             }
 
@@ -52,12 +52,34 @@ final class MediaFileRepositoryTests: XCTestCase {
             return self.download(source, filename: "edited-photo.jpg", mimeType: "image/jpeg")
         }
 
-        let file = try await repository.downloadOriginalFile("asset", filename: "original.HEIC")
+        let file = try await repository.downloadCurrentFile("asset", filename: "original.HEIC")
         prepared.append(file)
 
         XCTAssertEqual(file.pathExtension, "jpg")
         XCTAssertEqual(file.lastPathComponent, "edited-photo.jpg")
         XCTAssertEqual(try Data(contentsOf: file), Data("original bytes".utf8))
+    }
+
+    func testNormalSharingAndViewerDownloadTheCurrentRendition() async throws {
+        client.handler = { endpoint in
+            let edited = endpoint.query == [.init(name: "edited", value: "true")]
+            let source = try self.sourceFile(contents: edited ? "current edited bytes" : "unmodified bytes")
+            return self.download(source, filename: edited ? "current.jpg" : "camera.heic",
+                mimeType: edited ? "image/jpeg" : "image/heic")
+        }
+
+        let shared = try await repository.shareFile("asset")
+        prepared.append(shared)
+        let viewer = try await repository.downloadCurrentFile("asset", filename: "camera.heic")
+        prepared.append(viewer)
+
+        XCTAssertEqual(try Data(contentsOf: shared), Data("current edited bytes".utf8))
+        XCTAssertEqual(try Data(contentsOf: viewer), Data("current edited bytes".utf8))
+        XCTAssertEqual([shared.lastPathComponent, viewer.lastPathComponent], ["current.jpg", "current.jpg"])
+        XCTAssertNotEqual(shared, viewer, "Concurrent shares with the same basename need independent ownership")
+        XCTAssertEqual(client.requests.map(\.query), [
+            [.init(name: "edited", value: "true")], [.init(name: "edited", value: "true")],
+        ])
     }
 
     func testMissingDispositionUsesTheReturnedMIMETypeRatherThanGuessingJPEGOrMOV() async throws {
@@ -200,9 +222,9 @@ final class MediaFileRepositoryTests: XCTestCase {
         XCTAssertTrue(remaining.isEmpty)
     }
 
-    private func sourceFile() throws -> URL {
+    private func sourceFile(contents: String = "original bytes") throws -> URL {
         let file = directory.appendingPathComponent(UUID().uuidString)
-        try Data("original bytes".utf8).write(to: file)
+        try Data(contents.utf8).write(to: file)
         return file
     }
 

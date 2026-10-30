@@ -14,7 +14,7 @@ final class MediaSharingCallerTests: XCTestCase {
         try await super.tearDown()
     }
 
-    func testEveryBulkSharingScreenPreservesOriginalNamesFormatsAndBytes() async throws {
+    func testEveryBulkSharingScreenPreservesCurrentNamesFormatsAndBytes() async throws {
         for screen in BulkScreen.allCases {
             let fixture = try fixture()
             let share = bulkShare(screen, repository: fixture.repository, api: fixture.api)
@@ -27,8 +27,9 @@ final class MediaSharingCallerTests: XCTestCase {
             XCTAssertEqual(fixture.api.requests.map(\.path), [
                 "/assets/photo/original", "/assets/video/original", "/assets/raw/original",
             ])
-            XCTAssertTrue(fixture.api.requests.allSatisfy { $0.query.isEmpty },
-                "Sharing originals must not silently request edited bytes")
+            XCTAssertTrue(fixture.api.requests.allSatisfy {
+                $0.query == [.init(name: "edited", value: "true")]
+            }, "Normal sharing must use the current rendition in every screen")
             XCTAssertTrue(fixture.api.dataRequests.isEmpty)
             XCTAssertTrue(fixture.api.sources.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) })
         }

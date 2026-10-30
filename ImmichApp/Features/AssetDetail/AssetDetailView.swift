@@ -1450,7 +1450,7 @@ struct AssetDetailView: View {
               serverAssetID(for: target.asset) == serverID,
               visibilityPolicy.allows(id: serverID), let vm else { return nil }
         let filename = target.detail?.originalFileName ?? serverID
-        guard let file = await vm.downloadOriginalFile(serverID, filename: filename) else { return nil }
+        guard let file = await vm.downloadCurrentFile(serverID, filename: filename) else { return nil }
         guard viewer.isCurrent(target), accountGeneration == LocalSnapshot.generation,
               serverAssetID(for: target.asset) == serverID,
               visibilityPolicy.allows(id: target.asset.id), visibilityPolicy.allows(id: serverID),
@@ -1495,7 +1495,7 @@ struct AssetDetailView: View {
         let filename = target.detail?.originalFileName ?? serverID
         let accountGeneration = LocalSnapshot.generation
         viewer.download(target, operation: {
-            guard let file = await vm.downloadOriginalFile(serverID, filename: filename) else { return false }
+            guard let file = await vm.downloadCurrentFile(serverID, filename: filename) else { return false }
             defer { TemporaryMediaStore.remove(file) }
             guard accountGeneration == LocalSnapshot.generation, !Task.isCancelled else { return false }
             guard let localID = await LocalPhotoLibrary.shared.saveDownloadedFile(file, isVideo: target.asset.isVideo) else {

@@ -189,7 +189,7 @@ class AssetDetailRepository {
     }
 
     func shareFile(_ id: String) async throws -> URL {
-        try await originalFile(id, fallbackFilename: id, edited: false)
+        try await downloadCurrentFile(id, filename: id)
     }
 
     @MainActor
@@ -226,23 +226,18 @@ class AssetDetailRepository {
         return urls
     }
 
-    /// Original/hasil edit diunduh sebagai file agar video tidak masuk RAM.
-    func downloadOriginalFile(_ id: String, filename: String) async throws -> URL {
-        try await originalFile(id, fallbackFilename: filename, edited: true)
-    }
-
     @MainActor
-    private func originalFile(_ id: String, fallbackFilename: String, edited: Bool) async throws -> URL {
+    func downloadCurrentFile(_ id: String, filename: String) async throws -> URL {
         let context = api.session.snapshot
         let snapshotGeneration = LocalSnapshot.generation
         let download = try await api.rawFile(.init(
             path: "/assets/\(id)/original",
-            query: edited ? [.init(name: "edited", value: "true")] : []))
+            query: [.init(name: "edited", value: "true")]))
         defer { try? FileManager.default.removeItem(at: download.url) }
         try Task.checkCancellation()
         try api.checkCurrent(context)
         guard snapshotGeneration == LocalSnapshot.generation else { throw CancellationError() }
-        let name = filename(for: download.response, fallback: fallbackFilename)
+        let name = self.filename(for: download.response, fallback: filename)
         return try TemporaryMediaStore.adoptShareFile(at: download.url, suggestedFilename: name)
     }
 
