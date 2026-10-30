@@ -7,22 +7,37 @@ struct AlbumsListView: View {
     var onAlbumContentsChanged: ((String, [AssetLite]) -> Void)?
     var onAlbumDeleted: ((String) -> Void)?
     var onAlbumShared: ((String) -> Void)?
+    var onAlbumCoverChanged: ((String, String) -> Void)?
+    private let folderID: String?
 
     @Environment(SessionManager.self) private var session
     @State private var vm: AlbumListViewModel?
-    @State private var scope: Scope = .all
+    @State private var scope: Scope = .personal
     @State private var searchText = ""
+    @State private var isSearching = false
     @Namespace private var albumNamespace
     @State private var editTarget: AlbumResponseDTO?
     @State private var addUserTarget: AlbumResponseDTO?
     @State private var deleteTarget: AlbumResponseDTO?
     @State private var sharedLink: SharedLinkPresentation?
+    @State private var organization: AlbumsOrganizationStore?
+    @State private var activity: AlbumActivityViewModel?
+    @State private var kind: ContentKind = .all
+    @State private var showNewFolder = false
+    @State private var folderName = ""
+    @State private var renameFolderTarget: AlbumFolder?
+    @State private var deleteFolderTarget: AlbumFolder?
+    @State private var moveAlbumTarget: AlbumResponseDTO?
+    @State private var showReorder = false
+    @AppStorage("albumsCustomOrder") private var usesCustomOrder = true
+
+    enum ContentKind: String { case all, albums, folders }
     /// Tata letak & urutan disimpan supaya pilihannya bertahan antar sesi.
     @AppStorage("albumsLayout") private var layout: AlbumLayout = .grid
     @AppStorage("albumsSort") private var sort: AlbumSort = .lastModified
 
     enum Scope: String, CaseIterable, Identifiable {
-        case all, shared, personal
+        case all, shared, personal, activity
         var id: Self { self }
 
         var title: LocalizedStringKey {
@@ -30,6 +45,7 @@ struct AlbumsListView: View {
             case .all: "All"
             case .shared: "Shared"
             case .personal: "Personal"
+            case .activity: "Activity"
             }
         }
     }
@@ -44,11 +60,15 @@ struct AlbumsListView: View {
     /// membuat/menghapus album langsung terlihat di kedua tempat.
     init(
         viewModel: AlbumListViewModel? = nil,
+        initialScope: Scope? = nil,
         onAlbumUpdated: ((AlbumResponseDTO) -> Void)? = nil,
         onAlbumCreated: ((AlbumResponseDTO) -> Void)? = nil,
         onAlbumContentsChanged: ((String, [AssetLite]) -> Void)? = nil,
         onAlbumDeleted: ((String) -> Void)? = nil,
-        onAlbumShared: ((String) -> Void)? = nil
+        onAlbumShared: ((String) -> Void)? = nil,
+        onAlbumCoverChanged: ((String, String) -> Void)? = nil,
+        organizationStore: AlbumsOrganizationStore? = nil,
+        folderID: String? = nil
     ) {
         _vm = State(initialValue: viewModel)
         self.onAlbumUpdated = onAlbumUpdated
@@ -56,6 +76,10 @@ struct AlbumsListView: View {
         self.onAlbumContentsChanged = onAlbumContentsChanged
         self.onAlbumDeleted = onAlbumDeleted
         self.onAlbumShared = onAlbumShared
+        self.onAlbumCoverChanged = onAlbumCoverChanged
+        self.folderID = folderID
+        _scope = State(initialValue: initialScope ?? (folderID == nil ? .personal : .all))
+        _organization = State(initialValue: organizationStore)
     }
 
     var body: some View {
@@ -67,7 +91,7 @@ struct AlbumsListView: View {
             // — jadi segmented ikut menyusut ke tengah bersamanya, lalu melompat
             // ke atas begitu daftar album datang dan isinya membesar.
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .navigationTitle("Albums")
+            .navigationTitle(folderTitle)
             .navigationBarTitleDisplayMode(.inline)
             // `safeAreaBar`, BUKAN `safeAreaInset`.
             //
@@ -77,16 +101,53 @@ struct AlbumsListView: View {
             // baliknya; `safeAreaInset` cuma ruang kosong, sehingga isi yang
             // lewat di bawahnya terlihat menembus segmented apa adanya.
             .safeAreaBar(edge: .top, spacing: 0) { scopePicker }
-            // Search dipasang SETELAH safe-area bar dan selalu terbuka di
-            // navigation drawer. Dengan urutan/default otomatis sebelumnya,
-            // search mencoba collapse saat scroll pada saat segmented juga
-            // menghitung ulang safe area. Dua perubahan top inset itu dapat
-            // saling menahan dan membuat kolom search sesekali tidak responsif.
-            .searchable(
-                text: $searchText,
-                placement: .navigationBarDrawer(displayMode: .always),
-                prompt: "Search Albums")
+            .modifier(AlbumsSearchPresentation(text: $searchText, isPresented: $isSearching))
+            .onChange(of: isSearching) { _, searching in
+                if !searching { searchText = "" }
+            }
+            .onChange(of: vm?.hasLoadedAlbums) { _, _ in reconcileOrganization() }
+            .onChange(of: vm?.albums.map(\.id)) { _, _ in reconcileOrganization() }
             .toolbar { toolbar }
+            .sheet(isPresented: $showReorder) {
+                AlbumBrowserReorderSheet(items: unfilteredItems) { ids in
+                    organization?.setContainerOrder(ids, in: folderID)
+                    usesCustomOrder = true
+                }
+            }
+            .sheet(item: $moveAlbumTarget) { album in
+                AlbumMoveToFolderSheet(
+                    folders: organization?.value.folders ?? [],
+                    currentFolderID: organization?.value.albumFolders[album.id]) { destination in
+                        organization?.moveAlbum(album.id, to: destination)
+                    }
+            }
+            .alert("New Folder", isPresented: $showNewFolder) {
+                TextField("Folder Name", text: $folderName)
+                Button("Create") {
+                    organization?.createFolder(name: folderName, parentID: folderID)
+                    kind = .all
+                    folderName = ""
+                }.disabled(folderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("Cancel", role: .cancel) { folderName = "" }
+            } message: { Text("Folders are saved on this device.") }
+            .alert("Rename Folder", isPresented: Binding(
+                get: { renameFolderTarget != nil }, set: { if !$0 { renameFolderTarget = nil } })) {
+                TextField("Folder Name", text: $folderName)
+                Button("Save") {
+                    if let target = renameFolderTarget { organization?.renameFolder(target.id, to: folderName) }
+                    renameFolderTarget = nil
+                }.disabled(folderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("Cancel", role: .cancel) { renameFolderTarget = nil }
+            }
+            .confirmationDialog("Delete Folder?", isPresented: Binding(
+                get: { deleteFolderTarget != nil }, set: { if !$0 { deleteFolderTarget = nil } }),
+                titleVisibility: .visible) {
+                    Button("Delete Folder", role: .destructive) {
+                        if let target = deleteFolderTarget { organization?.removeFolder(target.id) }
+                        deleteFolderTarget = nil
+                    }
+                    Button("Cancel", role: .cancel) { deleteFolderTarget = nil }
+                } message: { Text("The albums and photos will be kept.") }
             .sheet(isPresented: createSheetBinding) {
                 NewAlbumSheet { name, description, assetIds in
                     guard let vm else {
@@ -123,6 +184,8 @@ struct AlbumsListView: View {
     }
 
     private func start() async {
+        if organization == nil { organization = AlbumsOrganizationStore(owner: session.accountOwner) }
+        if activity == nil { activity = AlbumActivityViewModel(repository: AlbumActivityRepository(api: APIClient(session: session))) }
         if vm == nil {
             let api = APIClient(session: session)
             vm = AlbumListViewModel(repo: AlbumRepository(api: api))
@@ -132,9 +195,11 @@ struct AlbumsListView: View {
 
     // MARK: - Segmented
 
+    @ViewBuilder
     private var scopePicker: some View {
+        if folderID == nil {
         Picker("Scope", selection: $scope) {
-            ForEach(Scope.allCases) { scope in
+            ForEach([Scope.personal, .shared, .activity]) { scope in
                 Text(scope.title).tag(scope)
             }
         }
@@ -147,41 +212,61 @@ struct AlbumsListView: View {
         .controlSize(.large)
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
+        }
     }
 
     // MARK: - Toolbar
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
-        ToolbarItem(placement: .topBarTrailing) {
-            Button {
-                vm?.showCreateSheet = true
-            } label: {
-                Image(systemName: "plus")
-            }
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            Menu {
+                Button { vm?.showCreateSheet = true } label: {
+                    Label("New Album", systemImage: "rectangle.stack.badge.plus")
+                }
+                Button { folderName = ""; showNewFolder = true } label: {
+                    Label("New Folder", systemImage: "folder.badge.plus")
+                }
+            } label: { Image(systemName: "plus") }
+            .accessibilityLabel("Create")
             .disabled(vm == nil)
+            optionsMenu
         }
-
-        ToolbarItem(placement: .topBarTrailing) { optionsMenu }
     }
 
     private var optionsMenu: some View {
         Menu {
+            Button { isSearching = true } label: { Label("Search", systemImage: "magnifyingglass") }
             Picker("Layout", selection: $layout) {
                 Label("Grid", systemImage: "square.grid.2x2").tag(AlbumLayout.grid)
                 Label("List", systemImage: "list.bullet").tag(AlbumLayout.list)
-            }
-            .pickerStyle(.inline)
+            }.pickerStyle(.inline)
 
-            Picker("Sort By", selection: $sort) {
-                ForEach(AlbumSort.allCases) { order in
-                    Text(order.label).tag(order)
+            Menu {
+                Picker("Sort By", selection: Binding<AlbumSort?>(
+                    get: { usesCustomOrder ? nil : sort },
+                    set: { value in
+                        usesCustomOrder = value == nil
+                        if let value { sort = value }
+                    })) {
+                        Text("Custom Order").tag(AlbumSort?.none)
+                        ForEach(AlbumSort.allCases) { order in
+                            Text(order.label).tag(Optional(order))
+                        }
+                    }
+                Button("Reorder Albums") { showReorder = true }.disabled(unfilteredItems.isEmpty)
+            } label: { Label("Sort", systemImage: "arrow.up.arrow.down") }
+
+            Menu {
+                Picker("Filter", selection: $kind) {
+                    Text("All Items").tag(ContentKind.all)
+                    Text("Albums").tag(ContentKind.albums)
+                    Text("Folders").tag(ContentKind.folders)
                 }
-            }
-            .pickerStyle(.inline)
-        } label: {
-            Image(systemName: "ellipsis")
-        }
+            } label: { Label("Filter", systemImage: "line.3.horizontal.decrease") }
+        } label: { Image(systemName: "ellipsis") }
+        .accessibilityLabel("More")
+        .disabled(scope == .activity)
     }
 
     private var createSheetBinding: Binding<Bool> {
@@ -223,7 +308,9 @@ struct AlbumsListView: View {
     private func loadedContent(_ vm: AlbumListViewModel) -> some View {
         let albums = visibleAlbums(vm)
 
-        if albums.isEmpty {
+        if scope == .activity {
+            activityContent(vm)
+        } else if albums.isEmpty && visibleFolders.isEmpty {
             if normalizedSearchText.isEmpty {
                 emptyState(vm, scope: scope)
             } else {
@@ -267,40 +354,49 @@ struct AlbumsListView: View {
     private func albumsGrid(_ albums: [AlbumResponseDTO], _ model: AlbumListViewModel) -> some View {
         GeometryReader { proxy in
             ScrollView {
-                LazyVGrid(columns: gridColumns(for: proxy.size.width), spacing: 16) {
-                    ForEach(albums) { album in
-                        NavigationLink {
-                            albumDestination(for: album, using: model)
-                                .navigationTransition(
-                                    .zoom(sourceID: album.id, in: albumNamespace))
-                        } label: {
-                            AlbumGridCard(album: album)
-                                .matchedTransitionSource(id: album.id, in: albumNamespace)
-                        }
-                        .buttonStyle(.plain)
-                        .contextMenu {
-                            contextMenu(for: album)
-                        } preview: {
-                            AlbumCoverPreview(album: album, session: session)
-                        }
-                        .confirmationDialog(
-                            "Delete “\(album.albumName)”?",
-                            isPresented: deleteBinding(for: album),
-                            titleVisibility: .visible
-                        ) {
-                            Button("Delete Album", role: .destructive) {
-                                deleteTarget = nil
-                                Task { await deleteAlbum(album.id, using: model) }
+                LazyVGrid(columns: gridColumns(for: proxy.size.width), spacing: 12) {
+                    ForEach(browserItems(albums: albums, folders: visibleFolders)) { item in
+                        browserGridItem(item, model: model)
+                            .draggable(item.id)
+                            .dropDestination(for: String.self) { ids, _ in
+                                reorder(ids.first, before: item.id)
                             }
-                            Button("Cancel", role: .cancel) {}
-                        } message: {
-                            Text("The photos will stay in your library.")
-                        }
                     }
                 }
                 .padding(.horizontal, Self.gridHorizontalPadding)
-                .padding(.top, 8)
+                .padding(.top, 2)
+                .padding(.bottom, 16)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func browserGridItem(_ item: AlbumBrowserItem, model: AlbumListViewModel) -> some View {
+        switch item {
+        case .album(let album):
+            NavigationLink {
+                albumDestination(for: album, using: model)
+                    .navigationTransition(.zoom(sourceID: album.id, in: albumNamespace))
+            } label: {
+                AlbumGridCard(album: album).matchedTransitionSource(id: album.id, in: albumNamespace)
+            }
+            .buttonStyle(.plain)
+            .contextMenu { contextMenu(for: album) } preview: { AlbumCoverPreview(album: album, session: session) }
+            .confirmationDialog("Delete “\(album.albumName)”?", isPresented: deleteBinding(for: album), titleVisibility: .visible) {
+                Button("Delete Album", role: .destructive) {
+                    deleteTarget = nil
+                    Task { await deleteAlbum(album.id, using: model) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { Text("The photos will stay in your library.") }
+        case .folder(let folder):
+            NavigationLink {
+                folderDestination(folder, using: model)
+            } label: {
+                AlbumFolderCard(folder: folder, albums: organization?.value.orderedAlbums(model.albums, in: folder.id) ?? [])
+            }
+            .buttonStyle(.plain)
+            .contextMenu { folderMenu(folder) }
         }
     }
 
@@ -328,56 +424,133 @@ struct AlbumsListView: View {
             count: count)
     }
 
-    private func albumsList(
-        _ albums: [AlbumResponseDTO],
-        _ vm: AlbumListViewModel
-    ) -> some View {
+    private func albumsList(_ albums: [AlbumResponseDTO], _ vm: AlbumListViewModel) -> some View {
         List {
-            ForEach(albums) { album in
-                NavigationLink {
-                    albumDestination(for: album, using: vm)
-                        .navigationTransition(
-                            .zoom(sourceID: album.id, in: albumNamespace))
-                } label: {
-                    AlbumRowView(album: album)
-                        .matchedTransitionSource(id: album.id, in: albumNamespace)
-                }
-                // Garis pemisah mulai dari tepi kiri TEKS, bukan dari tepi baris:
-                // sampul selebar 60 ditambah sela 12. Nilainya relatif terhadap
-                // tepi kiri baris ini sendiri.
-                .alignmentGuide(.listRowSeparatorLeading) { _ in
-                    albumRowThumbnailSide + albumRowSpacing
-                }
-                .contextMenu {
-                    contextMenu(for: album)
-                } preview: {
-                    AlbumCoverPreview(album: album, session: session)
-                }
-                .confirmationDialog(
-                    "Delete “\(album.albumName)”?",
-                    isPresented: deleteBinding(for: album),
-                    titleVisibility: .visible
-                ) {
-                    Button("Delete Album", role: .destructive) {
-                        deleteTarget = nil
-                        Task { await deleteAlbum(album.id, using: vm) }
+            ForEach(browserItems(albums: albums, folders: visibleFolders)) { item in
+                switch item {
+                case .album(let album):
+                    NavigationLink { albumDestination(for: album, using: vm) } label: { AlbumRowView(album: album) }
+                        .contextMenu { contextMenu(for: album) }
+                        .confirmationDialog("Delete “\(album.albumName)”?", isPresented: deleteBinding(for: album), titleVisibility: .visible) {
+                            Button("Delete Album", role: .destructive) {
+                                deleteTarget = nil
+                                Task { await deleteAlbum(album.id, using: vm) }
+                            }
+                            Button("Cancel", role: .cancel) {}
+                        } message: { Text("The photos will stay in your library.") }
+                        .swipeActions {
+                            Button("Delete", role: .destructive) { deleteTarget = album }
+                        }
+                case .folder(let folder):
+                    NavigationLink { folderDestination(folder, using: vm) } label: {
+                        Label(folder.name, systemImage: "folder")
+                            .padding(.vertical, 16)
                     }
-                    Button("Cancel", role: .cancel) {}
-                } message: {
-                    Text("The photos will stay in your library.")
+                    .contextMenu { folderMenu(folder) }
                 }
             }
-            .onDelete { indices in
-                for index in indices {
-                    let id = albums[index].id
-                    Task { await deleteAlbum(id, using: vm) }
-                }
-            }
-            // Garis di ATAS baris pertama dibuang: ia bukan pemisah antar apa
-            // pun — di atasnya cuma segmented, yang sudah punya batasnya sendiri.
-            .listSectionSeparator(.hidden, edges: .top)
         }
         .listStyle(.plain)
+    }
+
+    private var folderTitle: String {
+        organization?.value.folders.first(where: { $0.id == folderID })?.name ?? String(localized: "Albums")
+    }
+
+    private func reconcileOrganization() {
+        guard let vm, vm.hasLoadedAlbums else { return }
+        organization?.reconcileAlbums(Set(vm.albums.map(\.id)))
+    }
+
+    private var visibleFolders: [AlbumFolder] {
+        guard scope != .activity, scope != .shared, kind != .albums else { return [] }
+        return (organization?.value.childFolders(of: folderID) ?? []).filter {
+            normalizedSearchText.isEmpty || $0.name.localizedStandardContains(normalizedSearchText)
+        }
+    }
+
+    private var unfilteredItems: [AlbumBrowserItem] {
+        guard let vm else { return [] }
+        let albums = organization?.value.albums(vm.albums, in: folderID) ?? vm.albums
+        return browserItems(albums: albums, folders: organization?.value.childFolders(of: folderID) ?? [])
+    }
+
+    private func browserItems(albums: [AlbumResponseDTO], folders: [AlbumFolder]) -> [AlbumBrowserItem] {
+        let items = folders.map(AlbumBrowserItem.folder) + albums.map(AlbumBrowserItem.album)
+        guard usesCustomOrder else { return items }
+        let order = organization?.value.containerOrders[AlbumOrganization.container(folderID)] ?? []
+        var positions: [String: Int] = [:]
+        for (index, id) in order.enumerated() where positions[id] == nil { positions[id] = index }
+        let fallback = Dictionary(items.enumerated().map { ($0.element.id, $0.offset) }, uniquingKeysWith: { first, _ in first })
+        return items.sorted {
+            let a = positions[$0.id] ?? Int.max
+            let b = positions[$1.id] ?? Int.max
+            return a == b ? fallback[$0.id, default: 0] < fallback[$1.id, default: 0] : a < b
+        }
+    }
+
+    private func reorder(_ source: String?, before destination: String) {
+        var ids = unfilteredItems.map(\.id)
+        guard let source, source != destination, let original = ids.firstIndex(of: source),
+              ids.contains(destination) else { return }
+        _ = ids.remove(at: original)
+        guard let target = ids.firstIndex(of: destination) else { return }
+        ids.insert(source, at: target)
+        organization?.setContainerOrder(ids, in: folderID)
+        usesCustomOrder = true
+    }
+
+    private func folderDestination(_ folder: AlbumFolder, using model: AlbumListViewModel) -> some View {
+        AlbumsListView(viewModel: model,
+            onAlbumUpdated: onAlbumUpdated, onAlbumCreated: onAlbumCreated,
+            onAlbumContentsChanged: onAlbumContentsChanged, onAlbumDeleted: onAlbumDeleted,
+            onAlbumShared: onAlbumShared, onAlbumCoverChanged: onAlbumCoverChanged,
+            organizationStore: organization, folderID: folder.id)
+    }
+
+    private func folderMenu(_ folder: AlbumFolder) -> some View {
+        Group {
+            Button { folderName = folder.name; renameFolderTarget = folder } label: {
+                Label("Rename Folder", systemImage: "pencil")
+            }
+            Button(role: .destructive) { deleteFolderTarget = folder } label: {
+                Label("Delete Folder", systemImage: "trash")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func activityContent(_ albums: AlbumListViewModel) -> some View {
+        if let activity {
+            let items = activity.items(in: albums.albums)
+            Group {
+                if activity.phase.isLoading && items.isEmpty {
+                    ProgressView()
+                } else if let error = activity.phase.errorMessage {
+                    ContentUnavailableView {
+                        Label("Failed to Load", systemImage: "exclamationmark.triangle")
+                    } description: { Text(error) } actions: {
+                        Button("Retry") { Task { await activity.load(albums: albums.albums) } }
+                    }
+                } else if items.isEmpty {
+                    ContentUnavailableView {
+                        Label("No Activity", systemImage: "bubble.left.and.bubble.right")
+                    } description: { Text("Comments and likes in shared albums will appear here.") }
+                } else {
+                    List {
+                        if let error = activity.partialError { Text(error).font(.footnote).foregroundStyle(.secondary) }
+                        ForEach(items) { item in
+                            NavigationLink { albumDestination(for: item.album, using: albums) } label: {
+                                AlbumActivityRow(item: item)
+                            }
+                        }
+                    }
+                    .listStyle(.plain)
+                    .refreshable { await activity.load(albums: albums.albums) }
+                }
+            }
+            .task(id: albums.albums.filter(\.shared).map(\.id)) { await activity.load(albums: albums.albums) }
+        } else { ProgressView() }
     }
 
     // MARK: - Context menu
@@ -394,12 +567,17 @@ struct AlbumsListView: View {
                 onAlbumUpdated?($0)
             },
             onDeleted: {
+                organization?.removeAlbum(album.id)
                 model.removeDeletedAlbum(album.id)
                 onAlbumDeleted?(album.id)
             },
             onShared: {
                 model.applyAlbumSharing(album.id)
                 onAlbumShared?(album.id)
+            },
+            onCoverChanged: { albumID, assetID in
+                model.applyAlbumCover(albumID, assetID: assetID)
+                onAlbumCoverChanged?(albumID, assetID)
             })
     }
 
@@ -407,8 +585,10 @@ struct AlbumsListView: View {
         name: String, description: String, assetIds: [String], using model: AlbumListViewModel
     ) async -> String? {
         await model.createAlbum(name: name, description: description, assetIds: assetIds) { album in
-            scope = .all
+            scope = .personal
+            kind = .all
             searchText = ""
+            if folderID != nil { organization?.moveAlbum(album.id, to: folderID) }
             onAlbumCreated?(album)
         }
     }
@@ -418,15 +598,21 @@ struct AlbumsListView: View {
     }
 
     func deleteAlbum(_ id: String, using model: AlbumListViewModel) async {
-        if await model.deleteAlbum(id) { onAlbumDeleted?(id) }
+        if await model.deleteAlbum(id) {
+            organization?.removeAlbum(id)
+            onAlbumDeleted?(id)
+        }
     }
 
     private func contextMenu(for album: AlbumResponseDTO) -> some View {
-        AlbumActionsMenu(
+        Group {
+            Button { moveAlbumTarget = album } label: { Label("Move to Folder", systemImage: "folder") }
+            AlbumActionsMenu(
             onEdit: { editTarget = album },
             onAddUser: { addUserTarget = album },
             onCreateLink: { createLink(for: album) },
             onDelete: { deleteTarget = album })
+        }
     }
 
     private func deleteBinding(for album: AlbumResponseDTO) -> Binding<Bool> {
@@ -459,7 +645,10 @@ struct AlbumsListView: View {
         case .all: filtered = vm.albums
         case .shared: filtered = vm.albums.filter(\.shared)
         case .personal: filtered = vm.albums.filter { !$0.shared }
+        case .activity: filtered = []
         }
+        if kind == .folders { return [] }
+        filtered = organization?.value.albums(filtered, in: folderID) ?? filtered
 
         let query = normalizedSearchText
         if !query.isEmpty {
@@ -469,6 +658,7 @@ struct AlbumsListView: View {
             }
         }
 
+        if usesCustomOrder { return organization?.orderedAlbums(filtered, in: folderID) ?? filtered }
         return filtered.sorted(by: sort)
     }
 
@@ -481,13 +671,22 @@ struct AlbumsListView: View {
 
     @ViewBuilder
     func emptyState(_ vm: AlbumListViewModel, scope: Scope) -> some View {
-        if scope == .shared {
+        if kind == .folders {
+            ContentUnavailableView {
+                Label("No Folders", systemImage: "folder")
+            } description: {
+                Text("Folders are saved on this device.")
+            } actions: {
+                Button("New Folder") { folderName = ""; showNewFolder = true }
+                    .buttonStyle(.borderedProminent)
+            }
+        } else if scope == .shared {
             ContentUnavailableView {
                 Label("No Shared Albums", systemImage: "person.2")
             } description: {
                 Text("Albums you share or that others share with you will appear here.")
             } actions: {
-                Button("View All Albums") { self.scope = .all }
+                Button("View Personal Albums") { self.scope = .personal }
                     .buttonStyle(.borderedProminent)
             }
         } else {
@@ -525,7 +724,10 @@ struct AlbumGridCard: View {
             caption
         }
         .aspectRatio(1, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(album.albumName)
+        .accessibilityValue("^[\(album.assetCount) item](inflect: true)")
     }
 
     /// `Color.clear.overlay` supaya ukuran petaknya ditentukan `aspectRatio` di
@@ -539,11 +741,8 @@ struct AlbumGridCard: View {
     private var caption: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(album.albumName)
-                .font(.headline)
-                .lineLimit(1)
-            Text("^[\(album.assetCount) item](inflect: true)")
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.85))
+                .font(.body)
+                .lineLimit(2)
         }
         .foregroundStyle(.white)
         .padding(12)
@@ -555,6 +754,21 @@ struct AlbumGridCard: View {
                         .init(color: .black.opacity(0.85), location: 1)],
                 startPoint: .top, endPoint: .bottom)
                 .padding(.top, -28)
+        }
+    }
+}
+
+private struct AlbumsSearchPresentation: ViewModifier {
+    @Binding var text: String
+    @Binding var isPresented: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isPresented {
+            content.searchable(text: $text, isPresented: $isPresented,
+                placement: .navigationBarDrawer(displayMode: .always), prompt: "Search Albums")
+        } else {
+            content
         }
     }
 }

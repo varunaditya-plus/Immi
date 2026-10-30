@@ -18,6 +18,7 @@ struct AlbumDetailView: View {
     /// dihapus dan kembali ke All Albums.
     var onDeleted: (() -> Void)?
     var onShared: (() -> Void)?
+    var onCoverChanged: ((String, String) -> Void)?
 
     @Environment(SessionManager.self) private var session
     @Environment(\.dismiss) private var dismiss
@@ -34,6 +35,10 @@ struct AlbumDetailView: View {
     /// tanpa menunggu daftar album di layar sebelumnya dimuat ulang.
     @State private var editedAlbum: AlbumResponseDTO?
     @State private var deletionHandled = false
+    @State private var organization: AlbumsOrganizationStore?
+    @State private var showKeyPhotoPicker = false
+    @State private var showReorderPhotos = false
+    @State private var showActivity = false
 
     init(
         album: AlbumResponseDTO,
@@ -41,6 +46,8 @@ struct AlbumDetailView: View {
         onAlbumChanged: ((AlbumResponseDTO) -> Void)? = nil,
         onDeleted: (() -> Void)? = nil,
         onShared: (() -> Void)? = nil,
+        onCoverChanged: ((String, String) -> Void)? = nil,
+        organizationStore: AlbumsOrganizationStore? = nil,
         viewModel: AlbumDetailViewModel? = nil
     ) {
         self.album = album
@@ -48,7 +55,9 @@ struct AlbumDetailView: View {
         self.onAlbumChanged = onAlbumChanged
         self.onDeleted = onDeleted
         self.onShared = onShared
+        self.onCoverChanged = onCoverChanged
         _vm = State(initialValue: viewModel)
+        _organization = State(initialValue: organizationStore)
     }
 
     var body: some View {
@@ -56,6 +65,13 @@ struct AlbumDetailView: View {
             .sheet(isPresented: $showAddSheet) { addSheet }
             .sheet(isPresented: $showEditSheet) { editSheet }
             .sheet(isPresented: $showAddUserSheet) { addUserSheet }
+            .sheet(isPresented: $showKeyPhotoPicker) { keyPhotoPicker }
+            .sheet(isPresented: $showReorderPhotos) {
+                AlbumPhotoReorderSheet(assets: unfilteredOrderedAssets) { ids in
+                    organization?.setPhotoOrder(ids, albumID: album.id)
+                }
+            }
+            .sheet(isPresented: $showActivity) { AlbumActivitySheet(album: currentAlbum) }
             .sheet(item: $sharedLink) { link in
                 ShareSheet(url: link.url)
             }
@@ -78,11 +94,18 @@ struct AlbumDetailView: View {
         PhotoCollectionScreen(
             title: LocalizedStringKey(currentAlbum.albumName),
             subtitle: currentAlbum.description,
+            heroAssetID: currentAlbum.albumThumbnailAssetId,
             assets: assets,
             phase: vm?.phase ?? .loading,
             actionError: Binding(
                 get: { vm?.actionError },
                 set: { vm?.actionError = $0 }),
+            emptyState: (organization?.value.photoFilters[album.id] ?? .all) == .all ? nil : PhotoCollectionEmptyState(
+                title: "No Results", systemImage: "line.3.horizontal.decrease",
+                description: "Try removing filters to see more photos and videos.",
+                action: .init(title: "Remove Filter", perform: {
+                    organization?.setPhotoFilter(.all, albumID: album.id)
+                })),
             onRetry: { Task { await vm?.retry(album.id) } },
             onToggleFavorite: { await vm?.toggleFavorite($0) },
             onDelete: { await vm?.deleteAssets($0) },
@@ -107,6 +130,8 @@ struct AlbumDetailView: View {
                     handler: deleteAlbum)]),
             optionsConfirmationPresented: $showDeleteConfirm,
             options: {
+                albumPresentationMenu
+                Divider()
                 // Isinya sama persis dengan context menu di daftar album —
                 // lihat AlbumActionsMenu.
                 AlbumActionsMenu(
@@ -118,6 +143,7 @@ struct AlbumDetailView: View {
     }
 
     private func start() async {
+        if organization == nil { organization = AlbumsOrganizationStore(owner: session.accountOwner) }
         if vm == nil {
             let api = APIClient(session: session)
             vm = AlbumDetailViewModel(
@@ -130,7 +156,60 @@ struct AlbumDetailView: View {
     }
 
     private var assets: [AssetLite] {
-        vm?.assets ?? []
+        organization?.value.orderedPhotos(vm?.assets ?? [], albumID: album.id) ?? vm?.assets ?? []
+    }
+
+    private var unfilteredOrderedAssets: [AssetLite] {
+        var preferences = organization?.value ?? AlbumOrganization()
+        preferences.photoFilters[album.id] = .all
+        return AssetVisibilityPolicy(scope: .collection).filter(
+            preferences.orderedPhotos(vm?.assets ?? [], albumID: album.id))
+    }
+
+    private var albumPresentationMenu: some View {
+        Group {
+            if currentAlbum.shared {
+                Button { showActivity = true } label: { Label("Activity", systemImage: "bubble.left.and.bubble.right") }
+            }
+            Button { showKeyPhotoPicker = true } label: {
+                Label("Choose Key Photo", systemImage: "photo")
+            }
+            .disabled(unfilteredOrderedAssets.isEmpty)
+
+            Menu {
+                Picker("Sort", selection: Binding(
+                    get: { organization?.value.photoSorts[album.id] ?? .oldestFirst },
+                    set: { organization?.setPhotoSort($0, albumID: album.id) })) {
+                    Text("Custom Order").tag(AlbumPhotoSort.custom)
+                    Text("Date Captured: Oldest First").tag(AlbumPhotoSort.oldestFirst)
+                    Text("Date Captured: Newest First").tag(AlbumPhotoSort.newestFirst)
+                }
+                Button("Reorder Photos") { showReorderPhotos = true }
+                    .disabled(unfilteredOrderedAssets.isEmpty)
+            } label: { Label("Sort", systemImage: "arrow.up.arrow.down") }
+
+            Menu {
+                Picker("Filter", selection: Binding(
+                    get: { organization?.value.photoFilters[album.id] ?? .all },
+                    set: { organization?.setPhotoFilter($0, albumID: album.id) })) {
+                    Text("All Items").tag(AlbumPhotoFilter.all)
+                    Text("Favorites").tag(AlbumPhotoFilter.favorites)
+                    Text("Photos").tag(AlbumPhotoFilter.photos)
+                    Text("Videos").tag(AlbumPhotoFilter.videos)
+                }
+            } label: { Label("Filter", systemImage: "line.3.horizontal.decrease") }
+        }
+    }
+
+    private var keyPhotoPicker: some View {
+        AlbumKeyPhotoPicker(assets: unfilteredOrderedAssets, selectedID: currentAlbum.albumThumbnailAssetId) { assetID in
+            guard let updated = await vm?.setKeyPhoto(assetID, for: currentAlbum) else {
+                return vm?.actionError ?? String(localized: "Failed to update album")
+            }
+            editedAlbum = updated
+            onCoverChanged?(album.id, assetID)
+            return nil
+        }
     }
 
     private var currentAlbum: AlbumResponseDTO {
@@ -160,7 +239,7 @@ struct AlbumDetailView: View {
     }
 
     private var addSheet: some View {
-        AddPhotosToAlbumSheet(existingIDs: Set(assets.map(\.id))) { ids in
+        AddPhotosToAlbumSheet(existingIDs: Set((vm?.assets ?? []).map(\.id))) { ids in
             Task { await vm?.addAssets(ids, to: album.id) }
         }
     }
@@ -366,6 +445,28 @@ final class AlbumDetailViewModel {
             guard accepts(context), !(error is CancellationError) else { return nil }
             actionError = (error as? APIError)?.errorDescription
                 ?? String(localized: "Failed to create shared link")
+            return nil
+        }
+    }
+
+    func setKeyPhoto(_ assetID: String, for album: AlbumResponseDTO) async -> AlbumResponseDTO? {
+        let context = albumContext
+        guard canWork, albumId == album.id,
+              assets.contains(where: { $0.id == assetID }),
+              AssetVisibilityPolicy(scope: .collection, dataManager: dataManager).allows(id: assetID)
+        else { return nil }
+        actionError = nil
+        do {
+            try await albumRepo.setKeyPhoto(assetID, for: album.id)
+            guard accepts(context) else { return nil }
+            AlbumCoverStore.shared.invalidate(album.id)
+            var updated = album
+            updated.albumThumbnailAssetId = assetID
+            return updated
+        } catch {
+            guard accepts(context), !(error is CancellationError) else { return nil }
+            actionError = (error as? APIError)?.errorDescription
+                ?? String(localized: "Failed to update album")
             return nil
         }
     }
