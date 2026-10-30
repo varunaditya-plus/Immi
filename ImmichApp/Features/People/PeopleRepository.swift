@@ -77,7 +77,7 @@ class PeopleRepository {
 
     func setKeyPhoto(_ id: String, assetID: String) async throws {
         let context = await api.session.snapshot
-        let previous = try? await thumbnailData(id)
+        var previous = try? await thumbnailData(id)
         try Task.checkCancellation()
         try await update(.init(id: id, featureFaceAssetId: assetID))
         let key = "/people/\(id)/thumbnail"
@@ -91,7 +91,11 @@ class PeopleRepository {
             try await api.checkCurrent(context)
             guard ContinuousClock.now < deadline else { break }
             if attempt > 0 { try await Task.sleep(for: .milliseconds(250)) }
-            guard let data = try? await thumbnailData(id), data != previous else { continue }
+            guard let data = try? await thumbnailData(id) else { continue }
+            // A failed baseline read gives no evidence that the first image
+            // after the update belongs to the completed face-generation job.
+            guard let baseline = previous else { previous = data; continue }
+            guard data != baseline else { continue }
             try await api.checkCurrent(context)
             await ImageCache.shared.remove(key: key, maxPixelSize: 600)
             _ = try? await ImageCache.shared.image(key: key, maxPixelSize: 600) {

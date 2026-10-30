@@ -8,6 +8,7 @@ final class PeopleAssetRetrievalTests: XCTestCase {
     private var api: APIClient!
     private var transport: URLSession!
     private var snapshotKeys: [String] = []
+    private var thumbnailKeys: [String] = []
     private let personID = "33333333-3333-4333-8333-333333333333"
 
     override func setUp() async throws {
@@ -25,6 +26,8 @@ final class PeopleAssetRetrievalTests: XCTestCase {
         transport.invalidateAndCancel()
         for key in snapshotKeys { LocalSnapshot.remove(key) }
         snapshotKeys.removeAll()
+        for key in thumbnailKeys { await ImageCache.shared.remove(key: key, maxPixelSize: 600) }
+        thumbnailKeys.removeAll()
         api = nil
         transport = nil
         MockURLProtocol.reset()
@@ -265,6 +268,8 @@ final class PeopleAssetRetrievalTests: XCTestCase {
         let old = renderer.pngData { context in UIColor.red.setFill(); context.fill(CGRect(x: 0, y: 0, width: 2, height: 2)) }
         let fresh = renderer.pngData { context in UIColor.blue.setFill(); context.fill(CGRect(x: 0, y: 0, width: 2, height: 2)) }
         let id = UUID().uuidString, chosen = UUID().uuidString
+        let key = "/people/\(id)/thumbnail"
+        thumbnailKeys.append(key)
         var writes: [[String: Any]] = []
         var thumbnails = 0
         let accepted = try JSONSerialization.data(withJSONObject: [["id": id, "success": true]])
@@ -291,11 +296,77 @@ final class PeopleAssetRetrievalTests: XCTestCase {
         XCTAssertNil(writes[0]["featureFaceAssetId"])
         XCTAssertEqual(writes[1]["featureFaceAssetId"] as? String, chosen)
         XCTAssertGreaterThanOrEqual(thumbnails, 3, "The accepted update must wait past the worker's old thumbnail")
-        let key = "/people/\(id)/thumbnail"
         let image = try XCTUnwrap(ImageMemoryCache.shared.image(for: ImageCache.memoryKey(key, 600)))
         XCTAssertEqual(Self.centerPixel(image), Self.centerPixel(try XCTUnwrap(UIImage(data: fresh))))
         XCTAssertNotEqual(Self.centerPixel(image), Self.centerPixel(try XCTUnwrap(UIImage(data: old))))
-        await ImageCache.shared.remove(key: key, maxPixelSize: 600)
+    }
+
+    func testFailedKeyPhotoBaselineWaitsForAChangeBeforeCachingTheGeneratedFace() async throws {
+        let id = UUID().uuidString, chosen = UUID().uuidString
+        let old = Self.thumbnail(.red), fresh = Self.thumbnail(.blue)
+        let key = "/people/\(id)/thumbnail"
+        thumbnailKeys.append(key)
+        var reads = 0
+        var writes: [[String: Any]] = []
+        let accepted = try JSONSerialization.data(withJSONObject: [["id": id, "success": true]])
+        MockURLProtocol.responseProvider = { request in
+            if request.httpMethod == "GET" {
+                XCTAssertEqual(request.url?.path, "/api\(key)")
+                reads += 1
+                if reads == 1 { return Self.response(request, status: 503, data: Data()) }
+                return Self.response(request, data: reads == 2 ? old : fresh)
+            }
+            XCTAssertEqual(request.httpMethod, "PUT")
+            XCTAssertEqual(request.url?.path, "/api/people")
+            writes.append(contentsOf: Self.body(request)["people"] as? [[String: Any]] ?? [])
+            return Self.response(request, data: accepted)
+        }
+
+        try await PeopleRepository(api: api).setKeyPhoto(id, assetID: chosen)
+
+        XCTAssertEqual(writes.count, 1)
+        XCTAssertEqual(writes.first?["id"] as? String, id)
+        XCTAssertEqual(writes.first?["featureFaceAssetId"] as? String, chosen)
+        XCTAssertGreaterThanOrEqual(reads, 3, "The first successful read after a failed baseline can still be the old face")
+        let image = try XCTUnwrap(ImageMemoryCache.shared.image(for: ImageCache.memoryKey(key, 600)))
+        XCTAssertEqual(Self.centerPixel(image), Self.centerPixel(try XCTUnwrap(UIImage(data: fresh))))
+        XCTAssertNotEqual(Self.centerPixel(image), Self.centerPixel(try XCTUnwrap(UIImage(data: old))))
+    }
+
+    func testUnprovenKeyPhotoFreshnessInvalidatesTheOldThumbnailInsteadOfCachingIt() async throws {
+        let id = UUID().uuidString, chosen = UUID().uuidString
+        let old = Self.thumbnail(.red)
+        let key = "/people/\(id)/thumbnail"
+        thumbnailKeys.append(key)
+        _ = try await ImageCache.shared.image(key: key, maxPixelSize: 600) { old }
+        var reads = 0, writes = 0
+        let accepted = try JSONSerialization.data(withJSONObject: [["id": id, "success": true]])
+        MockURLProtocol.responseProvider = { request in
+            if request.httpMethod == "GET" {
+                XCTAssertEqual(request.url?.path, "/api\(key)")
+                reads += 1
+                return Self.response(request, status: reads == 1 ? 503 : 200, data: old)
+            }
+            XCTAssertEqual(request.httpMethod, "PUT")
+            XCTAssertEqual(request.url?.path, "/api/people")
+            writes += 1
+            XCTAssertEqual((Self.body(request)["people"] as? [[String: Any]])?.first?["featureFaceAssetId"] as? String, chosen)
+            return Self.response(request, data: accepted)
+        }
+
+        try await PeopleRepository(api: api).setKeyPhoto(id, assetID: chosen)
+
+        XCTAssertEqual(writes, 1)
+        XCTAssertGreaterThan(reads, 2, "An unknown baseline cannot turn the first old image into a cache hit")
+        XCTAssertNil(ImageMemoryCache.shared.image(for: ImageCache.memoryKey(key, 600)))
+        var fetchedAfterInvalidation = false
+        let fresh = Self.thumbnail(.blue)
+        let image = try await ImageCache.shared.image(key: key, maxPixelSize: 600) {
+            fetchedAfterInvalidation = true
+            return fresh
+        }
+        XCTAssertTrue(fetchedAfterInvalidation, "The stale disk entry must be invalidated along with memory")
+        XCTAssertEqual(Self.centerPixel(image), Self.centerPixel(try XCTUnwrap(UIImage(data: fresh))))
     }
 
     func testFaceReadsAndReassignmentUseTheAssetAndDestinationPersonContracts() async throws {
@@ -340,6 +411,15 @@ final class PeopleAssetRetrievalTests: XCTestCase {
             context.draw(source, in: CGRect(x: 0, y: 0, width: 1, height: 1))
         }
         return bytes
+    }
+
+    private static func thumbnail(_ color: UIColor) -> Data {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2), format: format).pngData { context in
+            color.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
+        }
     }
 
     private func newSnapshotKey() -> String {
