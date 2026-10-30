@@ -48,6 +48,8 @@ struct LocalPhoto: Identifiable, Equatable, Sendable {
     let duration: Double?
     let ratio: Double
     var isFavorite = false
+    var latitude: Double? = nil
+    var longitude: Double? = nil
 }
 
 struct LocalPhotoDisplayMetadata: Sendable {
@@ -313,7 +315,8 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
                     && asset.mediaSubtypes.contains(.photoLive),
                 duration: asset.mediaType == .video ? asset.duration : nil,
                 ratio: Double(asset.pixelWidth) / Double(height),
-                isFavorite: asset.isFavorite))
+                isFavorite: asset.isFavorite, latitude: asset.location?.coordinate.latitude,
+                longitude: asset.location?.coordinate.longitude))
         }
         return result
     }
@@ -685,7 +688,8 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
                             && asset.mediaSubtypes.contains(.photoLive),
                         duration: asset.mediaType == .video ? asset.duration : nil,
                         ratio: height > 0 ? width / height : 1,
-                        isFavorite: asset.isFavorite)
+                        isFavorite: asset.isFavorite, latitude: asset.location?.coordinate.latitude,
+                        longitude: asset.location?.coordinate.longitude)
                 }
         }
 
@@ -943,7 +947,8 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
                     && asset.mediaSubtypes.contains(.photoLive),
                 duration: asset.mediaType == .video ? asset.duration : nil,
                 ratio: Double(asset.pixelWidth) / Double(height),
-                isFavorite: asset.isFavorite)
+                isFavorite: asset.isFavorite, latitude: asset.location?.coordinate.latitude,
+                longitude: asset.location?.coordinate.longitude)
         }.value
     }
 
