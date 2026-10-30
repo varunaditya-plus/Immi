@@ -86,12 +86,8 @@ class SimulatorHostedTestCase: XCTestCase {
             return candidate != nil
         }
         let button = try XCTUnwrap(candidate, "The real \(title) action must be exposed; a direct model call is not a substitute")
-        if let control = button as? UIButton {
-            let event: UIControl.Event = control.allControlEvents.contains(.primaryActionTriggered)
-                ? .primaryActionTriggered : .touchUpInside
-            XCTAssertTrue(control.allControlEvents.contains(event), "The real button needs a registered action")
-            guard control.allControlEvents.contains(event) else { throw URLError(.unsupportedURL) }
-            control.sendActions(for: event)
+        if let control = button as? UIControl {
+            control.performPrimaryAction()
         } else {
             let activated = button.accessibilityActivate()
             XCTAssertTrue(activated, "The real \(title) accessibility action must activate")

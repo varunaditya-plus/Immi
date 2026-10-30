@@ -33,6 +33,12 @@ struct PhotoCollectionEmptyState {
     let title: LocalizedStringKey
     let systemImage: String
     var description: LocalizedStringKey? = nil
+    var action: Action? = nil
+
+    struct Action {
+        let title: LocalizedStringKey
+        let perform: () -> Void
+    }
 }
 
 /// Layar koleksi foto ala Photos.
@@ -53,6 +59,7 @@ struct PhotoCollectionScreen<Options: View>: View {
     /// Keterangan di bawah judul, mis. deskripsi album. Kosong berarti tidak
     /// ada barisnya sama sekali.
     var subtitle: String? = nil
+    var heroAssetID: String? = nil
     /// Daftar MENTAH dari pemanggil. Yang dipakai layar ini `visibleAssets`,
     /// yang sudah dibersihkan dari aset yang dibuang di layar lain.
     let assets: [AssetLite]
@@ -101,6 +108,7 @@ struct PhotoCollectionScreen<Options: View>: View {
     /// Trash includes soft-deleted photos while still excluding unavailable ones.
     var removalScope: RemovedAssets.Scope = .library
     var visibilityScope: AssetVisibilityPolicy.Scope = .collection
+    var canPerformServerActions: (AssetLite) -> Bool = { _ in true }
     /// Detail album di iPad tetap membutuhkan sidebar sebagai jalan kembali ke
     /// All Albums. Di compact/iPhone, tab bar tetap disembunyikan seperti biasa.
     var keepsTabBarVisibleOnRegularWidth = false
@@ -116,10 +124,12 @@ struct PhotoCollectionScreen<Options: View>: View {
 
     @Environment(SessionManager.self) private var session
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Jumlah kolom mengikuti Settings, sama seperti linimasa — kalau tidak,
     /// pilihan yang sama memberi hasil berbeda tergantung layar mana yang dibuka.
     @AppStorage(SettingsViewModel.gridColumnsKey)
     private var gridColumns = SettingsViewModel.defaultGridColumns
+    @AppStorage("library.aspectRatioGrid") private var aspectRatioGrid = false
     @State private var isSelecting = false
     @State private var selectedIDs: Set<String> = []
     @State private var sharePreparation = SharePreparation()
@@ -314,6 +324,7 @@ struct PhotoCollectionScreen<Options: View>: View {
             },
             menuActions: { menuActions(for: $0) },
             onControllerReady: { gridController = $0 },
+            onDensityChanged: { gridColumns = $0 },
             visibilityPolicy: visibilityPolicy,
             session: session)
         // Album, Favorites, dan koleksi hero lain menempel langsung pada safe
@@ -401,7 +412,9 @@ struct PhotoCollectionScreen<Options: View>: View {
 
     private var configuration: PhotoGridConfiguration {
         PhotoGridConfiguration(
+            layoutStyle: layout == .hero && aspectRatioGrid ? .justified : .square,
             columns: max(gridColumns, 1),
+            allowsDensityZoom: true,
             showsSectionHeaders: layout == .monthly,
             startsAtNewest: false,
             heroHeight: layout == .hero ? 420 : 0,
@@ -470,13 +483,15 @@ struct PhotoCollectionScreen<Options: View>: View {
         .coordinateSpace(.named(heroSpace))
         // Dimulai ulang saat isi koleksi berubah; sebelum itu belum ada foto
         // yang bisa digilir.
-        .task(id: heroAssets.count) { await runHeroAnimation() }
+        .task(id: HeroPresentation(ids: heroAssets.map(\.id), fixedID: heroAssetID, reduceMotion: reduceMotion)) {
+            await runHeroAnimation()
+        }
     }
 
     /// Beberapa foto pertama saja yang digilir — cukup untuk terasa hidup tanpa
     /// perlu memuat seluruh koleksi beresolusi preview.
     private var heroAssets: [AssetLite] {
-        Array(visibleAssets.prefix(8))
+        PhotoCollectionCover.assets(in: visibleAssets, preferredID: heroAssetID)
     }
 
     @ViewBuilder
@@ -506,8 +521,16 @@ struct PhotoCollectionScreen<Options: View>: View {
     }
 
     /// Zoom lambat sepanjang foto ditampilkan, lalu larut ke foto berikutnya.
+    private struct HeroPresentation: Equatable {
+        let ids: [String]
+        let fixedID: String?
+        let reduceMotion: Bool
+    }
+
     private func runHeroAnimation() async {
-        guard !heroAssets.isEmpty else { return }
+        heroIndex = 0
+        heroZoomedIn = false
+        guard heroAssetID == nil, !reduceMotion, heroAssets.count > 1 else { return }
 
         while !Task.isCancelled {
             withAnimation(.easeInOut(duration: heroHoldDuration)) {
@@ -567,10 +590,8 @@ struct PhotoCollectionScreen<Options: View>: View {
         .padding(.bottom, 16)
     }
 
-    /// Dirakit manual, bukan `^[...](inflect:)`: markup itu hanya diproses kalau
-    /// string-nya literal yang menjadi `LocalizedStringKey`.
     private var itemCountText: String {
-        visibleAssets.count == 1 ? "1 Item" : "\(visibleAssets.count) Items"
+        String(localized: "\(visibleAssets.count) items")
     }
 
     private func errorState(_ error: String) -> some View {
@@ -591,6 +612,11 @@ struct PhotoCollectionScreen<Options: View>: View {
             if let description = state.description {
                 Text(description)
             }
+        } actions: {
+            if let action = state.action {
+                Button(action.title, action: action.perform)
+                    .buttonStyle(.borderedProminent)
+            }
         }
     }
 
@@ -601,6 +627,7 @@ struct PhotoCollectionScreen<Options: View>: View {
     /// grid terakhir disusun.
     func menuActions(for id: String) -> [PhotoGridMenuAction] {
         guard let asset = asset(for: id) else { return [] }
+        let allowsServerActions = canPerformServerActions(asset)
 
         // TONG SAMPAH hanya punya dua jalan keluar, dan keduanya ada di sini.
         //
@@ -671,7 +698,7 @@ struct PhotoCollectionScreen<Options: View>: View {
                 })
         }
 
-        if let onToggleFavorite {
+        if let onToggleFavorite, allowsServerActions {
             actions.append(PhotoGridMenuAction(
                 title: asset.isFavorite
                     ? String(localized: "Unfavorite")
@@ -683,7 +710,7 @@ struct PhotoCollectionScreen<Options: View>: View {
             })
         }
 
-        if let onArchiveSelection {
+        if let onArchiveSelection, allowsServerActions {
             actions.append(PhotoGridMenuAction(
                 title: archiveActionTitle,
                 systemImage: "archivebox",
@@ -693,7 +720,7 @@ struct PhotoCollectionScreen<Options: View>: View {
             })
         }
 
-        if let onAddToAlbum {
+        if let onAddToAlbum, allowsServerActions {
             actions.append(PhotoGridMenuAction(
                 title: String(localized: "Add to Album"),
                 systemImage: "rectangle.stack.badge.plus"
@@ -702,7 +729,7 @@ struct PhotoCollectionScreen<Options: View>: View {
             })
         }
 
-        if let onMoveToLocked {
+        if let onMoveToLocked, allowsServerActions {
             actions.append(PhotoGridMenuAction(
                 title: String(localized: "Move to Locked Folder"),
                 systemImage: "lock"
@@ -711,7 +738,7 @@ struct PhotoCollectionScreen<Options: View>: View {
             })
         }
 
-        if let onShareLink {
+        if let onShareLink, allowsServerActions {
             actions.append(PhotoGridMenuAction(
                 title: String(localized: "Share Link"),
                 systemImage: "link"
@@ -821,8 +848,21 @@ struct PhotoCollectionScreen<Options: View>: View {
     @ViewBuilder
     private var optionsMenu: some View {
         // Layar tanpa menu opsi tidak boleh menampilkan kapsul elipsis kosong.
-        if Options.self != EmptyView.self {
+        if Options.self != EmptyView.self || layout == .hero {
             Menu {
+                if layout == .hero {
+                    Menu("View Options") {
+                        Button("Zoom In", systemImage: "plus.magnifyingglass") {
+                            gridController?.zoomDensity(in: true)
+                        }
+                        .disabled(PhotoGridDensity.next(columns: gridColumns, zoomingIn: true) == nil)
+                        Button("Zoom Out", systemImage: "minus.magnifyingglass") {
+                            gridController?.zoomDensity(in: false)
+                        }
+                        .disabled(PhotoGridDensity.next(columns: gridColumns, zoomingIn: false) == nil)
+                        Toggle("Aspect Ratio Grid", isOn: $aspectRatioGrid)
+                    }
+                }
                 options()
             } label: {
                 Image(systemName: "ellipsis")
@@ -879,6 +919,10 @@ struct PhotoCollectionScreen<Options: View>: View {
     }
 
     func selectionActions(for ids: [String]) -> SelectionActions {
+        let allowsServerActions = ids.allSatisfy { id in
+            guard let asset = asset(for: id) else { return false }
+            return canPerformServerActions(asset)
+        }
         var actions = SelectionActions()
         // Tombolnya tetap terlihat saat belum ada yang dipilih, hanya dimatikan.
         // Bar yang berubah-ubah isinya sesuai jumlah pilihan lebih membingungkan
@@ -897,7 +941,7 @@ struct PhotoCollectionScreen<Options: View>: View {
                 options: [SelectionConfirmationOption(
                     title: String(localized: "Restore")) { runRestore() }])
         }
-        if let onFavoriteSelection {
+        if let onFavoriteSelection, allowsServerActions {
             actions.favorite = {
                 runSelection(ids) {
                     await onFavoriteSelection(ids)
@@ -905,7 +949,7 @@ struct PhotoCollectionScreen<Options: View>: View {
                 }
             }
         }
-        if let onArchiveSelection {
+        if let onArchiveSelection, allowsServerActions {
             actions.archiveTitle = archiveActionTitle
             actions.archive = { runSelection(ids) { await onArchiveSelection(ids) } }
         }
@@ -919,7 +963,7 @@ struct PhotoCollectionScreen<Options: View>: View {
                 action.handler()
             }
         }
-        if let onMoveToLocked {
+        if let onMoveToLocked, allowsServerActions {
             menu.append(SelectionMenuAction(
                 title: "Move to Locked Folder", systemImage: "lock"
             ) {
@@ -1112,6 +1156,7 @@ extension PhotoCollectionScreen where Options == EmptyView {
         title: LocalizedStringKey,
         layout: PhotoCollectionLayout = .hero,
         subtitle: String? = nil,
+        heroAssetID: String? = nil,
         assets: [AssetLite],
         phase: LoadingPhase<Void>,
         actionError: Binding<String?> = .constant(nil),
@@ -1134,12 +1179,14 @@ extension PhotoCollectionScreen where Options == EmptyView {
         allowsSelectionShare: Bool = true,
         deletesPermanently: Bool = false,
         visibilityScope: AssetVisibilityPolicy.Scope = .collection,
+        canPerformServerActions: @escaping (AssetLite) -> Bool = { _ in true },
         selectionMenu: ((Set<String>) -> [SelectionMenuAction])? = nil
     ) {
         self.init(
             title: title,
             layout: layout,
             subtitle: subtitle,
+            heroAssetID: heroAssetID,
             assets: assets,
             phase: phase,
             actionError: actionError,
@@ -1162,7 +1209,17 @@ extension PhotoCollectionScreen where Options == EmptyView {
             allowsSelectionShare: allowsSelectionShare,
             deletesPermanently: deletesPermanently,
             visibilityScope: visibilityScope,
+            canPerformServerActions: canPerformServerActions,
             selectionMenu: selectionMenu,
             options: { EmptyView() })
+    }
+}
+
+enum PhotoCollectionCover {
+    static func assets(in visibleAssets: [AssetLite], preferredID: String?) -> [AssetLite] {
+        if let preferredID, let asset = visibleAssets.first(where: { $0.id == preferredID }) {
+            return [asset]
+        }
+        return Array(visibleAssets.prefix(8))
     }
 }
