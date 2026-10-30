@@ -1,12 +1,6 @@
 import SwiftUI
 
-/// Deret chip penyaring di bawah kolom cari.
-///
-/// Chip, bukan satu tombol yang membuka satu sheet berisi semuanya: penyaring
-/// yang sedang berlaku harus TERLIHAT tanpa dibuka. Hasil pencarian yang tiba-tiba
-/// sedikit karena filter tanggal yang terlupa adalah kebingungan yang mahal, dan
-/// satu-satunya penawarnya adalah menampilkannya terus-menerus.
-struct SearchFilterBar: View {
+struct SearchFilterMenu: View {
     @Binding var filters: SearchFilters
     /// Orang yang bisa dipilih; dimuat pemanggil sekali saja.
     let people: [PersonDTO]
@@ -21,94 +15,13 @@ struct SearchFilterBar: View {
     }
 
     var body: some View {
-        // Tombol bersihkan DI LUAR area gulir.
-        //
-        // Di dalamnya, ia terdorong ke ujung kanan deretan chip — dan begitu
-        // chip-nya menyala satu per satu, ujung itu makin jauh dari layar.
-        // Tombol untuk membatalkan semuanya justru jadi yang paling sulit
-        // diraih tepat ketika paling dibutuhkan.
-        HStack(spacing: 8) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    chip(
-                        label: peopleLabel,
-                        isOn: !filters.people.isEmpty,
-                        systemImage: "person.crop.circle") { sheet = .people }
-
-                    chip(
-                        label: filters.city ?? String(localized: "Location"),
-                        isOn: filters.city != nil,
-                        systemImage: "mappin.and.ellipse") { sheet = .location }
-
-                    chip(
-                        label: filters.dateRange?.label ?? String(localized: "Date"),
-                        isOn: filters.dateRange != nil,
-                        systemImage: "calendar") { sheet = .date }
-
-                    chip(
-                        label: filters.mediaType == .all
-                            ? String(localized: "Media Type")
-                            : filters.mediaType.label,
-                        isOn: filters.mediaType != .all,
-                        systemImage: "photo.on.rectangle") { sheet = .mediaType }
-                }
-                .padding(.horizontal, 16)
-            }
-            // TANPA `scrollClipDisabled`. Dulu ScrollView memenuhi seluruh bar
-            // sehingga klip yang dimatikan tak terlihat akibatnya; sekarang ia
-            // punya tetangga di kanan, dan chip yang tergulir lewat tepi akan
-            // terlukis menembus ke area tombol bersihkan.
-
-            if filters.isActive {
-                Button(role: .destructive) {
-                    filters = SearchFilters()
-                } label: {
-                    Label("Clear", systemImage: "xmark")
-                        .labelStyle(.iconOnly)
-                }
-                .buttonStyle(.bordered)
-                .buttonBorderShape(.capsule)
-                .padding(.trailing, 16)
-            }
+        Menu("Refine Search", systemImage: "slider.horizontal.3") {
+            Button("People", systemImage: "person.crop.circle") { sheet = .people }
+            Button("Location", systemImage: "mappin.and.ellipse") { sheet = .location }
+            Button("Date", systemImage: "calendar") { sheet = .date }
+            Button("Media Type", systemImage: "photo.on.rectangle") { sheet = .mediaType }
         }
-        .padding(.vertical, 8)
-        // Detent-nya ditentukan MASING-MASING pemilih, bukan dipukul rata di
-        // sini: daftar orang butuh ruang, sedangkan jenis media cuma tiga baris
-        // dan sheet setinggi separuh layar untuk tiga baris terasa kosong.
-        .sheet(item: $sheet) { which in
-            sheetContent(which)
-        }
-    }
-
-    /// Chip yang menyala menampilkan NILAINYA, bukan nama penyaringnya.
-    ///
-    /// "Last 3 Months" memberi tahu apa yang sedang berlaku; "Date" yang berwarna
-    /// hanya memberi tahu bahwa ada sesuatu — dan pengguna tetap harus membukanya
-    /// untuk tahu apa.
-    private func chip(
-        label: String,
-        isOn: Bool,
-        systemImage: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Label(label, systemImage: systemImage)
-                .font(.subheadline)
-                .lineLimit(1)
-        }
-        .buttonStyle(.bordered)
-        .buttonBorderShape(.capsule)
-        .tint(isOn ? .accentColor : .secondary)
-    }
-
-    private var peopleLabel: String {
-        switch filters.people.count {
-        case 0: String(localized: "People")
-        case 1: filters.people[0].name.isEmpty
-            ? String(localized: "1 Person")
-            : filters.people[0].name
-        default: String(localized: "\(filters.people.count) People")
-        }
+        .sheet(item: $sheet) { sheetContent($0) }
     }
 
     @ViewBuilder
@@ -360,8 +273,7 @@ private struct SearchMediaTypePicker: View {
                 }
             }
         }
-        // Tiga baris; setengah layar untuk itu cuma ruang kosong.
-        .filterSheet([.height(280)])
+        .filterSheet([.height(330)])
     }
 }
 

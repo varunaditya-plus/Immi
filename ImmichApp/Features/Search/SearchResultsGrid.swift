@@ -16,11 +16,9 @@ struct SearchAssetActions {
     var assetRemoved: (String) -> Void
     /// Status favorit berubah lewat layar detail.
     var favoriteChanged: (String, Bool) -> Void
+    var assetUpdated: (String) -> Void = { _ in }
 }
 
-/// Grid hasil pencarian: petaknya berlebar mengikuti rasio foto, tapi mesinnya
-/// `UICollectionView` yang sama dengan linimasa.
-///
 /// **Kenapa bukan `ScrollView` + `LazyVStack` seperti sebelumnya.** Bukan soal
 /// jumlah foto — hasil pencarian dibatasi paginasi, dan SwiftUI sanggup
 /// menggambarnya. Soalnya seleksi-seret.
@@ -78,7 +76,7 @@ struct SearchResultsGrid: View {
 
     private var configuration: PhotoGridConfiguration {
         PhotoGridConfiguration(
-            layoutStyle: .justified,
+            layoutStyle: .square,
             columns: max(gridColumns, 1),
             showsSectionHeaders: false)
     }
@@ -111,6 +109,7 @@ struct SearchResultsGrid: View {
                     // terpampang saat kembali — dan mengetuknya berujung
                     // "not found".
                     onAssetRemoved: { actions.assetRemoved($0) },
+                    onAssetUpdated: { actions.assetUpdated($0) },
                     onFavoriteChanged: { actions.favoriteChanged($0, $1) })
             }
             .ignoresSafeArea(.keyboard, edges: .bottom)
