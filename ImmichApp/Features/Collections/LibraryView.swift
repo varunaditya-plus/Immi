@@ -7,6 +7,7 @@ struct LibraryView: View {
     /// TabView dapat membangun Library walau Photos masih aktif; hanya tab yang
     /// terlihat yang boleh menjadi jangkar coach mark profil.
     var isActive = true
+    private let localLibrary: LocalPhotoLibrary
 
     @Environment(SessionManager.self) private var session
     @Environment(\.layoutDirection) private var layoutDirection
@@ -42,8 +43,9 @@ struct LibraryView: View {
         case album(String)
     }
 
-    init(isActive: Bool = true, viewModel: LibraryViewModel? = nil) {
+    init(isActive: Bool = true, viewModel: LibraryViewModel? = nil, localLibrary: LocalPhotoLibrary? = nil) {
         self.isActive = isActive
+        self.localLibrary = localLibrary ?? .shared
         _vm = State(initialValue: viewModel)
         _modelGeneration = State(initialValue: viewModel == nil ? nil : LocalSnapshot.generation)
     }
@@ -110,7 +112,7 @@ struct LibraryView: View {
                     else { return }
                     openExternalDestination(destination)
                 }
-                .onChange(of: LocalPhotoLibrary.shared.revision) { _, _ in vm?.refreshRecentDays() }
+                .onChange(of: localLibrary.photos) { _, _ in vm?.refreshRecentDays() }
                 .onChange(of: SwiftDataManager.shared.assetMutationRevision) { _, _ in
                     Task {
                         vm?.refreshRecentDays()
@@ -340,7 +342,8 @@ struct LibraryView: View {
                 albumRepo: AlbumRepository(api: api),
                 peopleRepo: PeopleRepository(api: api),
                 searchRepo: SearchRepository(api: api),
-                assetRepo: AssetDetailRepository(api: api))
+                assetRepo: AssetDetailRepository(api: api),
+                localPhotos: { [localLibrary] in localLibrary.photos })
         }
 
         // Data pengguna ditanyakan ulang SETIAP KALI Library dibuka, tidak

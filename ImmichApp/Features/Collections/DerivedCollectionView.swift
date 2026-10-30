@@ -43,7 +43,7 @@ struct DerivedCollectionView: View {
                 if dateInterval == nil { seed(assets()) }
                 else { Task { await load() } }
             }
-            .onChange(of: LocalPhotoLibrary.shared.revision) { _, _ in Task { await load() } }
+            .onChange(of: LocalPhotoLibrary.shared.photos) { _, _ in Task { await load() } }
             .onDisappear { request = UUID() }
     }
 

@@ -33,7 +33,7 @@ struct LocalAlbum: Identifiable, Sendable {
 }
 
 /// Satu foto milik perangkat, dilihat dari sisi aplikasi ini.
-struct LocalPhoto: Identifiable, Sendable {
+struct LocalPhoto: Identifiable, Equatable, Sendable {
     /// `PHAsset.localIdentifier`.
     let id: String
     let createdAt: Date
