@@ -373,12 +373,18 @@ struct AssetInfoPanel: View {
                 Divider()
 
                 HStack(spacing: 4) {
-                    Text(placeName)
-                        .font(.subheadline)
+                    NavigationLink {
+                        PhotoMapView(assetIDs: [detail.id], initialBounds: PhotoMapBounds(
+                            centerLatitude: coordinate.latitude, centerLongitude: coordinate.longitude,
+                            latitudeDelta: 0.04, longitudeDelta: 0.04))
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(placeName).font(.subheadline)
+                            Image(systemName: "chevron.forward").font(.caption2.weight(.semibold))
+                        }
                         .foregroundStyle(.tint)
-                    Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.tint)
+                    }
+                    .buttonStyle(.plain)
                     Spacer()
                     Button("Adjust") { onAdjustLocation?() }
                         .font(.subheadline)

@@ -54,6 +54,7 @@ struct TimelineView: View {
     @State private var isFinishingInitialTimelineLoad = false
     @State private var libraryOptionsTask: Task<Void, Never>?
     @State private var contentWidth: CGFloat = 390
+    @State private var showsMap = false
 
     /// Mode pilih dibagi dengan AppRouter karena picker compact iPhone hidup
     /// sebagai overlay di luar TimelineView.
@@ -68,6 +69,13 @@ struct TimelineView: View {
     var body: some View {
         screen
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { contentWidth = $0 }
+        .sheet(isPresented: $showsMap) {
+            NavigationStack {
+                PhotoMapView(assetIDs: PhotoMapNavigation.libraryIDs(for: vm?.libraryAssets ?? [],
+                    options: vm?.libraryOptions ?? LibraryBrowseOptions()))
+                    .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Close", systemImage: "xmark") { showsMap = false } } }
+            }
+        }
         .task {
             if vm == nil {
                 let api = APIClient(session: session)
@@ -484,6 +492,7 @@ struct TimelineView: View {
 
     private var libraryMenu: some View {
         Menu {
+            Button("Show Map", systemImage: "map") { showsMap = true }
             Section {
                 ForEach(LibrarySort.allCases, id: \.self) { sort in
                     Button {

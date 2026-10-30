@@ -141,6 +141,7 @@ struct PhotoCollectionScreen<Options: View>: View {
     @State private var preparedURLs: [URL] = []
     @State private var preparedAssetIDs: [String] = []
     @State private var isSharePresented = false
+    @State private var showsMap = false
     @State private var showsFaces = false
     /// Foto yang menunggu konfirmasi hapus DARI CONTEXT MENU.
     ///
@@ -218,6 +219,12 @@ struct PhotoCollectionScreen<Options: View>: View {
                 for: .tabBar)
             .sheet(isPresented: $isSharePresented, onDismiss: cleanupPreparedShare) {
                 MultiShareSheet(urls: preparedURLs)
+            }
+            .sheet(isPresented: $showsMap) {
+                NavigationStack {
+                    PhotoMapView(assetIDs: PhotoMapNavigation.ids(for: visibleAssets))
+                        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Close", systemImage: "xmark") { showsMap = false } } }
+                }
             }
             .onChange(of: visibilityPolicy.state) { _, _ in
                 guard preparedAssetIDs.contains(where: { !visibilityPolicy.allows(id: $0) }) else { return }
@@ -882,6 +889,9 @@ struct PhotoCollectionScreen<Options: View>: View {
                         .disabled(PhotoGridDensity.next(columns: gridColumns, zoomingIn: false) == nil)
                         Toggle("Aspect Ratio Grid", isOn: $aspectRatioGrid)
                             .disabled(showsFaces)
+                    }
+                    if visibilityScope != .locked && onRestoreSelection == nil && onUnlockSelection == nil {
+                        Button("Show Map", systemImage: "map") { showsMap = true }
                     }
                 }
                 options()
