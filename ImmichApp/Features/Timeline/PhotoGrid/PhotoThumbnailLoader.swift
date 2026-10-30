@@ -53,7 +53,7 @@ class PhotoThumbnailLoader {
         let repository = PeopleRepository(api: api)
         do {
             let image = try await ImageCache.shared.image(key: key, maxPixelSize: Self.maxPixelSize) {
-                let faces = try? await repository.faces(in: assetID)
+                let faces = try await repository.faces(in: assetID)
                 try Task.checkCancellation()
                 let data = try await api.rawData(.init(path: "/assets/\(assetID)/thumbnail", query: [
                     .init(name: "size", value: "preview"), .init(name: "cropped", value: "false"),
@@ -66,7 +66,7 @@ class PhotoThumbnailLoader {
                 guard current else { throw CancellationError() }
                 // Face bounds are transformed by saved edits on the server;
                 // only the matching uncropped edited preview uses that space.
-                if let face = faces?.first(where: { $0.person?.id == personID }),
+                if let face = faces.first(where: { $0.person?.id == personID }),
                    let cropped = PersonFaceImage.croppedData(data, face: face) { return cropped }
                 return data
             }
