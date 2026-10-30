@@ -58,6 +58,7 @@ struct SettingsView: View {
     @State private var showBackup = false
     @State private var settingsFrame = CGRect.zero
     @State private var backupRowFrame = CGRect.zero
+    @State private var backupRowPresentationRequest: Int?
     @Binding private var isSettingsRootVisible: Bool
     private let backupRowTip = BackupSetupRowTip()
 
@@ -89,7 +90,10 @@ struct SettingsView: View {
             }
             .onChange(of: library.currentSelectionScanID) { backup.refreshCounts() }
             .onChange(of: SwiftDataManager.shared.backupMappingRevision) { backup.refreshCounts() }
-            .onDisappear { isSettingsRootVisible = false }
+            .onDisappear {
+                isSettingsRootVisible = false
+                retireBackupRowAnchor()
+            }
             // Bar dibuat transparan supaya kepalanya terlihat sampai ke belakang
             // tombol tutup, seperti di referensi.
             .toolbarBackground(.hidden, for: .navigationBar)
@@ -239,23 +243,25 @@ struct SettingsView: View {
             } action: { backupRowFrame = $0 }
             .listRowBackground(backupRowBackground)
             .popoverTip(
-                backupRowTip,
+                canPresentBackupRowTip ? backupRowTip : nil,
                 isPresented: backupRowTipPresented,
                 attachmentAnchor: .rect(.bounds),
                 arrowEdge: backupRowTipArrowEdge,
                 action: handleBackupRowTipAction)
             .task(id: backupRowTipPresentationTaskID) {
-                guard backupSetupJourney.step == .backupRow,
-                      hasMeasuredBackupTipLayout,
-                      !backupSetupJourney.isCoachmarkVisible
-                else { return }
+                guard canPresentBackupRowTip else {
+                    retireBackupRowAnchor()
+                    return
+                }
+                guard !backupSetupJourney.isCoachmarkVisible else { return }
                 let request = backupSetupJourney.presentationRequest
+                backupRowPresentationRequest = request
                 await backupRowTip.resetEligibility()
                 guard !Task.isCancelled else { return }
                 // Navigation sheet masih menyelesaikan layout pada frame awal.
                 // Presentasi sesudah jeda singkat memberi TipKit frame row final.
                 try? await Task.sleep(for: .milliseconds(180))
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, canPresentBackupRowTip else { return }
                 backupSetupJourney.markTipReady(
                     for: .backupRow,
                     request: request)
@@ -276,10 +282,16 @@ struct SettingsView: View {
         settingsFrame.height > 0 && backupRowFrame.height > 0
     }
 
+    private var canPresentBackupRowTip: Bool {
+        isSettingsRootVisible && !showBackup
+            && backupSetupJourney.step == .backupRow
+            && hasMeasuredBackupTipLayout
+    }
+
     private var backupRowTipPresentationTaskID: String {
         let rowY = Int(backupRowFrame.minY.rounded())
         let bottom = Int(settingsFrame.maxY.rounded())
-        return "\(backupSetupJourney.presentationRequest)-\(rowY)-\(bottom)-\(backupRowTipArrowEdge)"
+        return "\(backupSetupJourney.presentationRequest)-\(isSettingsRootVisible)-\(showBackup)-\(rowY)-\(bottom)-\(backupRowTipArrowEdge)"
     }
 
     private var backupRowBackground: Color {
@@ -289,16 +301,24 @@ struct SettingsView: View {
     }
 
     private var backupRowTipPresented: Binding<Bool> {
-        Binding(
+        let request = backupRowPresentationRequest
+        return Binding(
             get: {
-                backupSetupJourney.step == .backupRow
+                canPresentBackupRowTip && request == backupSetupJourney.presentationRequest
                     && backupSetupJourney.isCoachmarkVisible
             },
             set: { presented in
-                if !presented, backupSetupJourney.step == .backupRow {
-                    backupSetupJourney.dismissCoachmark()
+                if !presented, canPresentBackupRowTip, backupSetupJourney.isCoachmarkVisible,
+                   let request {
+                    backupSetupJourney.dismissCoachmark(for: .backupRow, request: request)
                 }
             })
+    }
+
+    private func retireBackupRowAnchor() {
+        guard let request = backupRowPresentationRequest else { return }
+        backupRowPresentationRequest = nil
+        backupSetupJourney.suspendPresentation(for: .backupRow, request: request)
     }
 
     private func handleBackupRowTipAction(_ action: Tips.Action) {

@@ -63,8 +63,18 @@ final class BackupSetupJourney {
         activate(at: .backupRow)
     }
 
-    func dismissCoachmark() {
+    func dismissCoachmark(for expectedStep: Step, request: Int) {
+        guard expectedStep != .idle,
+              step == expectedStep,
+              presentationRequest == request
+        else { return }
+        finish()
+    }
+
+    func suspendPresentation(for expectedStep: Step, request: Int) {
+        guard step == expectedStep, presentationRequest == request else { return }
         isCoachmarkVisible = false
+        presentationRequest += 1
     }
 
     /// Jika Settings ditutup sebelum Backup dibuka, arahkan lagi dari avatar.
@@ -76,7 +86,10 @@ final class BackupSetupJourney {
     /// Dipanggil anchor setelah `Tip.resetEligibility()` selesai. Request lama
     /// tidak boleh membuka tip kalau pengguna sudah berpindah langkah.
     func markTipReady(for expectedStep: Step, request: Int) {
-        guard step == expectedStep, presentationRequest == request else { return }
+        guard expectedStep != .idle,
+              step == expectedStep,
+              presentationRequest == request
+        else { return }
         isCoachmarkVisible = true
     }
 
@@ -129,8 +142,11 @@ struct JourneyProfileButton: View {
     @State private var journey = BackupSetupJourney.shared
     @State private var launch = AppLaunchState.shared
     @State private var anchorFrame = CGRect.zero
+    @State private var isVisible = false
     @State private var isAnchorReady = false
+    @State private var anchorRequest: Int?
     @State private var isOpeningSettings = false
+    @State private var settingsPresentationTask: Task<Void, Never>?
     private let tip = BackupSetupProfileTip()
 
     var body: some View {
@@ -157,17 +173,35 @@ struct JourneyProfileButton: View {
             attachmentAnchor: .rect(.bounds),
             arrowEdge: .top,
             action: handleTipAction)
+        .onAppear { isVisible = true }
+        .onChange(of: isActive) { _, active in
+            if !active {
+                settingsPresentationTask?.cancel()
+                retireAnchor()
+            }
+        }
+        .onDisappear {
+            isVisible = false
+            settingsPresentationTask?.cancel()
+            retireAnchor()
+        }
         .task(id: presentationTaskID) {
             // Pada login pertama toolbar dibangun bersamaan dengan transisi
             // onboarding dan splash. Menunggu launch siap mencegah TipKit
             // membaca frame awal tombol yang masih berada di sisi kiri.
             guard launch.isReady,
+                  isVisible,
                   isActive,
                   journey.step == .profile,
                   hasUsableAnchorFrame
-            else { return }
+            else {
+                retireAnchor()
+                return
+            }
+            guard !isAnchorReady || !journey.isCoachmarkVisible else { return }
 
             let request = journey.presentationRequest
+            anchorRequest = request
             let stableFrame = anchorFrame
 
             // Jangan berikan TipKit sebuah source view saat toolbar masih
@@ -178,6 +212,7 @@ struct JourneyProfileButton: View {
             guard !Task.isCancelled,
                   stableFrame == anchorFrame,
                   launch.isReady,
+                  isVisible,
                   isActive
             else { return }
 
@@ -191,7 +226,7 @@ struct JourneyProfileButton: View {
     }
 
     private var showsHighlight: Bool {
-        isActive && journey.step == .profile
+        isVisible && isActive && journey.step == .profile
     }
 
     private var presentationTaskID: String {
@@ -199,7 +234,7 @@ struct JourneyProfileButton: View {
         let y = Int(anchorFrame.minY.rounded())
         let width = Int(anchorFrame.width.rounded())
         let height = Int(anchorFrame.height.rounded())
-        return "\(journey.presentationRequest)-\(isActive)-\(launch.isReady)-\(x)-\(y)-\(width)-\(height)"
+        return "\(journey.presentationRequest)-\(isVisible)-\(isActive)-\(launch.isReady)-\(x)-\(y)-\(width)-\(height)"
     }
 
     /// Frame sementara toolbar pada login pertama biasanya nol atau berada di
@@ -213,15 +248,26 @@ struct JourneyProfileButton: View {
     }
 
     private var tipPresented: Binding<Bool> {
-        Binding(
+        let request = anchorRequest
+        return Binding(
             get: {
-                showsHighlight && journey.isCoachmarkVisible
+                showsHighlight && isAnchorReady && request == journey.presentationRequest
+                    && journey.isCoachmarkVisible
             },
             set: { presented in
-                if !presented, journey.step == .profile {
-                    journey.dismissCoachmark()
+                if !presented, showsHighlight, isAnchorReady, journey.isCoachmarkVisible,
+                   let request {
+                    journey.dismissCoachmark(for: .profile, request: request)
                 }
             })
+    }
+
+    private func retireAnchor() {
+        isAnchorReady = false
+        guard let request = anchorRequest else { return }
+        anchorRequest = nil
+        // A disappearing toolbar must not cancel a newer tab's presentation.
+        journey.suspendPresentation(for: .profile, request: request)
     }
 
     private func handleTipAction(_ action: Tips.Action) {
@@ -238,14 +284,18 @@ struct JourneyProfileButton: View {
         if journey.step == .profile {
             tip.invalidate(reason: .actionPerformed)
             journey.advanceToBackupRow()
-            Task { @MainActor in
+            settingsPresentationTask = Task { @MainActor in
+                defer {
+                    settingsPresentationTask = nil
+                    isOpeningSettings = false
+                }
                 // `isPresented = false` memulai animasi dismissal, bukan
                 // menyelesaikannya. Sheet baru aman masuk setelah popover lama
                 // benar-benar keluar dari presentation hierarchy.
                 try? await Task.sleep(for: .milliseconds(350))
+                guard !Task.isCancelled, isVisible else { return }
                 openSettings()
                 await Task.yield()
-                isOpeningSettings = false
             }
         } else {
             openSettings()

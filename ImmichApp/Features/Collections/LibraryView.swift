@@ -28,6 +28,7 @@ struct LibraryView: View {
     @State private var backupSetupJourney = BackupSetupJourney.shared
     @State private var navigation = AppNavigation.shared
     @State private var navigationPath: [ExternalRoute] = []
+    @State private var isRootVisible = false
     /// Kenangan yang sedang dibuka sebagai story; nil berarti tertutup.
     @State private var openedStoryID: String?
     /// Namespace zoom transition untuk kartu album.
@@ -80,7 +81,11 @@ struct LibraryView: View {
     var body: some View {
         NavigationStack(path: $navigationPath) {
             assetActionPresentations
-                .onDisappear { sharePreparation.cancel() }
+                .onAppear { isRootVisible = true }
+                .onDisappear {
+                    isRootVisible = false
+                    sharePreparation.cancel()
+                }
                 // Nav bar TETAP dipakai — blur tepi progresifnya digambar oleh
                 // bar itu; menyembunyikannya berarti kehilangan blurnya. Yang
                 // dimatikan hanya latar solidnya.
@@ -415,7 +420,10 @@ struct LibraryView: View {
     @ToolbarContentBuilder
     private var profileButton: some ToolbarContent {
         ToolbarItem(placement: .topBarTrailing) {
-            JourneyProfileButton(isActive: isActive) {
+            JourneyProfileButton(
+                isActive: isActive && isRootVisible && navigationPath.isEmpty
+                    && !showBackup && !showSettings && openedStoryID == nil
+            ) {
                 showSettings = true
             }
         }

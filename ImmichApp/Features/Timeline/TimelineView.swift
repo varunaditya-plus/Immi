@@ -571,7 +571,7 @@ struct TimelineView: View {
             ToolbarItem(placement: .topBarTrailing) { selectButton }
             if !isSelecting {
                 ToolbarItem(placement: .topBarTrailing) {
-                    JourneyProfileButton(isActive: isActive) {
+                    JourneyProfileButton(isActive: isActive && !showSettings) {
                         showSettings = true
                     }
                 }

@@ -126,6 +126,116 @@ final class BackupSetupJourneyTests: XCTestCase {
         XCTAssertFalse(journey.isCoachmarkVisible)
     }
 
+    func testDismissedProfileDoesNotReopenForRepeatedReadyCallbacksOrRefreshes() {
+        let journey = makeJourney()
+        journey.refreshForAlbumSelection()
+        let request = journey.presentationRequest
+        journey.markTipReady(for: .profile, request: request)
+        XCTAssertTrue(journey.isCoachmarkVisible)
+
+        journey.dismissCoachmark(for: .profile, request: request)
+        journey.markTipReady(for: .profile, request: request)
+        journey.refreshForAlbumSelection()
+        journey.markTipReady(for: .profile, request: journey.presentationRequest)
+
+        XCTAssertEqual(journey.step, .idle)
+        XCTAssertFalse(journey.isCoachmarkVisible)
+    }
+
+    func testDismissedBackupRowDoesNotReturnToProfileWhenSettingsCloses() {
+        let journey = makeJourney()
+        journey.refreshForAlbumSelection()
+        journey.advanceToBackupRow()
+        let request = journey.presentationRequest
+        journey.markTipReady(for: .backupRow, request: request)
+
+        journey.dismissCoachmark(for: .backupRow, request: request)
+        journey.returnToProfileIfNeeded()
+        journey.markTipReady(for: .backupRow, request: request)
+        journey.refreshForAlbumSelection()
+
+        XCTAssertEqual(journey.step, .idle)
+        XCTAssertFalse(journey.isCoachmarkVisible)
+    }
+
+    func testLosingAnchorRejectsItsPendingCallbackWithoutSuppressingTheJourney() {
+        let journey = makeJourney()
+        journey.refreshForAlbumSelection()
+        let request = journey.presentationRequest
+
+        journey.suspendPresentation(for: .profile, request: request)
+        journey.markTipReady(for: .profile, request: request)
+
+        XCTAssertEqual(journey.step, .profile)
+        XCTAssertFalse(journey.isCoachmarkVisible)
+        XCTAssertNotEqual(journey.presentationRequest, request)
+        assertCoachmarkBecomesVisibleWhenReady(journey)
+    }
+
+    func testLosingVisibleAnchorHidesTheTipUntilTheCurrentAnchorIsReady() {
+        let journey = makeJourney()
+        journey.refreshForAlbumSelection()
+        let request = journey.presentationRequest
+        journey.markTipReady(for: .profile, request: request)
+
+        journey.suspendPresentation(for: .profile, request: request)
+
+        XCTAssertEqual(journey.step, .profile)
+        XCTAssertFalse(journey.isCoachmarkVisible)
+        assertCoachmarkBecomesVisibleWhenReady(journey)
+    }
+
+    func testRetiredAnchorCannotHideANewerPresentation() {
+        let journey = makeJourney()
+        journey.refreshForAlbumSelection()
+        let retiredRequest = journey.presentationRequest
+        journey.suspendPresentation(for: .profile, request: retiredRequest)
+        let currentRequest = journey.presentationRequest
+        journey.markTipReady(for: .profile, request: currentRequest)
+
+        journey.suspendPresentation(for: .profile, request: retiredRequest)
+
+        XCTAssertEqual(journey.presentationRequest, currentRequest)
+        XCTAssertTrue(journey.isCoachmarkVisible)
+    }
+
+    func testProfileAnchorCannotHideTheSettingsRowPresentation() {
+        let journey = makeJourney()
+        journey.refreshForAlbumSelection()
+        let profileRequest = journey.presentationRequest
+        journey.advanceToBackupRow()
+        let rowRequest = journey.presentationRequest
+        journey.markTipReady(for: .backupRow, request: rowRequest)
+
+        journey.suspendPresentation(for: .profile, request: profileRequest)
+
+        XCTAssertEqual(journey.presentationRequest, rowRequest)
+        XCTAssertTrue(journey.isCoachmarkVisible)
+    }
+
+    func testDismissalFromRetiredPopoverCannotSuppressANewerPresentation() {
+        let journey = makeJourney()
+        journey.refreshForAlbumSelection()
+        let retiredRequest = journey.presentationRequest
+        journey.suspendPresentation(for: .profile, request: retiredRequest)
+        let currentRequest = journey.presentationRequest
+        journey.markTipReady(for: .profile, request: currentRequest)
+
+        journey.dismissCoachmark(for: .profile, request: retiredRequest)
+
+        XCTAssertEqual(journey.step, .profile)
+        XCTAssertEqual(journey.presentationRequest, currentRequest)
+        XCTAssertTrue(journey.isCoachmarkVisible)
+    }
+
+    func testIdleJourneyRejectsReadinessWithoutAnActiveStep() {
+        let journey = makeJourney()
+
+        journey.markTipReady(for: .idle, request: journey.presentationRequest)
+
+        XCTAssertFalse(journey.isCoachmarkVisible)
+    }
+
     private func assertCoachmarkBecomesVisibleWhenReady(
         _ journey: BackupSetupJourney,
         file: StaticString = #filePath,
