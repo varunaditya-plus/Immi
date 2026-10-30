@@ -144,6 +144,10 @@ struct PhotoGridView: UIViewControllerRepresentable {
         controller.setSelection(selectedIDs)
     }
 
+    static func dismantleUIViewController(_ controller: PhotoGridController, coordinator: ()) {
+        controller.releaseOwner()
+    }
+
     private func bind(_ controller: PhotoGridController) {
         controller.visibilityPolicy = visibilityPolicy
         controller.onOpen = onOpen
@@ -268,6 +272,8 @@ final class PhotoGridController: UIViewController {
 
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<SectionID, String>!
+    private let hostedCells = NSHashTable<PhotoGridHostCell>.weakObjects()
+
     /// Aset seperti yang TERAKHIR digambar, diindeks id.
     ///
     /// Pembanding untuk `reconfigureChangedItems`: snapshot hanya menyimpan id,
@@ -419,6 +425,27 @@ final class PhotoGridController: UIViewController {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) tidak dipakai") }
+
+    fileprivate func releaseOwner() {
+        // The owner can keep this controller in SwiftUI State. Its callbacks
+        // must stop retaining that same view when the representable unmounts.
+        onOpen = nil
+        onAddTapped = nil
+        onVisibleSectionChanged = nil
+        onSelectionChanged = nil
+        onSelectingChanged = nil
+        menuActions = nil
+        onReachEnd = nil
+        onInitialContentDisplayed = nil
+        onTitleDockedChanged = nil
+        onDensityChanged = nil
+        makeDetail = nil
+        hero = nil
+        endReturnLink()
+        // An offscreen hero can remain in UIKit's reuse pool with its view closures.
+        for cell in hostedCells.allObjects { cell.contentConfiguration = nil }
+        hostedCells.removeAllObjects()
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -606,7 +633,10 @@ final class PhotoGridController: UIViewController {
         if itemID == heroItemID {
             let cell = collectionView.dequeueReusableCell(
                 withReuseIdentifier: PhotoGridHostCell.reuseID, for: indexPath)
-            (cell as? PhotoGridHostCell)?.host(hero ?? AnyView(EmptyView()))
+            if let hostCell = cell as? PhotoGridHostCell {
+                hostCell.host(hero ?? AnyView(EmptyView()))
+                hostedCells.add(hostCell)
+            }
             return cell
         }
 
