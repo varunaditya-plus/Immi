@@ -12,6 +12,7 @@ struct SearchRequestDTO: Encodable {
     var takenBefore: String? = nil
     var city: String? = nil
     var personIds: [String]? = nil
+    var withPeople: Bool? = nil
     var size: Int? = nil
     /// Explicitly preserve timeline-only browsing on both Immich v2 and v3.
     /// Archived and Locked Folder pass their own visibility.
