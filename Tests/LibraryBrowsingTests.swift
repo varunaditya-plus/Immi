@@ -144,9 +144,9 @@ final class LibraryBrowsingTests: XCTestCase {
         XCTAssertEqual(model.libraryOptions, LibraryBrowseOptions())
     }
 
-    func testDeviceMetadataUsesAuthoritativeSubtypeAndFavoriteValues() async {
+    func testDeviceMetadataUsesAuthoritativeSubtypeAndFavoriteValues() async throws {
         let screenshot = asset(LocalPhotoLibrary.assetID(for: "selected-screenshot"), captured: 1)
-        let photo = asset(LocalPhotoLibrary.assetID(for: "selected-photo"), captured: 2)
+        let photo = asset(LocalPhotoLibrary.assetID(for: "selected-photo"), captured: 2, favorite: true)
         let model = TimelineViewModel(libraryDeviceMetadata: { assets in
             XCTAssertEqual(Set(assets.map(\.id)), [screenshot.id, photo.id])
             return [screenshot.id: .init(isEdited: true, isScreenshot: true, isFavorite: true, isNotInAlbum: false),
@@ -155,8 +155,64 @@ final class LibraryBrowsingTests: XCTestCase {
         model.sections = [TimelineSection(id: "month", title: "Month", assets: [screenshot, photo])]
         await model.updateLibraryOptions(.init(filters: [.screenshots, .favorites]))
         XCTAssertEqual(model.libraryAssets.map(\.id), [screenshot.id])
+        let includedScreenshot = try XCTUnwrap(model.libraryAssets.first)
+        XCTAssertTrue(includedScreenshot.isFavorite)
+        XCTAssertEqual(PhotoAssetAccessibility.value(for: includedScreenshot), String(localized: "Favorite"),
+            "The rendered photo's accessibility value must reflect its authoritative favorite state")
         await model.updateLibraryOptions(.init(showsScreenshots: false))
         XCTAssertEqual(model.libraryAssets.map(\.id), [photo.id])
+        let includedPhoto = try XCTUnwrap(model.libraryAssets.first)
+        XCTAssertFalse(includedPhoto.isFavorite)
+        XCTAssertNil(PhotoAssetAccessibility.value(for: includedPhoto))
+    }
+
+    func testMappedDeviceFallbackKeepsAcceptedServerFavoritesAcrossLibraryFilters() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("library-mapped-favorite-\(UUID())")
+        directories.append(directory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let manager = SwiftDataManager(storeURL: directory.appendingPathComponent("test.store"),
+            backupJournalURL: directory.appendingPathComponent("backup.json"))
+        var uploaded = localPhoto()
+        uploaded.isFavorite = true
+        let unuploaded = localPhoto()
+        let uploadedID = LocalPhotoLibrary.assetID(for: uploaded.id)
+        let unuploadedID = LocalPhotoLibrary.assetID(for: unuploaded.id)
+        let serverID = UUID().uuidString
+        try manager.linkDeviceAsset(localIdentifier: uploaded.id, to: serverID)
+        var photoKitFavorite = false
+        let mutations = LibraryActionRepository(api: makeStubAPIClient())
+        let model = TimelineViewModel(dataManager: manager, assetRepo: mutations,
+            libraryDeviceMetadata: { assets in
+                Dictionary(uniqueKeysWithValues: assets.map { ($0.id, LibraryAssetMetadata(isFavorite: photoKitFavorite)) })
+            }, localPhotos: { [uploaded, unuploaded] })
+        await model.loadTimeline()
+        let original = try XCTUnwrap(model.asset(for: uploadedID))
+        XCTAssertEqual(original.origin, .both)
+        XCTAssertFalse(original.isFavorite, "Mapped fallbacks must not substitute the device favorite for unknown server state")
+        XCTAssertNil(manager.getCachedAsset(id: serverID), "The uploaded photo must still use its device fallback")
+
+        let favorited = await model.toggleFavorite(original)
+        XCTAssertTrue(favorited)
+        for filters: Set<LibraryFilter> in [[.photos], [.favorites]] {
+            await model.updateLibraryOptions(.init(filters: filters))
+            XCTAssertEqual(model.libraryAssets.first(where: { $0.id == uploadedID })?.isFavorite, true)
+        }
+        XCTAssertEqual(model.libraryAssets.map(\.id), [uploadedID],
+            "The accepted server favorite must remain even while PhotoKit says false")
+        await model.loadTimeline()
+        XCTAssertEqual(model.libraryAssets.map(\.id), [uploadedID])
+
+        photoKitFavorite = true
+        let favorite = try XCTUnwrap(model.asset(for: uploadedID))
+        let unfavorited = await model.toggleFavorite(favorite)
+        XCTAssertTrue(unfavorited)
+        await model.updateLibraryOptions(.init(filters: [.photos]))
+        XCTAssertEqual(model.libraryAssets.first(where: { $0.id == uploadedID })?.isFavorite, false)
+        XCTAssertEqual(model.libraryAssets.first(where: { $0.id == unuploadedID })?.isFavorite, true)
+        await model.updateLibraryOptions(.init(filters: [.favorites]))
+        XCTAssertEqual(model.libraryAssets.map(\.id), [unuploadedID],
+            "Only the unuploaded photo should use PhotoKit's favorite state")
+        XCTAssertEqual(mutations.favoriteUpdates, [true, false])
     }
 
     func testDefaultLibraryUsesDeviceSnapshotFavoritesWithoutAdditionalMetadataQueries() async throws {

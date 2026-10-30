@@ -155,10 +155,11 @@ final class TimelineViewModel {
         }
         var values = libraryMetadataIndex?.metadata ?? [:]
         var sources = base
+        let mappings = base.contains(where: { LocalPhotoLibrary.isLocal($0.id) })
+            ? dataManager?.serverAssetIDsByLocalIdentifier() ?? [:] : [:]
         if let index = libraryMetadataIndex {
             let baseByID = Dictionary(uniqueKeysWithValues: base.map { ($0.id, $0) })
             let local = base.filter { LocalPhotoLibrary.isLocal($0.id) }
-            let mappings = dataManager?.serverAssetIDsByLocalIdentifier() ?? [:]
             let localServerIDs = Set(local.compactMap { mappings[LocalPhotoLibrary.localIdentifier(from: $0.id)] })
             let serverIDs = Set(index.assets.map(\.id))
             sources = index.assets.map { asset in
@@ -170,7 +171,14 @@ final class TimelineViewModel {
                 !serverIDs.contains(mappings[LocalPhotoLibrary.localIdentifier(from: $0.id)] ?? "")
             })
         }
-        values.merge(libraryDeviceMetadata(sources), uniquingKeysWith: { _, local in local })
+        var deviceMetadata = libraryDeviceMetadata(sources)
+        for asset in sources where LocalPhotoLibrary.isLocal(asset.id) {
+            guard let serverID = AssetServerIdentity.resolve(asset, using: dataManager, localMappings: mappings) else { continue }
+            // Uploaded fallbacks use the server favorite, which can differ from PhotoKit.
+            deviceMetadata[asset.id]?.isFavorite = pendingLocalFavorites[serverID]
+                ?? dataManager?.getCachedAsset(id: serverID)?.isFavorite ?? asset.isFavorite
+        }
+        values.merge(deviceMetadata, uniquingKeysWith: { _, local in local })
         sources = AssetVisibilityPolicy(scope: .timeline, dataManager: dataManager).filter(sources)
         supportsScreenshotFilter = !hasKnownServerPhotos && !sources.isEmpty
             && sources.allSatisfy { LocalPhotoLibrary.isLocal($0.id) }

@@ -127,6 +127,11 @@ enum LibraryPresentation {
                 if !included { return false }
             }
             return true
+        }.map { asset in
+            guard let isFavorite = metadata[asset.id]?.isFavorite else { return asset }
+            var asset = asset
+            asset.isFavorite = isFavorite
+            return asset
         }.sorted { lhs, rhs in
             if options.sort == .recentlyAdded {
                 let left = metadata[lhs.id]?.addedAt, right = metadata[rhs.id]?.addedAt
