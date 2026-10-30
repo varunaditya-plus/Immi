@@ -2,9 +2,11 @@ import Foundation
 
 class PeopleRepository {
     private let api: APIClient
+    private let dataManager: SwiftDataManager?
 
-    init(api: APIClient) {
+    init(api: APIClient, dataManager: SwiftDataManager? = nil) {
         self.api = api
+        self.dataManager = dataManager
     }
 
     /// - Parameter size: batas dari SERVER, bukan dipotong setelah diterima.
@@ -75,20 +77,21 @@ class PeopleRepository {
         try await update(.init(id: id, isFavorite: value))
     }
 
+    @MainActor
     func setKeyPhoto(_ id: String, assetID: String) async throws {
-        let context = await api.session.snapshot
+        let context = api.session.snapshot
         var previous = try? await thumbnailData(id)
         try Task.checkCancellation()
         try await update(.init(id: id, featureFaceAssetId: assetID))
         let key = "/people/\(id)/thumbnail"
-        try await api.checkCurrent(context)
+        try api.checkCurrent(context)
         await ImageCache.shared.remove(key: key, maxPixelSize: 600)
         // Immich queues face generation after accepting the update. Do not
         // immediately cache the old face again while that worker is running.
         let deadline = ContinuousClock.now.advanced(by: .seconds(3))
         for attempt in 0..<6 {
             try Task.checkCancellation()
-            try await api.checkCurrent(context)
+            try api.checkCurrent(context)
             guard ContinuousClock.now < deadline else { break }
             if attempt > 0 { try await Task.sleep(for: .milliseconds(250)) }
             guard let data = try? await thumbnailData(id) else { continue }
@@ -96,7 +99,7 @@ class PeopleRepository {
             // after the update belongs to the completed face-generation job.
             guard let baseline = previous else { previous = data; continue }
             guard data != baseline else { continue }
-            try await api.checkCurrent(context)
+            try api.checkCurrent(context)
             await ImageCache.shared.remove(key: key, maxPixelSize: 600)
             _ = try? await ImageCache.shared.image(key: key, maxPixelSize: 600) {
                 try await self.api.checkCurrent(context)
@@ -104,7 +107,7 @@ class PeopleRepository {
             }
             return
         }
-        try await api.checkCurrent(context)
+        try api.checkCurrent(context)
         await ImageCache.shared.remove(key: key, maxPixelSize: 600)
     }
 
@@ -145,7 +148,14 @@ class PeopleRepository {
 
     /// `PUT /people/{id}` deprecated sejak Immich API v3. Endpoint bulk ini
     /// adalah pengganti stabilnya, termasuk untuk perubahan satu orang.
+    @MainActor
     private func update(_ item: PeopleUpdateRequestDTO.Item) async throws {
+        if let assetID = item.featureFaceAssetId {
+            guard !LocalPhotoLibrary.isLocal(assetID),
+                  AssetVisibilityPolicy(scope: .timeline, dataManager: dataManager).allows(id: assetID) else {
+                throw APIError.server(status: 409, message: String(localized: "This photo is no longer available."))
+            }
+        }
         let response: [BulkIDResponseDTO] = try await api.send(.json(
             "/people", method: .put,
             body: PeopleUpdateRequestDTO(people: [item])))

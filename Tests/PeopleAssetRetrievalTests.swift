@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import UIKit
 import XCTest
 @testable import ImmichApp
@@ -9,6 +10,8 @@ final class PeopleAssetRetrievalTests: XCTestCase {
     private var transport: URLSession!
     private var snapshotKeys: [String] = []
     private var thumbnailKeys: [String] = []
+    private var directory: URL?
+    private var store: SwiftDataManager?
     private let personID = "33333333-3333-4333-8333-333333333333"
 
     override func setUp() async throws {
@@ -28,6 +31,12 @@ final class PeopleAssetRetrievalTests: XCTestCase {
         snapshotKeys.removeAll()
         for key in thumbnailKeys { await ImageCache.shared.remove(key: key, maxPixelSize: 600) }
         thumbnailKeys.removeAll()
+        if let container = store?.modelContainer {
+            store = nil
+            try container.erase()
+        }
+        if let directory { try? FileManager.default.removeItem(at: directory) }
+        directory = nil
         api = nil
         transport = nil
         MockURLProtocol.reset()
@@ -369,6 +378,53 @@ final class PeopleAssetRetrievalTests: XCTestCase {
         XCTAssertEqual(Self.centerPixel(image), Self.centerPixel(try XCTUnwrap(UIImage(data: fresh))))
     }
 
+    func testKeyPhotoRechecksPrivacyAfterItsBaselineReadAndDoesNotSendAStaleSelection() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("people-key-photo-\(UUID())")
+        self.directory = directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        store = SwiftDataManager(storeURL: directory.appendingPathComponent("test.store"),
+            backupJournalURL: directory.appendingPathComponent("backup.json"))
+        let store = try XCTUnwrap(store)
+        let old = Self.thumbnail(.red)
+        for visibility in ["locked", "archive", "removed"] {
+            let id = UUID().uuidString, chosen = UUID().uuidString
+            let key = "/people/\(id)/thumbnail"
+            thumbnailKeys.append(key)
+            var reads = 0, writes = 0
+            let accepted = try JSONSerialization.data(withJSONObject: [["id": id, "success": true]])
+            MockURLProtocol.responseProvider = { request in
+                if request.httpMethod == "GET" {
+                    XCTAssertEqual(request.url?.path, "/api\(key)")
+                    reads += 1
+                    return Self.response(request, data: old)
+                }
+                writes += 1
+                return Self.response(request, data: accepted)
+            }
+            let held = PeopleStateGate<Void>()
+            let heldAPI = HeldKeyPhotoBaselineAPI(session: api.session, urlSession: transport)
+            heldAPI.afterFirstThumbnail = { try await held.value() }
+            let repository = PeopleRepository(api: heldAPI, dataManager: store)
+            let pending = Task { try await repository.setKeyPhoto(id, assetID: chosen) }
+            addTeardownBlock { await held.complete(.failure(CancellationError())); _ = try? await pending.value }
+            await fulfillment(of: [held.started], timeout: 2)
+            if visibility == "removed" { RemovedAssets.shared.remove([chosen]) }
+            else { try store.setAssetVisibility([chosen], to: visibility) }
+            held.complete(.success(()))
+
+            do {
+                try await pending.value
+                XCTFail("A \(visibility) photo cannot become the person's public key photo")
+            } catch APIError.server(let status, _) {
+                XCTAssertEqual(status, 409)
+            } catch { XCTFail("Expected the unavailable-photo rejection, received \(error)") }
+
+            XCTAssertEqual(reads, 1)
+            XCTAssertEqual(writes, 0, "Privacy must be checked before sending the mutation, not just before updating the UI")
+            if visibility == "removed" { RemovedAssets.shared.restore([chosen]) }
+        }
+    }
+
     func testFaceReadsAndReassignmentUseTheAssetAndDestinationPersonContracts() async throws {
         let assetID = UUID().uuidString, target = UUID().uuidString, face = UUID().uuidString
         let encoded = try JSONEncoder.immich.encode(PersonDTO(id: target, name: "Target", birthDate: nil, thumbnailPath: nil, isHidden: false))
@@ -473,5 +529,17 @@ final class PeopleAssetRetrievalTests: XCTestCase {
     private nonisolated static func response(_ request: URLRequest, status: Int = 200, data: Data)
         -> (Data?, URLResponse?, Error?) {
         (data, HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil), nil)
+    }
+}
+
+private final class HeldKeyPhotoBaselineAPI: APIClient {
+    var afterFirstThumbnail: (@MainActor () async throws -> Void)?
+
+    override func rawData(_ endpoint: Endpoint) async throws -> Data {
+        let data = try await super.rawData(endpoint)
+        let hold = afterFirstThumbnail
+        afterFirstThumbnail = nil
+        try await hold?()
+        return data
     }
 }
