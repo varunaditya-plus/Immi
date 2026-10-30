@@ -97,15 +97,15 @@ struct LibraryView: View {
                 .toolbar { libraryToolbar }
                 .sheet(isPresented: $showSettings) { settingsSheet }
                 .onChange(of: showSettings) { _, isPresented in
-                    if !isPresented {
-                        Task { @MainActor in
-                            // Anchor toolbar baru aman dipakai setelah sheet
-                            // benar-benar meninggalkan presentation hierarchy.
-                            try? await Task.sleep(for: .milliseconds(450))
-                            guard !showSettings else { return }
-                            backupSetupJourney.returnToProfileIfNeeded()
-                        }
+                    if isPresented {
+                        backupSetupJourney.advanceToBackupRow()
+                    } else {
+                        backupSetupJourney.beginReturningToProfile(
+                            request: backupSetupJourney.presentationRequest)
                     }
+                }
+                .task(id: returnToProfileTaskID) {
+                    await returnToProfileAfterDismissal()
                 }
                 .navigationDestination(isPresented: $showBackup) { BackupView() }
                 // Separuh kedua dari pengantaran itu — lihat `MainTabView`.
@@ -434,6 +434,19 @@ struct LibraryView: View {
 
     private var settingsSheet: some View {
         SettingsSheetView(session: session)
+    }
+
+    private var returnToProfileTaskID: String {
+        "\(backupSetupJourney.presentationRequest)-\(isActive)-\(isRootVisible)-\(showSettings)"
+    }
+
+    private func returnToProfileAfterDismissal() async {
+        guard isActive, isRootVisible, !showSettings,
+              backupSetupJourney.step == .returningToProfile else { return }
+        let request = backupSetupJourney.presentationRequest
+        try? await Task.sleep(for: .milliseconds(450))
+        guard !Task.isCancelled, !showSettings else { return }
+        backupSetupJourney.returnToProfileIfNeeded(request: request)
     }
 
     // MARK: - Baris yang bisa dilipat

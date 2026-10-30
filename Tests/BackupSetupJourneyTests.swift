@@ -82,8 +82,9 @@ final class BackupSetupJourneyTests: XCTestCase {
         let journey = makeJourney()
         journey.refreshForAlbumSelection()
         journey.advanceToBackupRow()
+        journey.beginReturningToProfile(request: journey.presentationRequest)
 
-        journey.returnToProfileIfNeeded()
+        journey.returnToProfileIfNeeded(request: journey.presentationRequest)
 
         XCTAssertEqual(journey.step, .profile)
         assertCoachmarkBecomesVisibleWhenReady(journey)
@@ -106,7 +107,8 @@ final class BackupSetupJourneyTests: XCTestCase {
         journey.refreshForAlbumSelection()
         let oldRequest = journey.presentationRequest
         journey.advanceToBackupRow()
-        journey.returnToProfileIfNeeded()
+        journey.beginReturningToProfile(request: journey.presentationRequest)
+        journey.returnToProfileIfNeeded(request: journey.presentationRequest)
 
         journey.markTipReady(for: .profile, request: oldRequest)
 
@@ -150,7 +152,8 @@ final class BackupSetupJourneyTests: XCTestCase {
         journey.markTipReady(for: .backupRow, request: request)
 
         journey.dismissCoachmark(for: .backupRow, request: request)
-        journey.returnToProfileIfNeeded()
+        journey.beginReturningToProfile(request: journey.presentationRequest)
+        journey.returnToProfileIfNeeded(request: journey.presentationRequest)
         journey.markTipReady(for: .backupRow, request: request)
         journey.refreshForAlbumSelection()
 
@@ -234,6 +237,97 @@ final class BackupSetupJourneyTests: XCTestCase {
         journey.markTipReady(for: .idle, request: journey.presentationRequest)
 
         XCTAssertFalse(journey.isCoachmarkVisible)
+    }
+
+    func testClosingSettingsRetiresItsRowBeforeTheDelayedProfileReturn() {
+        let journey = makeJourney()
+        journey.refreshForAlbumSelection()
+        journey.advanceToBackupRow()
+        let rowRequest = journey.presentationRequest
+        journey.markTipReady(for: .backupRow, request: rowRequest)
+
+        journey.beginReturningToProfile(request: journey.presentationRequest)
+        let returnRequest = journey.presentationRequest
+        journey.suspendPresentation(for: .backupRow, request: rowRequest)
+        journey.markTipReady(for: .backupRow, request: rowRequest)
+        journey.markTipReady(for: .returningToProfile, request: returnRequest)
+
+        XCTAssertEqual(journey.step, .returningToProfile)
+        XCTAssertEqual(journey.presentationRequest, returnRequest)
+        XCTAssertFalse(journey.isCoachmarkVisible)
+        journey.returnToProfileIfNeeded(request: returnRequest)
+        XCTAssertEqual(journey.step, .profile)
+        assertCoachmarkBecomesVisibleWhenReady(journey)
+    }
+
+    func testOldProfileReturnCannotRetireANewerSettingsVisit() {
+        let journey = makeJourney()
+        journey.refreshForAlbumSelection()
+        journey.advanceToBackupRow()
+        journey.beginReturningToProfile(request: journey.presentationRequest)
+        let oldReturnRequest = journey.presentationRequest
+        journey.advanceToBackupRow()
+        let currentRowRequest = journey.presentationRequest
+        journey.markTipReady(for: .backupRow, request: currentRowRequest)
+
+        journey.returnToProfileIfNeeded(request: oldReturnRequest)
+
+        XCTAssertEqual(journey.step, .backupRow)
+        XCTAssertEqual(journey.presentationRequest, currentRowRequest)
+        XCTAssertTrue(journey.isCoachmarkVisible)
+    }
+
+    func testOldProfileReturnCannotFinishANewerDismissal() {
+        let journey = makeJourney()
+        journey.refreshForAlbumSelection()
+        journey.advanceToBackupRow()
+        journey.beginReturningToProfile(request: journey.presentationRequest)
+        let oldReturnRequest = journey.presentationRequest
+        journey.advanceToBackupRow()
+        journey.beginReturningToProfile(request: journey.presentationRequest)
+        let currentReturnRequest = journey.presentationRequest
+
+        journey.returnToProfileIfNeeded(request: oldReturnRequest)
+
+        XCTAssertEqual(journey.step, .returningToProfile)
+        XCTAssertEqual(journey.presentationRequest, currentReturnRequest)
+        XCTAssertFalse(journey.isCoachmarkVisible)
+        journey.returnToProfileIfNeeded(request: currentReturnRequest)
+        XCTAssertEqual(journey.step, .profile)
+    }
+
+    func testCancelledPendingSettingsEntryCanResumeAtProfile() {
+        let journey = makeJourney()
+        journey.refreshForAlbumSelection()
+        journey.advanceToBackupRow()
+        let pendingEntryRequest = journey.presentationRequest
+        XCTAssertFalse(journey.isCoachmarkVisible, "Settings has not opened its row yet")
+
+        journey.beginReturningToProfile(request: pendingEntryRequest)
+        let returnRequest = journey.presentationRequest
+
+        XCTAssertEqual(journey.step, .returningToProfile)
+        XCTAssertNotEqual(returnRequest, pendingEntryRequest)
+        journey.returnToProfileIfNeeded(request: returnRequest)
+        XCTAssertEqual(journey.step, .profile)
+        assertCoachmarkBecomesVisibleWhenReady(journey)
+    }
+
+    func testCancellingAnOldSettingsEntryCannotRetireANewerRow() {
+        let journey = makeJourney()
+        journey.refreshForAlbumSelection()
+        journey.advanceToBackupRow()
+        let oldEntryRequest = journey.presentationRequest
+        journey.advanceToBackupRow()
+        let currentRowRequest = journey.presentationRequest
+        journey.markTipReady(for: .backupRow, request: currentRowRequest)
+
+        journey.beginReturningToProfile(request: oldEntryRequest)
+
+        XCTAssertNotEqual(currentRowRequest, oldEntryRequest)
+        XCTAssertEqual(journey.step, .backupRow)
+        XCTAssertEqual(journey.presentationRequest, currentRowRequest)
+        XCTAssertTrue(journey.isCoachmarkVisible)
     }
 
     private func assertCoachmarkBecomesVisibleWhenReady(

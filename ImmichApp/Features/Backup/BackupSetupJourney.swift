@@ -14,6 +14,7 @@ final class BackupSetupJourney {
         case idle
         case profile
         case backupRow
+        case returningToProfile
     }
 
     static let shared = BackupSetupJourney()
@@ -59,12 +60,13 @@ final class BackupSetupJourney {
     }
 
     func advanceToBackupRow() {
-        guard step == .profile, !hasSelectedAlbums() else { return }
+        guard step == .profile || step == .backupRow || step == .returningToProfile,
+              !hasSelectedAlbums() else { return }
         activate(at: .backupRow)
     }
 
     func dismissCoachmark(for expectedStep: Step, request: Int) {
-        guard expectedStep != .idle,
+        guard expectedStep == .profile || expectedStep == .backupRow,
               step == expectedStep,
               presentationRequest == request
         else { return }
@@ -72,21 +74,30 @@ final class BackupSetupJourney {
     }
 
     func suspendPresentation(for expectedStep: Step, request: Int) {
-        guard step == expectedStep, presentationRequest == request else { return }
+        guard expectedStep == .profile || expectedStep == .backupRow,
+              step == expectedStep, presentationRequest == request else { return }
         isCoachmarkVisible = false
         presentationRequest += 1
     }
 
-    /// Jika Settings ditutup sebelum Backup dibuka, arahkan lagi dari avatar.
-    func returnToProfileIfNeeded() {
-        guard step == .backupRow, !hasSelectedAlbums() else { return }
+    // Retire the closing row immediately; the next active root resumes the
+    // profile tip after sheet dismissal, using this request to reject old timers.
+    func beginReturningToProfile(request: Int) {
+        guard step == .backupRow, presentationRequest == request,
+              !hasSelectedAlbums() else { return }
+        activate(at: .returningToProfile)
+    }
+
+    func returnToProfileIfNeeded(request: Int) {
+        guard step == .returningToProfile, presentationRequest == request,
+              !hasSelectedAlbums() else { return }
         activate(at: .profile)
     }
 
     /// Dipanggil anchor setelah `Tip.resetEligibility()` selesai. Request lama
     /// tidak boleh membuka tip kalau pengguna sudah berpindah langkah.
     func markTipReady(for expectedStep: Step, request: Int) {
-        guard expectedStep != .idle,
+        guard expectedStep == .profile || expectedStep == .backupRow,
               step == expectedStep,
               presentationRequest == request
         else { return }
@@ -284,8 +295,13 @@ struct JourneyProfileButton: View {
         if journey.step == .profile {
             tip.invalidate(reason: .actionPerformed)
             journey.advanceToBackupRow()
+            let rowRequest = journey.presentationRequest
             settingsPresentationTask = Task { @MainActor in
+                var didOpenSettings = false
                 defer {
+                    if !didOpenSettings {
+                        journey.beginReturningToProfile(request: rowRequest)
+                    }
                     settingsPresentationTask = nil
                     isOpeningSettings = false
                 }
@@ -294,6 +310,7 @@ struct JourneyProfileButton: View {
                 // benar-benar keluar dari presentation hierarchy.
                 try? await Task.sleep(for: .milliseconds(350))
                 guard !Task.isCancelled, isVisible else { return }
+                didOpenSettings = true
                 openSettings()
                 await Task.yield()
             }

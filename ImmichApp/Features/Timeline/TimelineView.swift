@@ -79,6 +79,17 @@ struct TimelineView: View {
 
     var body: some View {
         screen
+        .onChange(of: showSettings) { _, isPresented in
+            if isPresented {
+                backupSetupJourney.advanceToBackupRow()
+            } else {
+                backupSetupJourney.beginReturningToProfile(
+                    request: backupSetupJourney.presentationRequest)
+            }
+        }
+        .task(id: returnToProfileTaskID) {
+            await returnToProfileAfterDismissal()
+        }
         .task {
             if vm == nil {
                 let api = APIClient(session: session)
@@ -167,18 +178,6 @@ struct TimelineView: View {
             }
         }
         .sheet(isPresented: $showSettings) { settingsSheet }
-        .onChange(of: showSettings) { _, isPresented in
-            if !isPresented {
-                Task { @MainActor in
-                    // Tunggu animasi dismiss sheet selesai. Membuka TipKit saat
-                    // presentation controller lama masih turun dapat membuat
-                    // overlay tak terlihat yang menahan tap toolbar.
-                    try? await Task.sleep(for: .milliseconds(450))
-                    guard !showSettings else { return }
-                    backupSetupJourney.returnToProfileIfNeeded()
-                }
-            }
-        }
         .sheet(isPresented: $isSharePresented, onDismiss: {
             shareFileURL = nil
             sharedAssetIDs.removeAll()
@@ -510,6 +509,19 @@ struct TimelineView: View {
     
     private var settingsSheet: some View {
         SettingsSheetView(session: session)
+    }
+
+    private var returnToProfileTaskID: String {
+        "\(backupSetupJourney.presentationRequest)-\(isActive)-\(showSettings)"
+    }
+
+    private func returnToProfileAfterDismissal() async {
+        guard isActive, !showSettings,
+              backupSetupJourney.step == .returningToProfile else { return }
+        let request = backupSetupJourney.presentationRequest
+        try? await Task.sleep(for: .milliseconds(450))
+        guard !Task.isCancelled, !showSettings else { return }
+        backupSetupJourney.returnToProfileIfNeeded(request: request)
     }
 
     // MARK: - Sel grid
