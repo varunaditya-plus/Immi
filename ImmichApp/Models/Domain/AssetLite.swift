@@ -23,7 +23,7 @@ struct AssetLite: Identifiable, Hashable, Sendable, Codable {
     let isVideo: Bool
     let ratio: Double
     let thumbhash: String?
-    let createdAt: Date
+    var createdAt: Date
     /// var supaya grid bisa menampilkan status favorit tanpa memuat detail
     /// penuh, dan memperbaruinya di tempat setelah aksi context menu.
     var isFavorite: Bool = false

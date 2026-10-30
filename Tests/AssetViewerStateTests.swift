@@ -4,6 +4,35 @@ import XCTest
 
 @MainActor
 final class AssetViewerStateTests: XCTestCase {
+    func testConfirmedCaptureDateSurvivesPagingWithoutChangingVisitOrOtherFields() {
+        let first = AssetLite(id: "A", isVideo: true, ratio: 1.7, thumbhash: "retained",
+            createdAt: .distantPast, isFavorite: true, duration: 37, livePhotoVideoID: "paired-video",
+            origin: .both, trashVisibility: "archive")
+        let second = asset("B")
+        let state = viewer([first, second])
+        let visit = state.visit
+        let saved = Date(timeIntervalSince1970: 1_700_000_000)
+
+        state.setCaptureDate(saved, for: first.id)
+
+        XCTAssertEqual(state.visit, visit)
+        XCTAssertEqual(state.currentAsset.createdAt, saved)
+        XCTAssertEqual(state.currentAsset.origin, first.origin)
+        XCTAssertEqual(state.currentAsset.isFavorite, first.isFavorite)
+        XCTAssertEqual(state.currentAsset.ratio, first.ratio)
+        XCTAssertEqual(state.currentAsset.thumbhash, first.thumbhash)
+        XCTAssertEqual(state.currentAsset.duration, first.duration)
+        XCTAssertEqual(state.currentAsset.livePhotoVideoID, first.livePhotoVideoID)
+        XCTAssertEqual(state.currentAsset.trashVisibility, first.trashVisibility)
+        XCTAssertTrue(state.select(second.id))
+        XCTAssertEqual(state.currentAsset.createdAt, second.createdAt)
+        XCTAssertTrue(state.select(first.id))
+        XCTAssertEqual(state.currentAsset.createdAt, saved)
+        XCTAssertTrue(state.removePage(first.id))
+        state.setCaptureDate(saved, for: first.id)
+        XCTAssertEqual(state.pages.map(\.id), [second.id])
+    }
+
     func testRemovalCompletesForItsOriginalPageAfterSwiping() async throws {
         let state = viewer([asset("A"), asset("B"), asset("C")])
         let target = state.target(serverID: "A", detail: nil)

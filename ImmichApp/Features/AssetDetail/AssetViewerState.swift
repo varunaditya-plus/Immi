@@ -241,6 +241,11 @@ final class AssetViewerState {
         storage.assets[index].isFavorite = value
     }
 
+    func setCaptureDate(_ date: Date, for id: String) {
+        guard let index = storage.assets.firstIndex(where: { $0.id == id }) else { return }
+        storage.assets[index].createdAt = date
+    }
+
     func setOrigin(_ origin: AssetOrigin, for id: String) {
         guard let index = storage.assets.firstIndex(where: { $0.id == id }) else { return }
         storage.assets[index].origin = origin

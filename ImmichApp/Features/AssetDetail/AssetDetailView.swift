@@ -304,7 +304,8 @@ struct AssetDetailView: View {
     }
 
     private var navigationTitleText: String {
-        currentAsset.createdAt.formatted(date: .abbreviated, time: .omitted)
+        (matchingDetail?.fileCreatedAt ?? currentAsset.createdAt)
+            .formatted(date: .abbreviated, time: .omitted)
     }
 
     private var isStatusBarHidden: Bool {
@@ -386,7 +387,12 @@ struct AssetDetailView: View {
         if let detail = target.detail, let serverID = target.serverID {
             AssetDateEditor(initialDate: detail.fileCreatedAt) { newDate in
                 Task {
-                    if await vm?.updateDate(serverID, to: newDate) == true { onAssetUpdated?(serverID) }
+                    if await vm?.updateDate(serverID, to: newDate) == true {
+                        if serverAssetID(for: target.asset) == serverID {
+                            viewer.setCaptureDate(newDate, for: target.asset.id)
+                        }
+                        onAssetUpdated?(serverID)
+                    }
                 }
             }
         }
@@ -456,6 +462,9 @@ struct AssetDetailView: View {
             .onChange(of: detailID, initial: true) { _, newValue in
                 hasDetail = newValue.assetID != nil
             }
+            .onChange(of: captureDateValue, initial: true) { _, newValue in
+                if let date = newValue.date { viewer.setCaptureDate(date, for: newValue.assetID) }
+            }
             .onChange(of: livePhotoValue, initial: true) { _, newValue in
                 currentLivePhotoVideoID = newValue.videoID
                 currentLivePhotoHint = newValue.hint
@@ -467,6 +476,9 @@ struct AssetDetailView: View {
         FavoriteDisplay(visit: viewer.visit, value: matchingDetail?.isFavorite ?? currentAsset.isFavorite)
     }
     private var detailID: DetailDisplay { DetailDisplay(visit: viewer.visit, assetID: matchingDetail?.id) }
+    private var captureDateValue: CaptureDateDisplay {
+        CaptureDateDisplay(visit: viewer.visit, assetID: currentAsset.id, date: matchingDetail?.fileCreatedAt)
+    }
     private var livePhotoValue: LivePhotoDisplay {
         let detail = matchingDetail
         let hint = detail.map {
@@ -1631,6 +1643,12 @@ private struct FavoriteDisplay: Equatable {
 private struct DetailDisplay: Equatable {
     let visit: UUID
     let assetID: String?
+}
+
+private struct CaptureDateDisplay: Equatable {
+    let visit: UUID
+    let assetID: String
+    let date: Date?
 }
 
 private struct LivePhotoDisplay: Equatable {

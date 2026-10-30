@@ -16,7 +16,7 @@ struct AssetResponseDTO: Codable, Identifiable {
     let id: String
     let type: String
     let originalFileName: String
-    let fileCreatedAt: Date
+    var fileCreatedAt: Date
     var isFavorite: Bool
     var isArchived: Bool
     /// Missing only in older API responses and existing offline snapshots.

@@ -300,14 +300,15 @@ final class AssetDetailViewModel {
         }
     }
 
-    /// Tanggal & lokasi tersimpan di beberapa field turunan (`fileCreatedAt`,
-    /// `localDateTime`, `exifInfo`), jadi lebih aman memuat ulang detailnya
-    /// daripada menambal satu per satu di sisi klien.
+    /// Keep the confirmed capture date if the follow-up read fails. Other
+    /// server-derived date fields still need a fresh response before caching.
     @discardableResult
     func updateDate(_ id: String, to date: Date) async -> Bool {
         let mutation = beginMutation(id, kind: .date)
         do {
-            let accepted = try await performMutation(mutation) {
+            let accepted = try await performMutation(mutation, patch: {
+                $0.fileCreatedAt = date
+            }, invalidatesSnapshot: true) {
                 try await self.repo.updateDate(id, to: date)
             }
             if accepted, let selected = selection, selected.id == id {
