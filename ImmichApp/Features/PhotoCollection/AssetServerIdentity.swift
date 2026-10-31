@@ -3,6 +3,17 @@ import Foundation
 /// Display IDs identify grid tiles; only the current mapping identifies a server asset.
 @MainActor
 enum AssetServerIdentity {
+    static func exportIDs(for ids: [String], using manager: SwiftDataManager? = nil) -> [String] {
+        let mappings = ids.contains(where: LocalPhotoLibrary.isLocal)
+            ? (manager ?? .shared).serverAssetIDsByLocalIdentifier() : [:]
+        return ids.map { id in
+            guard LocalPhotoLibrary.isLocal(id),
+                  let serverID = mappings[LocalPhotoLibrary.localIdentifier(from: id)],
+                  !serverID.isEmpty, !LocalPhotoLibrary.isLocal(serverID) else { return id }
+            return serverID
+        }
+    }
+
     /// Supply a snapshot for synchronous scans; omit it when revalidating after an await.
     static func resolve(
         _ asset: AssetLite, using manager: SwiftDataManager? = nil,
