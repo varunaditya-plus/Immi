@@ -13,8 +13,10 @@ final class PhotoSlideshowState {
     private(set) var hasEnded = false
     private(set) var revision = UUID()
     private(set) var mediaRevision = UUID()
+    private(set) var mediaState = PhotoStoryMediaState.loading
     var isSceneActive = true
     @ObservationIgnored private var elapsed: TimeInterval = 0
+    @ObservationIgnored private var acceptsMediaUpdates = true
 
     init(assets: [AssetLite], initialAssetID: String? = nil,
          visibilityPolicy: AssetVisibilityPolicy? = nil, dataManager: SwiftDataManager? = nil, removed: RemovedAssets? = nil) {
@@ -96,16 +98,22 @@ final class PhotoSlideshowState {
     }
 
     func elapse(_ seconds: TimeInterval, suspended: Bool = false) {
-        guard isPlaying, isSceneActive, !suspended, !hasEnded, currentAsset != nil,
+        guard isPlaying, isSceneActive, !suspended, !hasEnded, mediaState != .loading, currentAsset != nil,
               seconds.isFinite, seconds > 0 else { return }
+        if mediaState == .failed { next(); return }
         elapsed += seconds
         if elapsed >= duration { next() }
     }
 
-    func stop() { isPlaying = false; revision = UUID() }
+    func updateMediaState(_ value: PhotoStoryMediaState, assetID: String, revision: UUID) {
+        guard acceptsMediaUpdates, !hasEnded, currentAsset?.id == assetID, mediaRevision == revision else { return }
+        mediaState = value
+    }
+
+    func stop() { acceptsMediaUpdates = false; isPlaying = false; revision = UUID() }
     func allowsSharing(_ id: String) -> Bool { isCurrent && currentAsset?.id == id && policy.allows(id: id) }
 
-    private func restartInterval() { elapsed = 0; revision = UUID(); mediaRevision = UUID() }
+    private func restartInterval() { elapsed = 0; mediaState = .loading; revision = UUID(); mediaRevision = UUID() }
 }
 
 struct PhotoSlideshowView: View {
@@ -140,9 +148,13 @@ struct PhotoSlideshowView: View {
         return ZStack {
             Color.black.ignoresSafeArea()
             if let asset = state.currentAsset {
+                let revision = state.mediaRevision
                 GeometryReader { geometry in
                     MemoryStorySlide(asset: asset, isActive: !state.hasEnded && state.isCurrent,
-                        isPaused: !state.isPlaying || suspended, previewLoader: previewLoader, visibilityPolicy: state.policy)
+                        isPaused: !state.isPlaying || suspended, previewLoader: previewLoader, visibilityPolicy: state.policy,
+                        onMediaStateChanged: { [weak state] value in
+                            state?.updateMediaState(value, assetID: asset.id, revision: revision)
+                        })
                         .id(state.mediaRevision)
                         .frame(width: geometry.size.width, height: geometry.size.height)
                         .clipped()
@@ -172,7 +184,7 @@ struct PhotoSlideshowView: View {
         }
         .errorToast($shareError)
         .task(id: PlaybackKey(assetID: state.currentAssetID, revision: state.revision,
-            paused: !state.isPlaying || suspended, ended: state.hasEnded)) { await run() }
+            paused: !state.isPlaying || suspended || state.mediaState == .loading, ended: state.hasEnded)) { await run() }
         .onAppear {
             if sessionContext == nil { sessionContext = session.snapshot }
             state.isSceneActive = scenePhase == .active
@@ -266,9 +278,10 @@ struct PhotoSlideshowView: View {
         let revision = state.revision
         let clock = ContinuousClock()
         var previous = clock.now
-        while !Task.isCancelled, state.revision == revision, state.isPlaying, !state.hasEnded, !suspended {
+        while !Task.isCancelled, state.revision == revision, state.isPlaying, !state.hasEnded,
+              state.mediaState != .loading, !suspended {
             do { try await clock.sleep(for: .milliseconds(100)) } catch { return }
-            guard !Task.isCancelled, state.revision == revision, !suspended else { return }
+            guard !Task.isCancelled, state.revision == revision, state.mediaState != .loading, !suspended else { return }
             let now = clock.now
             let interval = previous.duration(to: now).components
             previous = now

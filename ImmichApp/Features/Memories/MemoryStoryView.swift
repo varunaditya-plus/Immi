@@ -4,6 +4,8 @@ import SwiftUI
 /// Lama satu foto tampil sebelum berpindah sendiri.
 private let storyPhotoDuration: Double = 5
 
+enum PhotoStoryMediaState: Equatable { case loading, ready, failed }
+
 /// Kenangan sebagai story layar penuh.
 ///
 /// Dua arah gerak yang berbeda arti: menggeser MENDATAR berpindah foto di dalam
@@ -351,13 +353,15 @@ struct MemoryStorySlide: View {
     let isPaused: Bool
     var previewLoader: PhotoPreviewLoader? = nil
     var visibilityPolicy = AssetVisibilityPolicy(scope: .timeline)
+    var onMediaStateChanged: ((PhotoStoryMediaState) -> Void)? = nil
 
     @Environment(SessionManager.self) private var session
 
     var body: some View {
         ZStack {
-            if LocalPhotoLibrary.isLocal(asset.id) {
-                MemoryStoryLocalImage(assetID: asset.id, loader: previewLoader, visibilityPolicy: visibilityPolicy)
+            if LocalPhotoLibrary.isLocal(asset.id) || (onMediaStateChanged != nil && !asset.isVideo) {
+                MemoryStoryLoadedImage(assetID: asset.id, loader: previewLoader, visibilityPolicy: visibilityPolicy,
+                    onMediaStateChanged: asset.isVideo ? nil : onMediaStateChanged)
             } else {
                 // TIGA lapis, tapi hanya DUA permintaan jaringan.
                 //
@@ -409,34 +413,68 @@ struct MemoryStorySlide: View {
                     assetID: asset.id,
                     isActive: isActive,
                     isPaused: isPaused,
-                    session: session, localLoader: previewLoader, visibilityPolicy: visibilityPolicy)
+                    session: session, localLoader: previewLoader, visibilityPolicy: visibilityPolicy,
+                    onMediaStateChanged: onMediaStateChanged)
             }
         }
     }
 }
 
-private struct MemoryStoryLocalImage: View {
+private struct MemoryStoryLoadedImage: View {
+    private struct LoadKey: Equatable {
+        let assetID: String
+        let sourceID: String
+        let context: SessionRequestContext
+        let generation: UUID
+    }
+
     let assetID: String
     let loader: PhotoPreviewLoader?
     let visibilityPolicy: AssetVisibilityPolicy
+    let onMediaStateChanged: ((PhotoStoryMediaState) -> Void)?
     @Environment(SessionManager.self) private var session
     @State private var image: UIImage?
+    @State private var imageKey: LoadKey?
 
     var body: some View {
-        ZStack {
-            if let image {
+        _ = SwiftDataManager.shared.backupMappingRevision
+        let loader = loader ?? PhotoPreviewLoader(session: session)
+        let key = LoadKey(assetID: assetID, sourceID: loader.sourceID(for: assetID),
+            context: loader.requestContext, generation: LocalSnapshot.generation)
+        return ZStack {
+            if let image, imageKey == key {
                 Image(uiImage: image).resizable().scaledToFill().blur(radius: 40)
                     .overlay(Color.black.opacity(0.25))
                 Image(uiImage: image).resizable().scaledToFit()
             }
         }
-        .task(id: assetID) {
-            let generation = LocalSnapshot.generation
-            let loader = loader ?? PhotoPreviewLoader(session: session)
+        .task(id: key) {
+            let previousImage = image, previousKey = imageKey
+            image = nil
+            imageKey = nil
+            onMediaStateChanged?(.loading)
+            guard !Task.isCancelled, visibilityPolicy.allows(id: assetID) else { return }
+            if let cached = loader.cachedImage(for: assetID), previousKey == nil || previousKey == key || cached !== previousImage {
+                image = cached
+                imageKey = key
+                onMediaStateChanged?(.ready)
+            }
             let loaded = await loader.image(for: assetID)
-            guard !Task.isCancelled, generation == LocalSnapshot.generation,
-                  visibilityPolicy.allows(id: assetID) else { return }
-            image = loaded
+            guard !Task.isCancelled, key.generation == LocalSnapshot.generation else { return }
+            guard key.sourceID == loader.sourceID(for: assetID), key.context == loader.requestContext,
+                  visibilityPolicy.allows(id: assetID) else {
+                image = nil
+                onMediaStateChanged?(.failed)
+                return
+            }
+            if let loaded {
+                guard previousKey == nil || previousKey == key || loaded !== previousImage else {
+                    if image == nil { onMediaStateChanged?(.failed) }
+                    return
+                }
+                image = loaded; imageKey = key; onMediaStateChanged?(.ready)
+            }
+            else if image == nil { onMediaStateChanged?(.failed) }
         }
     }
 }
@@ -457,6 +495,7 @@ private struct MemoryStoryVideo: UIViewRepresentable {
     let session: SessionManager
     var localLoader: PhotoPreviewLoader? = nil
     var visibilityPolicy = AssetVisibilityPolicy(scope: .timeline)
+    var onMediaStateChanged: ((PhotoStoryMediaState) -> Void)? = nil
 
     func makeUIView(context: Context) -> MemoryStoryVideoView {
         MemoryStoryVideoView()
@@ -467,7 +506,8 @@ private struct MemoryStoryVideo: UIViewRepresentable {
             assetID: assetID,
             session: session,
             isActive: isActive,
-            isPaused: isPaused, localLoader: localLoader, visibilityPolicy: visibilityPolicy)
+            isPaused: isPaused, localLoader: localLoader, visibilityPolicy: visibilityPolicy,
+            onMediaStateChanged: onMediaStateChanged)
     }
 
     static func dismantleUIView(_ view: MemoryStoryVideoView, coordinator: ()) {
@@ -485,10 +525,14 @@ final class MemoryStoryVideoView: UIView {
     private var playbackNotifications = NotificationCenter.default
     private var playerFactory: (AVPlayerItem) -> AVPlayer = { AVPlayer(playerItem: $0) }
     private var playbackGeneration: UUID?
+    private var playbackSourceID: String?
+    private var playbackContext: SessionRequestContext?
     private var isPlaybackActive = false
     private var isPlaybackPaused = true
     private var localLoadTask: Task<Void, Never>?
     private var localLoadRequest = UUID()
+    private var playbackObservations: [NSKeyValueObservation] = []
+    private var onMediaStateChanged: ((PhotoStoryMediaState) -> Void)?
     /// Halaman ini sedang aktif pada pembaruan sebelumnya.
     ///
     /// Dipakai untuk membedakan "lanjutkan setelah jeda" dari "masuk lagi ke
@@ -506,7 +550,8 @@ final class MemoryStoryVideoView: UIView {
 
     @MainActor
     func update(assetID: String, session: SessionManager, isActive: Bool, isPaused: Bool,
-                localLoader: PhotoPreviewLoader? = nil, visibilityPolicy: AssetVisibilityPolicy? = nil) {
+                localLoader: PhotoPreviewLoader? = nil, visibilityPolicy: AssetVisibilityPolicy? = nil,
+                onMediaStateChanged: ((PhotoStoryMediaState) -> Void)? = nil) {
         // Pemutar baru dibuat saat halamannya benar-benar dilihat.
         //
         // `LazyHStack` membangun beberapa halaman sekaligus di kiri dan kanan;
@@ -517,16 +562,25 @@ final class MemoryStoryVideoView: UIView {
             return
         }
 
-        if loadedAssetID != assetID || playbackGeneration != LocalSnapshot.generation {
+        let loader = localLoader ?? PhotoPreviewLoader(session: session)
+        let sourceID = loader.sourceID(for: assetID)
+        let context = LocalPhotoLibrary.isLocal(assetID) ? loader.requestContext : session.snapshot
+        let needsPlayer = loadedAssetID != assetID || playbackGeneration != LocalSnapshot.generation
+            || playbackSourceID != sourceID || playbackContext != context
+        if needsPlayer {
             teardown()
             loadedAssetID = assetID
             playbackGeneration = LocalSnapshot.generation
-            makePlayer(assetID: assetID, session: session, localLoader: localLoader,
-                visibilityPolicy: visibilityPolicy ?? AssetVisibilityPolicy(scope: .timeline))
+            playbackSourceID = sourceID
+            playbackContext = context
         }
-
         isPlaybackActive = true
         isPlaybackPaused = isPaused
+        self.onMediaStateChanged = onMediaStateChanged
+        if needsPlayer {
+            makePlayer(assetID: assetID, session: session, localLoader: loader,
+                visibilityPolicy: visibilityPolicy ?? AssetVisibilityPolicy(scope: .timeline))
+        }
         applyPlaybackIntent()
     }
 
@@ -547,6 +601,8 @@ final class MemoryStoryVideoView: UIView {
         localLoadRequest = UUID()
         localLoadTask?.cancel()
         localLoadTask = nil
+        playbackObservations.removeAll()
+        onMediaStateChanged = nil
         VideoPlaybackLifecycle.stop(player)
         if let endObserver {
             playbackNotifications.removeObserver(endObserver)
@@ -556,6 +612,8 @@ final class MemoryStoryVideoView: UIView {
         player = nil
         loadedAssetID = nil
         playbackGeneration = nil
+        playbackSourceID = nil
+        playbackContext = nil
         isPlaybackActive = false
         isPlaybackPaused = true
         wasActive = false
@@ -567,22 +625,31 @@ final class MemoryStoryVideoView: UIView {
         if LocalPhotoLibrary.isLocal(assetID) {
             let loader = localLoader ?? PhotoPreviewLoader(session: session)
             let generation = LocalSnapshot.generation, request = UUID()
+            let sourceID = loader.sourceID(for: assetID), context = loader.requestContext
             localLoadRequest = request
             localLoadTask = Task { [weak self] in
                 let asset = await loader.playbackAsset(for: assetID)
                 guard let self, !Task.isCancelled, self.localLoadRequest == request,
                       self.loadedAssetID == assetID, self.isPlaybackActive,
-                      generation == LocalSnapshot.generation,
-                      visibilityPolicy.allows(id: assetID) else { return }
+                      generation == LocalSnapshot.generation else { return }
                 self.localLoadTask = nil
-                guard let asset else { return }
+                guard sourceID == loader.sourceID(for: assetID), context == loader.requestContext,
+                      visibilityPolicy.allows(id: assetID) else { self.onMediaStateChanged?(.failed); return }
+                guard let asset else { self.onMediaStateChanged?(.failed); return }
                 self.installPlayer(item: AVPlayerItem(asset: asset), assetID: assetID)
                 self.applyPlaybackIntent()
             }
             return
         }
         guard let source = PhotoPreviewLoader(session: session).videoSource(for: assetID)
-        else { return }
+        else {
+            Task { @MainActor [weak self] in
+                guard let self, self.loadedAssetID == assetID, self.isPlaybackActive,
+                      self.playbackGeneration == LocalSnapshot.generation else { return }
+                self.onMediaStateChanged?(.failed)
+            }
+            return
+        }
 
         let urlAsset = AVURLAsset(
             url: source.url,
@@ -618,6 +685,27 @@ final class MemoryStoryVideoView: UIView {
         playerLayer.videoGravity = .resizeAspect
         playerLayer.player = newPlayer
         player = newPlayer
+        if onMediaStateChanged != nil {
+            playbackObservations = [
+                newPlayer.observe(\.timeControlStatus, options: [.initial, .new]) { [weak self] player, _ in
+                    self?.scheduleMediaStateUpdate(player: player, item: item)
+                },
+                item.observe(\.status, options: [.initial, .new]) { [weak self, weak newPlayer] item, _ in
+                    guard let newPlayer else { return }
+                    self?.scheduleMediaStateUpdate(player: newPlayer, item: item)
+                },
+            ]
+        }
+    }
+
+    nonisolated private func scheduleMediaStateUpdate(player: AVPlayer, item: AVPlayerItem) {
+        DispatchQueue.main.async { [weak self, weak player, weak item] in
+            guard let self, let player, let item, self.player === player,
+                  player.currentItem === item, self.isPlaybackActive,
+                  self.playbackGeneration == LocalSnapshot.generation else { return }
+            self.onMediaStateChanged?(item.status == .failed ? .failed
+                : player.timeControlStatus == .playing ? .ready : .loading)
+        }
     }
 }
 

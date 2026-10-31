@@ -52,6 +52,7 @@ final class PhotoSlideshowStateTests: XCTestCase {
     func testPauseResumeSceneAndShareSuspensionPreserveTheRemainingIntervalAndVideoDuration() {
         let a = asset(), video = asset(video: true, duration: 12)
         let state = PhotoSlideshowState(assets: [a, video])
+        ready(state)
         state.elapse(2)
         let media = state.mediaRevision
         state.togglePlayback()
@@ -68,6 +69,7 @@ final class PhotoSlideshowStateTests: XCTestCase {
         XCTAssertEqual(state.currentAssetID, video.id)
         XCTAssertEqual(state.duration, 12)
         XCTAssertNotEqual(state.mediaRevision, media)
+        ready(state)
         state.elapse(11.9)
         XCTAssertFalse(state.hasEnded)
         state.elapse(0.2)
@@ -82,10 +84,12 @@ final class PhotoSlideshowStateTests: XCTestCase {
     func testSelectingTheSameThumbnailRestartsItsMediaAndTimerWhileInvalidDurationsCannotStallPlayback() {
         let a = asset(), b = asset()
         let state = PhotoSlideshowState(assets: [a, b])
+        ready(state)
         state.elapse(4.9)
         let media = state.mediaRevision
         state.select(a.id)
         XCTAssertNotEqual(state.mediaRevision, media)
+        ready(state)
         state.elapse(0.2)
         XCTAssertEqual(state.currentAssetID, a.id)
         state.elapse(4.9)
@@ -93,6 +97,7 @@ final class PhotoSlideshowStateTests: XCTestCase {
         for duration in [nil, 0, -1, .infinity, .nan] as [Double?] {
             let state = PhotoSlideshowState(assets: [asset(video: true, duration: duration)])
             XCTAssertEqual(state.duration, 5)
+            ready(state)
             for elapsed in [Double.nan, .infinity, -1] { state.elapse(elapsed) }
             XCTAssertFalse(state.hasEnded)
             state.elapse(5)
@@ -158,6 +163,49 @@ final class PhotoSlideshowStateTests: XCTestCase {
         XCTAssertFalse(state.isPlaying)
     }
 
+    func testLoadingAndBufferingPreserveTheIntervalAndObsoleteOrStoppedMediaCannotAdvanceIt() {
+        let a = asset(), b = asset()
+        let state = PhotoSlideshowState(assets: [a, b])
+        let first = state.mediaRevision
+        state.elapse(100)
+        XCTAssertEqual(state.currentAssetID, a.id)
+        ready(state)
+        state.elapse(2)
+        state.updateMediaState(.loading, assetID: a.id, revision: first)
+        state.elapse(100)
+        XCTAssertEqual(state.currentAssetID, a.id)
+        ready(state)
+        state.elapse(3)
+        XCTAssertEqual(state.currentAssetID, b.id)
+        XCTAssertEqual(state.mediaState, .loading)
+        state.updateMediaState(.failed, assetID: a.id, revision: first)
+        XCTAssertEqual(state.currentAssetID, b.id)
+        XCTAssertFalse(state.hasEnded)
+        state.stop()
+        state.updateMediaState(.failed, assetID: b.id, revision: state.mediaRevision)
+        XCTAssertFalse(state.hasEnded)
+
+        let failed = PhotoSlideshowState(assets: [a, b])
+        failed.updateMediaState(.failed, assetID: a.id, revision: failed.mediaRevision)
+        failed.elapse(100, suspended: true)
+        XCTAssertEqual(failed.currentAssetID, a.id, "A failed preview must not advance or cancel a suspended share")
+        failed.togglePlayback()
+        failed.elapse(100)
+        XCTAssertEqual(failed.currentAssetID, a.id, "A failed preview must preserve the user's Pause intent")
+        failed.togglePlayback()
+        failed.elapse(0.1)
+        XCTAssertEqual(failed.currentAssetID, b.id, "Unavailable media must not leave the slideshow waiting forever")
+        failed.updateMediaState(.failed, assetID: b.id, revision: failed.mediaRevision)
+        failed.elapse(0.1)
+        XCTAssertTrue(failed.hasEnded)
+        XCTAssertFalse(failed.isPlaying)
+    }
+
+    private func ready(_ state: PhotoSlideshowState) {
+        guard let id = state.currentAssetID else { return XCTFail("A selected slide is required") }
+        state.updateMediaState(.ready, assetID: id, revision: state.mediaRevision)
+    }
+
     private func asset(video: Bool = false, duration: Double? = nil) -> AssetLite {
         AssetLite(id: UUID().uuidString, isVideo: video, ratio: 1, thumbhash: nil, createdAt: .now, duration: duration)
     }
@@ -184,6 +232,7 @@ final class PhotoSlideshowPresentationTests: SimulatorHostedTestCase {
     private var gates: [PeopleStateGate<URL?>] = []
     private var policyManagers: [SwiftDataManager] = []
     private var policyDirectories: [URL] = []
+    private var mappings: [(localID: String, recordID: String)] = []
 
     override func tearDown() async throws {
         gates.forEach { $0.complete(.success(nil)) }
@@ -193,7 +242,7 @@ final class PhotoSlideshowPresentationTests: SimulatorHostedTestCase {
         models.removeAll()
         try await waitUntil("The dismissed slideshow releases its playback state") { self.retainedState == nil }
         for asset in assets {
-            for (name, size) in [("thumbnail", 600), ("preview", 1400)] {
+            for (name, size) in [("thumbnail", 600), ("preview", 1400), ("preview", 2048)] {
                 ImageMemoryCache.shared.remove(for: ImageCache.memoryKey("\(asset.id)-\(name)", size))
             }
         }
@@ -206,6 +255,15 @@ final class PhotoSlideshowPresentationTests: SimulatorHostedTestCase {
         for container in containers { try container.erase() }
         for directory in policyDirectories { try FileManager.default.removeItem(at: directory) }
         policyDirectories.removeAll()
+        for mapping in mappings {
+            let recordID = mapping.recordID
+            let descriptor = FetchDescriptor<BackupRecord>(predicate: #Predicate { $0.id == recordID })
+            for record in try SwiftDataManager.shared.modelContext.fetch(descriptor) {
+                SwiftDataManager.shared.modelContext.delete(record)
+            }
+            try SwiftDataManager.shared.unlinkDeviceAsset(localIdentifier: mapping.localID)
+        }
+        mappings.removeAll()
     }
 
     func testMountedPausePreviousNextThumbnailsReplayAndCloseOperateTheActualSlideshow() async throws {
@@ -239,6 +297,7 @@ final class PhotoSlideshowPresentationTests: SimulatorHostedTestCase {
         var requested: [String] = []
         let (window, _) = try await show(source, model: model, prepare: { asset in requested.append(asset.id); return file })
         model.select(source[1].id)
+        try await waitUntil("The selected still is actually ready before approaching its interval") { model.mediaState == .ready }
         model.elapse(4.8)
         try await activateAccessibilityButton(named: "Share", in: window)
         var share: PhotoShareViewController?
@@ -383,18 +442,141 @@ final class PhotoSlideshowPresentationTests: SimulatorHostedTestCase {
         XCTAssertNil(MockURLProtocol.lastRequest)
     }
 
+    func testHeldLocalVideoCannotConsumeItsSlideshowIntervalBeforeRealPlaybackStarts() async throws {
+        let movie = try TemporaryMediaStore.adoptShareFile(at: await makePagerPlaybackMovie(), suggestedFilename: "held-slideshow.mov")
+        files.append(movie)
+        let video = AssetLite(id: "device:\(UUID())", isVideo: true, ratio: 1, thumbhash: nil, createdAt: .now, duration: 3, origin: .device)
+        assets.append(video)
+        let following = photos(1)[0]
+        let image = try XCTUnwrap(ImageMemoryCache.shared.image(for: ImageCache.memoryKey("\(following.id)-thumbnail", 600)))
+        ImageMemoryCache.shared.insert(image, for: ImageCache.memoryKey("\(video.id)-thumbnail", 600))
+        let loader = SlideshowLocalPlaybackLoader(), gate = PeopleStateGate<AVAsset?>()
+        defer { gate.complete(.success(nil)) }
+        loader.preview = image
+        loader.operation = { _ in try? await gate.value() }
+        let model = model([video, following])
+        let presentation = SlideshowTestPresentation()
+        presentations.append(presentation)
+        let session = MockSessionManager()
+        try session.setServer("https://held-slideshow.example")
+        _ = try await host(SlideshowTestPresenter(presentation: presentation, assets: [video, following],
+            model: model, prepare: { _ in nil }, previewLoader: loader).environment(session as SessionManager))
+        await fulfillment(of: [gate.started], timeout: 2)
+        try await Task.sleep(for: .milliseconds(3300))
+        XCTAssertEqual(model.currentAssetID, video.id, "Waiting longer than the video's duration must not skip the unloaded clip")
+        XCTAssertEqual(model.mediaState, .loading)
+        XCTAssertTrue(model.isPlaying)
+
+        gate.complete(.success(AVURLAsset(url: movie)))
+        try await waitUntil("The generated movie actually starts playing") { model.mediaState == .ready }
+        XCTAssertEqual(model.currentAssetID, video.id)
+        try await waitUntil("Its full playing interval advances to the following photo") { model.currentAssetID == following.id }
+        XCTAssertTrue(presentation.isPresented)
+    }
+
+    func testHeldPreviewCannotPublishPixelsOrReadinessAfterItsSourceOrLoaderSessionChanges() async throws {
+        for invalidation in ["mapping", "session"] {
+            let localID = UUID().uuidString
+            try SwiftDataManager.shared.linkDeviceAsset(localIdentifier: localID, to: UUID().uuidString)
+            let record = try XCTUnwrap(SwiftDataManager.shared.getBackupRecord(localIdentifier: localID))
+            mappings.append((localID, record.id))
+            let asset = AssetLite(id: LocalPhotoLibrary.assetID(for: localID), isVideo: false, ratio: 1,
+                thumbhash: nil, createdAt: .now, origin: .both)
+            assets.append(asset)
+            let old = UIGraphicsImageRenderer(size: CGSize(width: 120, height: 120)).image { context in
+                UIColor.green.setFill(); context.fill(CGRect(x: 0, y: 0, width: 120, height: 120))
+            }
+            ImageMemoryCache.shared.insert(old, for: ImageCache.memoryKey("\(asset.id)-thumbnail", 600))
+            let loaderSession = MockSessionManager()
+            try loaderSession.setServer("https://held-renderer-before.example")
+            let loader = SlideshowHeldPreviewLoader(session: loaderSession), gate = PeopleStateGate<UIImage?>()
+            defer { gate.complete(.success(nil)) }
+            var requests = 0
+            loader.operation = { _ in
+                requests += 1
+                return requests == 1 ? try? await gate.value() : nil
+            }
+            let model = model([asset])
+            model.togglePlayback()
+            let window = try await host(PhotoSlideshowView(assets: [asset], prepareShare: { _ in nil },
+                state: model, previewLoader: loader).environment(\.scenePhase, .active))
+            await fulfillment(of: [gate.started], timeout: 2)
+            if invalidation == "mapping" {
+                try SwiftDataManager.shared.upsertBackupRecord(assetID: UUID().uuidString, checksum: "", localIdentifier: localID)
+            } else { try loaderSession.setServer("https://held-renderer-after.example") }
+            gate.complete(.success(old))
+            try await waitUntil("The obsolete \(invalidation) preview completes and is rejected") {
+                loader.completed == 2 && model.mediaState == .failed
+            }
+            XCTAssertFalse(model.isPlaying)
+            let pixel = try centerPixel(await screenshot(window))
+            XCTAssertLessThanOrEqual(Int(pixel[1]), max(Int(pixel[0]), Int(pixel[2])) + 40,
+                "The old green bitmap must not render under a replacement \(invalidation)")
+        }
+    }
+
+    func testCompletedPreviewIsHiddenAfterRemappingUntilANewBitmapArrives() async throws {
+        let localID = UUID().uuidString, oldID = UUID().uuidString
+        try SwiftDataManager.shared.linkDeviceAsset(localIdentifier: localID, to: oldID)
+        let record = try XCTUnwrap(SwiftDataManager.shared.getBackupRecord(localIdentifier: localID))
+        mappings.append((localID, record.id))
+        let asset = AssetLite(id: LocalPhotoLibrary.assetID(for: localID), isVideo: false, ratio: 1,
+            thumbhash: nil, createdAt: .now, origin: .both)
+        assets.append(asset)
+        func bitmap(_ color: UIColor) -> UIImage {
+            UIGraphicsImageRenderer(size: CGSize(width: 120, height: 120)).image { context in
+                color.setFill(); context.fill(CGRect(x: 0, y: 0, width: 120, height: 120))
+            }
+        }
+        let old = bitmap(.green), replacement = bitmap(.blue)
+        ImageMemoryCache.shared.insert(old, for: ImageCache.memoryKey("\(asset.id)-thumbnail", 600))
+        let removed = RemovedAssets(), policy = AssetVisibilityPolicy(scope: .collection, removed: removed)
+        let model = model([asset], visibilityPolicy: policy)
+        model.togglePlayback()
+        let loader = SlideshowHeldPreviewLoader(session: MockSessionManager()), gate = PeopleStateGate<UIImage?>()
+        defer { gate.complete(.success(nil)) }
+        var requests = 0
+        loader.operation = { _ in
+            requests += 1
+            return requests == 1 ? old : try? await gate.value()
+        }
+        let window = try await host(PhotoSlideshowView(assets: [asset], prepareShare: { _ in nil },
+            state: model, previewLoader: loader).environment(\.scenePhase, .active))
+        try await waitUntil("The original bitmap is installed before its source changes") { model.mediaState == .ready }
+        try assertGreenImageCenter(await screenshot(window))
+        loader.cached = old
+        try SwiftDataManager.shared.upsertBackupRecord(assetID: UUID().uuidString, checksum: "", localIdentifier: localID)
+        removed.remove([oldID])
+        XCTAssertTrue(policy.allows(id: asset.id))
+        await fulfillment(of: [gate.started], timeout: 2)
+        XCTAssertEqual(model.mediaState, .loading)
+        let hidden = try centerPixel(await screenshot(window))
+        XCTAssertLessThanOrEqual(Int(hidden[1]), max(Int(hidden[0]), Int(hidden[2])) + 40,
+            "A cached bitmap from the old private source must not be retagged as the public replacement")
+        gate.complete(.success(replacement))
+        try await waitUntil("The replacement bitmap resumes the currently selected slide") { model.mediaState == .ready }
+        let fresh = try centerPixel(await screenshot(window))
+        XCTAssertGreaterThan(Int(fresh[2]), max(Int(fresh[0]), Int(fresh[1])) + 40)
+        XCTAssertFalse(model.isPlaying)
+    }
+
     private func assertGreenImageCenter(_ image: UIImage, file: StaticString = #filePath, line: UInt = #line) throws {
-        let source = try XCTUnwrap(image.cgImage, file: file, line: line)
+        let pixel = try centerPixel(image)
+        XCTAssertGreaterThan(Int(pixel[1]), Int(pixel[0]) + 40, "The actual slide must render its allowed green preview", file: file, line: line)
+        XCTAssertGreaterThan(Int(pixel[1]), Int(pixel[2]) + 40, file: file, line: line)
+    }
+
+    private func centerPixel(_ image: UIImage) throws -> [UInt8] {
+        let source = try XCTUnwrap(image.cgImage)
         var pixel = [UInt8](repeating: 0, count: 4)
         try pixel.withUnsafeMutableBytes { buffer in
             let context = try XCTUnwrap(CGContext(data: buffer.baseAddress, width: 1, height: 1,
                 bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue), file: file, line: line)
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
             context.draw(source, in: CGRect(x: -source.width / 2, y: -source.height / 2,
                 width: source.width, height: source.height))
         }
-        XCTAssertGreaterThan(Int(pixel[1]), Int(pixel[0]) + 40, "The actual slide must render its allowed green preview", file: file, line: line)
-        XCTAssertGreaterThan(Int(pixel[1]), Int(pixel[2]) + 40, file: file, line: line)
+        return pixel
     }
 
     private func photos(_ count: Int) -> [AssetLite] {
@@ -404,7 +586,7 @@ final class PhotoSlideshowPresentationTests: SimulatorHostedTestCase {
         return (0..<count).map { index in
             let asset = AssetLite(id: UUID().uuidString, isVideo: false, ratio: 1.5, thumbhash: nil,
                 createdAt: Date(timeIntervalSince1970: 1_700_000_000 + Double(index * 86_400)))
-            for (name, size) in [("thumbnail", 600), ("preview", 1400)] {
+            for (name, size) in [("thumbnail", 600), ("preview", 1400), ("preview", 2048)] {
                 ImageMemoryCache.shared.insert(image, for: ImageCache.memoryKey("\(asset.id)-\(name)", size))
             }
             assets.append(asset)
@@ -412,8 +594,8 @@ final class PhotoSlideshowPresentationTests: SimulatorHostedTestCase {
         }
     }
 
-    private func model(_ assets: [AssetLite], initialID: String? = nil) -> PhotoSlideshowState {
-        let model = PhotoSlideshowState(assets: assets, initialAssetID: initialID)
+    private func model(_ assets: [AssetLite], initialID: String? = nil, visibilityPolicy: AssetVisibilityPolicy? = nil) -> PhotoSlideshowState {
+        let model = PhotoSlideshowState(assets: assets, initialAssetID: initialID, visibilityPolicy: visibilityPolicy)
         models.append(model)
         retainedState = model
         return model
@@ -476,6 +658,66 @@ private struct SlideshowTestPresenter: View {
 
 @MainActor
 final class PhotoSlideshowVideoTests: XCTestCase {
+    func testChangingACompletedLocalVideosSourceReplacesItsPlayerAndRejectsTheOldEndNotification() async throws {
+        let session = MockSessionManager(), notifications = NotificationCenter(), loader = SlideshowLocalPlaybackLoader()
+        loader.resolvedSource = "original"
+        loader.operation = { _ in AVMutableComposition() }
+        var players: [SlideshowTrackingPlayer] = []
+        let view = MemoryStoryVideoView(playbackNotifications: notifications, playerFactory: { item in
+            let player = SlideshowTrackingPlayer(item: item)
+            players.append(player)
+            return player
+        })
+        defer { view.teardown() }
+        let id = "device:\(UUID())"
+        view.update(assetID: id, session: session, isActive: true, isPaused: false, localLoader: loader)
+        let firstDeadline = Date().addingTimeInterval(2)
+        while players.isEmpty, Date() < firstDeadline { try await Task.sleep(for: .milliseconds(10)) }
+        let old = try XCTUnwrap(players.first), item = try XCTUnwrap(old.currentItem)
+        loader.resolvedSource = "replacement"
+        view.update(assetID: id, session: session, isActive: true, isPaused: true, localLoader: loader)
+        let nextDeadline = Date().addingTimeInterval(2)
+        while players.count < 2, Date() < nextDeadline { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(players.count, 2)
+        XCTAssertNil(old.currentItem)
+        let plays = old.playCount
+        notifications.post(name: .AVPlayerItemDidPlayToEndTime, object: item)
+        XCTAssertEqual(old.playCount, plays)
+        XCTAssertEqual(players.last?.playCount, 0, "Rebinding must preserve Pause intent")
+    }
+
+    func testPlayerReadinessTracksActualKVOBufferingAndStopsPublishingAfterTeardown() async throws {
+        let session = MockSessionManager()
+        try session.setServer("https://slideshow-buffering.example")
+        var player: SlideshowTrackingPlayer?
+        var states: [PhotoStoryMediaState] = []
+        let view = MemoryStoryVideoView(playbackNotifications: NotificationCenter(), playerFactory: { item in
+            let value = SlideshowTrackingPlayer(item: item)
+            player = value
+            return value
+        })
+        view.update(assetID: "buffering-video", session: session, isActive: true, isPaused: false,
+            onMediaStateChanged: { states.append($0) })
+        let tracked = try XCTUnwrap(player)
+        try await waitForMediaState(.ready, in: { states })
+        tracked.simulateBuffering()
+        try await waitForMediaState(.loading, in: { states })
+        tracked.play()
+        try await waitForMediaState(.ready, in: { states })
+        let published = states.count
+        view.teardown()
+        tracked.simulateBuffering()
+        tracked.play()
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(states.count, published, "Removed player observations cannot publish into a dismissed slideshow")
+    }
+
+    private func waitForMediaState(_ state: PhotoStoryMediaState, in states: () -> [PhotoStoryMediaState]) async throws {
+        let deadline = Date().addingTimeInterval(2)
+        while states().last != state, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(states().last, state)
+    }
+
     func testLocalPlaybackKeepsPauseIntentWhileLoadingAndRejectsItsLateResultAfterTeardown() async throws {
         let session = MockSessionManager()
         try session.setServer("https://local-slideshow-video.example")
@@ -575,24 +817,47 @@ private final class SlideshowTrackingPlayer: AVPlayer, @unchecked Sendable {
     private(set) var playCount = 0
     private(set) var pauseCount = 0
     private(set) var seekCount = 0
-    private var playing = false
+    private var playbackStatus = AVPlayer.TimeControlStatus.paused
     init(item: AVPlayerItem) { self.item = item; super.init() }
     override var currentItem: AVPlayerItem? { item }
-    override var timeControlStatus: AVPlayer.TimeControlStatus { playing ? .playing : .paused }
-    override func play() { playCount += 1; playing = true }
-    override func pause() { pauseCount += 1; playing = false }
+    override var timeControlStatus: AVPlayer.TimeControlStatus { playbackStatus }
+    override func play() { playCount += 1; setPlaybackStatus(.playing) }
+    override func pause() { pauseCount += 1; setPlaybackStatus(.paused) }
+    func simulateBuffering() { setPlaybackStatus(.waitingToPlayAtSpecifiedRate) }
+    private func setPlaybackStatus(_ value: AVPlayer.TimeControlStatus) {
+        guard playbackStatus != value else { return }
+        willChangeValue(forKey: "timeControlStatus")
+        playbackStatus = value
+        didChangeValue(forKey: "timeControlStatus")
+    }
     override func seek(to time: CMTime) { seekCount += 1 }
     override func replaceCurrentItem(with item: AVPlayerItem?) { self.item = item }
 }
 
 @MainActor
 private final class SlideshowLocalPlaybackLoader: PhotoPreviewLoader {
+    var preview: UIImage?
+    var resolvedSource: String?
     var operation: (String) async -> AVAsset? = { _ in nil }
     private(set) var requested: [String] = []
     private(set) var completed = 0
     init() { super.init(session: MockSessionManager()) }
+    override func sourceID(for assetID: String) -> String { resolvedSource ?? super.sourceID(for: assetID) }
+    override func image(for assetId: String) async -> UIImage? { preview }
     override func playbackAsset(for assetId: String) async -> AVAsset? {
         requested.append(assetId)
+        defer { completed += 1 }
+        return await operation(assetId)
+    }
+}
+
+@MainActor
+private final class SlideshowHeldPreviewLoader: PhotoPreviewLoader {
+    var cached: UIImage?
+    var operation: (String) async -> UIImage? = { _ in nil }
+    private(set) var completed = 0
+    override func cachedImage(for assetId: String) -> UIImage? { cached }
+    override func image(for assetId: String) async -> UIImage? {
         defer { completed += 1 }
         return await operation(assetId)
     }
