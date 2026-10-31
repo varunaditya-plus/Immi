@@ -12,7 +12,7 @@ final class AssetViewerState {
         var id: UUID { visit }
     }
 
-    enum Preparation: Hashable { case share, editor, sharedLink }
+    enum Preparation: Hashable { case share, copy, editor, sharedLink }
 
     // AssetLite equality deliberately compares IDs only. A non-Equatable
     // container makes changes to origin/favorite observable without changing

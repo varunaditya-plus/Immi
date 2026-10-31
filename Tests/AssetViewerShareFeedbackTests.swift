@@ -46,6 +46,7 @@ final class AssetViewerShareFeedbackTests: XCTestCase {
         let target = try XCTUnwrap(item.target)
         let action = try XCTUnwrap(item.action)
         XCTAssertTrue(UIApplication.shared.sendAction(action, to: target, from: item, for: nil))
+        try await continueFromComposer()
         let activity = try await presentedActivity()
         XCTAssertNotNil(activity.presentingViewController ?? activity.parent?.presentingViewController)
         let prepared = try preparedFiles(named: response.filename)
@@ -65,7 +66,7 @@ final class AssetViewerShareFeedbackTests: XCTestCase {
         XCTAssertEqual(response.downloadCount, 1)
         XCTAssertTrue(FileManager.default.fileExists(atPath: firstFile.path),
             "The displayed activity must retain its file until completion or dismissal")
-        XCTAssertTrue(findActivity(from: try XCTUnwrap(window?.rootViewController)) === activity)
+        XCTAssertTrue(findController(UIActivityViewController.self, from: try XCTUnwrap(window?.rootViewController)) === activity)
     }
 
     func testFailedServerShareShowsAToastAndCanRetrySuccessfully() async throws {
@@ -78,10 +79,12 @@ final class AssetViewerShareFeedbackTests: XCTestCase {
         let text = try await visibleText()
         XCTAssertTrue(text.contains("Original unavailable"), text)
         XCTAssertEqual(response.downloadCount, 1)
-        XCTAssertNil(findActivity(from: try XCTUnwrap(window?.rootViewController)))
+        XCTAssertNil(findController(UIActivityViewController.self, from: try XCTUnwrap(window?.rootViewController)))
+        XCTAssertNil(findController(PhotoShareViewController.self, from: try XCTUnwrap(window?.rootViewController)))
 
         response.setStatus(200)
         try await activateShare()
+        try await continueFromComposer()
         _ = try await presentedActivity()
         let prepared = try preparedFiles(named: response.filename)
         files.append(contentsOf: prepared)
@@ -153,20 +156,41 @@ final class AssetViewerShareFeedbackTests: XCTestCase {
         return own + controller.children.flatMap { barItems($0) }
     }
 
+    private func continueFromComposer() async throws {
+        await waitUntil("The photo share composer is presented before the native activity") { [self] in
+            guard let root = window?.rootViewController else { return false }
+            return findController(PhotoShareViewController.self, from: root) != nil
+        }
+        let root = try XCTUnwrap(window?.rootViewController)
+        let composer = try XCTUnwrap(findController(PhotoShareViewController.self, from: root))
+        await waitForTransition(composer)
+        XCTAssertNil(findController(UIActivityViewController.self, from: root))
+        await waitUntil("The actual composer Share button is enabled") {
+            self.continueButton(in: composer.view).map { $0.isEnabled && $0.window != nil } == true
+        }
+        let button = try XCTUnwrap(continueButton(in: composer.view))
+        button.sendActions(for: .touchUpInside)
+    }
+
+    private func continueButton(in view: UIView) -> UIButton? {
+        if let button = view as? UIButton, button.accessibilityIdentifier == "photoShare.continue" { return button }
+        return view.subviews.compactMap { continueButton(in: $0) }.first
+    }
+
     private func presentedActivity() async throws -> UIActivityViewController {
         await waitUntil("The Share activity appears") { [self] in
             guard let root = window?.rootViewController else { return false }
-            return self.findActivity(from: root) != nil
+            return self.findController(UIActivityViewController.self, from: root) != nil
         }
-        let activity = try XCTUnwrap(findActivity(from: try XCTUnwrap(window?.rootViewController)))
+        let activity = try XCTUnwrap(findController(UIActivityViewController.self, from: try XCTUnwrap(window?.rootViewController)))
         await waitForTransition(activity)
         return activity
     }
 
-    private func findActivity(from controller: UIViewController) -> UIActivityViewController? {
-        if let result = controller as? UIActivityViewController { return result }
-        if let presented = controller.presentedViewController, let result = findActivity(from: presented) { return result }
-        return controller.children.compactMap { findActivity(from: $0) }.first
+    private func findController<T: UIViewController>(_ type: T.Type, from controller: UIViewController) -> T? {
+        if let result = controller as? T { return result }
+        if let presented = controller.presentedViewController, let result = findController(type, from: presented) { return result }
+        return controller.children.compactMap { findController(type, from: $0) }.first
     }
 
     private func waitUntil(_ description: String, _ condition: @escaping @MainActor () -> Bool) async {

@@ -28,8 +28,9 @@ struct AssetDetailView: View {
     @State private var sharedLink: SharedLinkPresentation?
     @State private var isSettingProfilePhoto = false
     @State private var downloadedFileURL: URL?
-    /// Pratinjau untuk header share sheet, diambil dari cache preview.
-    @State private var sharePreviewImage: UIImage?
+    @State private var sharedAssetIDs: [String] = []
+    @State private var sharedSourceIDs: [String] = []
+    @State private var sharedRequestContext: SessionRequestContext?
     @State private var showToolbar = true
     @State private var isZoomed = false
     @State private var showDeleteConfirm = false
@@ -97,6 +98,7 @@ struct AssetDetailView: View {
     /// Pegangan ke strip, supaya pager bisa menggesernya langsung tiap frame.
     @State private var filmstripController: PhotoFilmstripController?
     /// Pegangan ke pager, supaya bar kontrol video bisa menyambung langsung.
+    @State private var slideshow: PhotoSlideshowPresentation?
     @State private var pagerController: PhotoPagerController?
     /// Salinan eksplisit metadata Live Photo. Membacanya langsung dari objek
     /// observable di dalam representable dapat melewatkan update ketika detail
@@ -341,6 +343,10 @@ struct AssetDetailView: View {
     private var presentations: some View {
         stateSync
             .sheet(isPresented: $isSharePresented, onDismiss: cleanupSharedFile) { shareSheet }
+            .fullScreenCover(item: $slideshow, onDismiss: { viewer.activate() }) { selection in
+                PhotoSlideshowView(assets: selection.assets, initialAssetID: selection.initialAssetID,
+                    visibilityPolicy: visibilityPolicy, prepareShare: slideshowFile)
+            }
             .sheet(item: $sharedLink) { ShareSheet(url: $0.url) }
             .sheet(item: $dateTarget) { dateEditor($0) }
             .sheet(item: $locationTarget) { locationEditor($0) }
@@ -502,7 +508,9 @@ struct AssetDetailView: View {
     @ViewBuilder
     private var shareSheet: some View {
         if let url = downloadedFileURL {
-            ShareSheet(url: url, previewImage: sharePreviewImage)
+            PhotoShareSheet(urls: [url], assetIDs: sharedAssetIDs,
+                    sourceIDs: sharedSourceIDs, requestContext: sharedRequestContext,
+                isAllowed: { [policy = visibilityPolicy] in policy.allows(id: $0) })
         }
     }
 
@@ -1029,12 +1037,31 @@ struct AssetDetailView: View {
 
     private var detailActionsMenu: some View {
         Menu {
+            Button("Copy", systemImage: "doc.on.doc") { copyCurrentMedia() }
+                .disabled(viewer.isPreparing(.copy))
+
+            if visibilityPolicy.scope != .locked, trashActions == nil {
+                Button("Slideshow", systemImage: "play.rectangle") {
+                    slideshow = PhotoSlideshowPresentation(assets: visibleAssets, initialAssetID: currentAsset.id)
+                }
+            }
+
             if let serverID = currentServerAssetID {
                 Button {
                     createSharedLink(for: serverID)
                 } label: {
                     Label("Share Link", systemImage: "link")
                 }
+
+                Button("Adjust Date & Time", systemImage: "calendar.badge.clock") {
+                    dateTarget = currentTarget
+                }
+                .disabled(matchingDetail == nil)
+
+                Button("Adjust Location", systemImage: "mappin.and.ellipse") {
+                    locationTarget = currentTarget
+                }
+                .disabled(matchingDetail == nil)
             }
 
             // Aset lokal belum menjadi bagian dari library server, jadi belum
@@ -1075,12 +1102,8 @@ struct AssetDetailView: View {
                     }
                 }
 
-                Section("Add to") {
-                    Button {
-                        albumTarget = currentTarget
-                    } label: {
-                        Label("Album", systemImage: "rectangle.stack.badge.plus")
-                    }
+                Button("Add to Album", systemImage: "rectangle.stack.badge.plus") {
+                    albumTarget = currentTarget
                 }
             }
 
@@ -1097,6 +1120,16 @@ struct AssetDetailView: View {
                 }
                 .disabled(deviceRemoval != nil)
             }
+
+            if currentServerAssetID != nil {
+                Divider()
+                Button(role: .destructive) {
+                    deleteTarget = currentTarget
+                    showDeleteConfirm = true
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
         } label: {
             if isDownloadingToDevice || isSettingProfilePhoto {
                 ProgressView()
@@ -1104,6 +1137,43 @@ struct AssetDetailView: View {
                 Image(systemName: "ellipsis")
             }
         }
+        .accessibilityLabel("More")
+    }
+
+    private func copyCurrentMedia() {
+        let target = currentTarget
+        let generation = LocalSnapshot.generation
+        let context = session.snapshot
+        viewer.prepare(target, kind: .copy, operation: { () async -> [MediaCopy.Item]? in
+            guard copyIsCurrent(target, generation: generation, context: context) else { return nil }
+            vm?.actionError = nil
+            guard let file = await fileURL(for: target) else {
+                if copyIsCurrent(target, generation: generation, context: context), vm?.actionError == nil {
+                    vm?.actionError = ErrorEvent(MediaCopy.CopyError.unavailable.localizedDescription)
+                }
+                return nil
+            }
+            defer { TemporaryMediaStore.remove(file) }
+            do {
+                return try await MediaCopy.prepare([.init(url: file, isVideo: target.asset.isVideo)])
+            } catch {
+                if copyIsCurrent(target, generation: generation, context: context), !(error is CancellationError) {
+                    vm?.actionError = ErrorEvent(error.localizedDescription)
+                }
+                return nil
+            }
+        }) { items in
+            guard copyIsCurrent(target, generation: generation, context: context) else { return }
+            MediaCopy.write(items)
+        }
+    }
+
+    private func copyIsCurrent(_ target: AssetViewerState.Target, generation: UUID, context: SessionRequestContext) -> Bool {
+        !Task.isCancelled && generation == LocalSnapshot.generation && viewer.isCurrent(target)
+            && (try? APIClient(session: session).checkCurrent(context)) != nil
+            && serverAssetID(for: target.asset) == target.serverID
+            && visibilityPolicy.allows(id: target.asset.id)
+            && (target.serverID.map { visibilityPolicy.allows(id: $0) } ?? true)
     }
 
     private var cancelEditButton: some View {
@@ -1315,7 +1385,7 @@ struct AssetDetailView: View {
         .disabled(trashActions != nil && (currentServerAssetID == nil || viewer.isRemoving(currentAsset.id)))
         .accessibilityLabel(trashActions == nil ? "Delete" : "Delete Permanently")
         .confirmationDialog(
-            trashActions == nil ? "Delete Photo" : "Permanently Delete Photo?",
+            deleteConfirmationTitle,
             isPresented: $showDeleteConfirm,
             titleVisibility: .visible
         ) {
@@ -1325,11 +1395,18 @@ struct AssetDetailView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             if trashActions == nil {
-                Text("Are you sure you want to delete this photo?")
+                Text((deleteTarget?.asset.isVideo ?? currentAsset.isVideo)
+                    ? "Are you sure you want to delete this video?" : "Are you sure you want to delete this photo?")
             } else {
                 Text("This cannot be undone.")
             }
         }
+    }
+
+    private var deleteConfirmationTitle: LocalizedStringKey {
+        let isVideo = deleteTarget?.asset.isVideo ?? currentAsset.isVideo
+        if trashActions != nil { return isVideo ? "Permanently Delete Video?" : "Permanently Delete Photo?" }
+        return isVideo ? "Delete Video" : "Delete Photo"
     }
 
     private func performDelete(_ target: AssetViewerState.Target) {
@@ -1378,11 +1455,13 @@ struct AssetDetailView: View {
         guard !isSharePresented else { return }
         let target = currentTarget
         let accountGeneration = LocalSnapshot.generation
+        let requestContext = session.snapshot
         viewer.prepare(target, kind: .share,
             operation: {
                 vm?.actionError = nil
                 let url = await fileURL(for: target)
                 if url == nil, viewer.isCurrent(target), accountGeneration == LocalSnapshot.generation,
+                   session.snapshot == requestContext,
                    !Task.isCancelled, serverAssetID(for: target.asset) == target.serverID,
                    visibilityPolicy.allows(id: target.asset.id), vm?.actionError == nil {
                     vm?.actionError = ErrorEvent(String(localized: "Failed to prepare share"))
@@ -1390,7 +1469,7 @@ struct AssetDetailView: View {
                 return url
             },
             discard: { TemporaryMediaStore.remove($0) }) { file in
-                guard accountGeneration == LocalSnapshot.generation,
+                guard accountGeneration == LocalSnapshot.generation, session.snapshot == requestContext,
                       serverAssetID(for: target.asset) == target.serverID,
                       visibilityPolicy.allows(id: target.asset.id) else {
                     TemporaryMediaStore.remove(file)
@@ -1398,7 +1477,9 @@ struct AssetDetailView: View {
                 }
                 cleanupSharedFile()
                 downloadedFileURL = file
-                sharePreviewImage = target.asset.isVideo ? nil : SharePreviewThumbnail.image(at: file)
+                sharedAssetIDs = [target.asset.id]
+                sharedSourceIDs = [target.serverID ?? target.asset.id]
+                sharedRequestContext = requestContext
                 isSharePresented = true
             }
     }
@@ -1427,21 +1508,21 @@ struct AssetDetailView: View {
             : CGSize(width: width, height: height)
     }
 
-    /// Memilih salinan lokal lebih dulu; server hanya disentuh kalau aset belum
-    /// ada di perangkat. Ini membuat Share pada foto lokal benar-benar lokal.
+    // A backup mapping identifies the original, not whether device and server edits match.
     private func fileURL(for target: AssetViewerState.Target) async -> URL? {
         let accountGeneration = LocalSnapshot.generation
         guard viewer.isCurrent(target), !Task.isCancelled,
               visibilityPolicy.allows(id: target.asset.id) else { return nil }
-        if target.asset.isOnDevice {
+        if target.serverID == nil, target.asset.isOnDevice {
             let localID = LocalPhotoLibrary.isLocal(target.asset.id)
                 ? LocalPhotoLibrary.localIdentifier(from: target.asset.id)
                 : SwiftDataManager.shared.localIdentifier(forServerAsset: target.asset.id)
-            if let localID, let file = await LocalPhotoLibrary.shared.originalFile(
+            if let localID, let file = await LocalPhotoLibrary.shared.exportFile(
                 for: LocalPhotoLibrary.assetID(for: localID)) {
                 defer { try? FileManager.default.removeItem(at: file.url) }
                 guard viewer.isCurrent(target), accountGeneration == LocalSnapshot.generation,
                       visibilityPolicy.allows(id: target.asset.id),
+                      serverAssetID(for: target.asset) == nil,
                       !Task.isCancelled else { return nil }
                 do {
                     return try TemporaryMediaStore.adoptShareFile(
@@ -1466,6 +1547,27 @@ struct AssetDetailView: View {
               serverAssetID(for: target.asset) == serverID,
               visibilityPolicy.allows(id: target.asset.id), visibilityPolicy.allows(id: serverID),
               !Task.isCancelled else {
+            TemporaryMediaStore.remove(file)
+            return nil
+        }
+        return file
+    }
+
+    private func slideshowFile(for asset: AssetLite) async -> URL? {
+        let generation = LocalSnapshot.generation
+        let context = session.snapshot
+        let serverID = serverAssetID(for: asset)
+        guard visibilityPolicy.allows(id: asset.id) else { return nil }
+        let file: URL?
+        if let serverID {
+            file = await vm?.downloadCurrentFile(serverID, filename: serverID)
+        } else if let local = await LocalPhotoLibrary.shared.exportFile(for: asset.id) {
+            defer { try? FileManager.default.removeItem(at: local.url) }
+            file = try? TemporaryMediaStore.adoptShareFile(at: local.url, suggestedFilename: local.filename)
+        } else { file = nil }
+        guard let file else { return nil }
+        guard !Task.isCancelled, generation == LocalSnapshot.generation, session.snapshot == context,
+              serverAssetID(for: asset) == serverID, visibilityPolicy.allows(id: asset.id) else {
             TemporaryMediaStore.remove(file)
             return nil
         }
@@ -1629,7 +1731,9 @@ struct AssetDetailView: View {
     private func cleanupSharedFile() {
         if let downloadedFileURL { TemporaryMediaStore.remove(downloadedFileURL) }
         downloadedFileURL = nil
-        sharePreviewImage = nil
+        sharedAssetIDs.removeAll()
+        sharedSourceIDs.removeAll()
+        sharedRequestContext = nil
     }
 }
 
