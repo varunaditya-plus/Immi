@@ -435,7 +435,7 @@ final class PhotoSlideshowPresentationTests: SimulatorHostedTestCase {
             return image
         })
         let model = model([asset])
-        let window = try await host(PhotoSlideshowView(assets: [asset], prepareShare: { _ in nil },
+        let window = try await host(PhotoSlideshowView(assets: [asset], session: session, prepareShare: { _ in nil },
             state: model, previewLoader: loader).environment(session as SessionManager).environment(\.scenePhase, .active))
         try await waitUntil("The real loader's PhotoKit branch receives only the selected local identifier") { requested == [asset.id] }
         try assertGreenImageCenter(await screenshot(window))
@@ -498,7 +498,7 @@ final class PhotoSlideshowPresentationTests: SimulatorHostedTestCase {
             }
             let model = model([asset])
             model.togglePlayback()
-            let window = try await host(PhotoSlideshowView(assets: [asset], prepareShare: { _ in nil },
+            let window = try await host(PhotoSlideshowView(assets: [asset], session: loaderSession, prepareShare: { _ in nil },
                 state: model, previewLoader: loader).environment(\.scenePhase, .active))
             await fulfillment(of: [gate.started], timeout: 2)
             if invalidation == "mapping" {
@@ -533,14 +533,15 @@ final class PhotoSlideshowPresentationTests: SimulatorHostedTestCase {
         let removed = RemovedAssets(), policy = AssetVisibilityPolicy(scope: .collection, removed: removed)
         let model = model([asset], visibilityPolicy: policy)
         model.togglePlayback()
-        let loader = SlideshowHeldPreviewLoader(session: MockSessionManager()), gate = PeopleStateGate<UIImage?>()
+        let loaderSession = MockSessionManager()
+        let loader = SlideshowHeldPreviewLoader(session: loaderSession), gate = PeopleStateGate<UIImage?>()
         defer { gate.complete(.success(nil)) }
         var requests = 0
         loader.operation = { _ in
             requests += 1
             return requests == 1 ? old : try? await gate.value()
         }
-        let window = try await host(PhotoSlideshowView(assets: [asset], prepareShare: { _ in nil },
+        let window = try await host(PhotoSlideshowView(assets: [asset], session: loaderSession, prepareShare: { _ in nil },
             state: model, previewLoader: loader).environment(\.scenePhase, .active))
         try await waitUntil("The original bitmap is installed before its source changes") { model.mediaState == .ready }
         try assertGreenImageCenter(await screenshot(window))
@@ -641,6 +642,7 @@ final class PhotoSlideshowPresentationTests: SimulatorHostedTestCase {
 private final class SlideshowTestPresentation { var isPresented = true }
 
 private struct SlideshowTestPresenter: View {
+    @Environment(SessionManager.self) private var session
     @Bindable var presentation: SlideshowTestPresentation
     let assets: [AssetLite]
     let model: PhotoSlideshowState?
@@ -649,7 +651,7 @@ private struct SlideshowTestPresenter: View {
     var previewLoader: PhotoPreviewLoader? = nil
     var body: some View {
         Color.clear.fullScreenCover(isPresented: $presentation.isPresented) {
-            PhotoSlideshowView(assets: assets, visibilityPolicy: visibilityPolicy, prepareShare: prepare,
+            PhotoSlideshowView(assets: assets, session: session, visibilityPolicy: visibilityPolicy, prepareShare: prepare,
                 state: model, previewLoader: previewLoader)
                 .environment(\.scenePhase, .active)
         }

@@ -344,7 +344,7 @@ struct AssetDetailView: View {
         stateSync
             .sheet(isPresented: $isSharePresented, onDismiss: cleanupSharedFile) { shareSheet }
             .fullScreenCover(item: $slideshow, onDismiss: { viewer.activate() }) { selection in
-                PhotoSlideshowView(assets: selection.assets, initialAssetID: selection.initialAssetID,
+                PhotoSlideshowView(assets: selection.assets, session: session, initialAssetID: selection.initialAssetID,
                     visibilityPolicy: visibilityPolicy, prepareShare: slideshowFile)
             }
             .sheet(item: $sharedLink) { ShareSheet(url: $0.url) }

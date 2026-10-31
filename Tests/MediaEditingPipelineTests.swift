@@ -296,6 +296,29 @@ final class MediaEditingPipelineTests: XCTestCase {
         XCTAssertEqual(try reopened.savedEdit(for: assetID, session: session)?.document, document)
     }
 
+    func testSlideshowTimingUsesPersistedTrimAndSpeedOnceFromTheOriginalDuration() throws {
+        let video = AssetLite(id: assetID, isVideo: true, ratio: 1, thumbhash: nil, createdAt: .now, duration: 20)
+        let following = AssetLite(id: UUID().uuidString, isVideo: false, ratio: 1, thumbhash: nil, createdAt: .now)
+        let cases: [(VideoEditRecipe, Double)] = [(VideoEditRecipe(trimStart: 4, trimEnd: 8, rate: 2), 2),
+            (VideoEditRecipe(rate: 0.5), 40)]
+        for (recipe, expectedDuration) in cases {
+            var document = MediaEditDocument()
+            document.kind = .video
+            document.video = recipe
+            try save(document)
+            let state = PhotoSlideshowState(assets: [video, following], displayAsset: {
+                self.pipeline.displayAsset($0, session: self.session)
+            })
+            XCTAssertEqual(state.duration, expectedDuration, accuracy: 0.001)
+            XCTAssertEqual(video.duration, 20, "Presentation conversion must preserve the supplied source metadata")
+            state.updateMediaState(.ready, assetID: video.id, revision: state.mediaRevision)
+            state.elapse(expectedDuration - 0.1)
+            XCTAssertEqual(state.currentAssetID, video.id)
+            state.elapse(0.2)
+            XCTAssertEqual(state.currentAssetID, following.id)
+        }
+    }
+
     func testDisplayGeometryMatchesRealCropRotationAndFramingFromTheOriginalAspect() async throws {
         var document = MediaEditDocument()
         document.sourceAspectRatio = 2

@@ -6,6 +6,7 @@ import SwiftUI
 final class PhotoSlideshowState {
     private let source: [AssetLite]
     private let sourceIndex: [String: Int]
+    @ObservationIgnored private let displayAsset: (AssetLite) -> AssetLite
     private let generation = LocalSnapshot.generation
     let policy: AssetVisibilityPolicy
     private(set) var currentAssetID: String?
@@ -19,9 +20,11 @@ final class PhotoSlideshowState {
     @ObservationIgnored private var acceptsMediaUpdates = true
 
     init(assets: [AssetLite], initialAssetID: String? = nil,
-         visibilityPolicy: AssetVisibilityPolicy? = nil, dataManager: SwiftDataManager? = nil, removed: RemovedAssets? = nil) {
+         visibilityPolicy: AssetVisibilityPolicy? = nil, dataManager: SwiftDataManager? = nil, removed: RemovedAssets? = nil,
+         displayAsset: @escaping (AssetLite) -> AssetLite = { $0 }) {
         var seen = Set<String>()
         source = assets.filter { seen.insert($0.id).inserted }
+        self.displayAsset = displayAsset
         sourceIndex = Dictionary(uniqueKeysWithValues: source.enumerated().map { ($0.element.id, $0.offset) })
         policy = visibilityPolicy ?? AssetVisibilityPolicy(scope: .timeline, dataManager: dataManager, removed: removed)
         currentAssetID = initialAssetID ?? source.first?.id
@@ -32,7 +35,7 @@ final class PhotoSlideshowState {
     var assets: [AssetLite] { isCurrent ? policy.filter(source) : [] }
     var currentAsset: AssetLite? {
         guard isCurrent, let id = currentAssetID, let index = sourceIndex[id], policy.allows(id: id) else { return nil }
-        return source[index]
+        return displayAsset(source[index])
     }
     var currentIndex: Int { assets.firstIndex { $0.id == currentAssetID } ?? 0 }
     var canMovePrevious: Bool { currentAsset != nil && currentIndex > 0 }
@@ -131,13 +134,13 @@ struct PhotoSlideshowView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(SessionManager.self) private var session
 
-    init(assets: [AssetLite], initialAssetID: String? = nil,
+    init(assets: [AssetLite], session: SessionManager, initialAssetID: String? = nil,
          visibilityPolicy: AssetVisibilityPolicy? = nil, prepareShare: @escaping (AssetLite) async -> URL?, state: PhotoSlideshowState? = nil,
          previewLoader: PhotoPreviewLoader? = nil) {
         self.prepareShare = prepareShare
         self.previewLoader = previewLoader
         _state = State(initialValue: state ?? PhotoSlideshowState(assets: assets, initialAssetID: initialAssetID,
-            visibilityPolicy: visibilityPolicy))
+            visibilityPolicy: visibilityPolicy, displayAsset: { MediaEditingPipeline.shared.displayAsset($0, session: session) }))
     }
 
     private var suspended: Bool { !state.isSceneActive || sharePreparation.isPreparing || shareItem != nil }

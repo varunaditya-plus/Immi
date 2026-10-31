@@ -228,7 +228,7 @@ struct PhotoCollectionScreen<Options: View>: View {
                     isAllowed: { [policy = visibilityPolicy] in policy.allows(id: $0) })
             }
             .fullScreenCover(item: $slideshow) { selection in
-                PhotoSlideshowView(assets: selection.assets, initialAssetID: selection.initialAssetID,
+                PhotoSlideshowView(assets: selection.assets, session: session, initialAssetID: selection.initialAssetID,
                     visibilityPolicy: visibilityPolicy) { asset in
                     (await shareURLs([asset.id])).first
                 }

@@ -103,7 +103,7 @@ struct LibraryView: View {
                 }
                 .fullScreenCover(isPresented: openedStoryBinding) { memoryStoryCover }
                 .fullScreenCover(item: $slideshow) { selection in
-                    PhotoSlideshowView(assets: selection.assets, initialAssetID: selection.initialAssetID) { asset in
+                    PhotoSlideshowView(assets: selection.assets, session: session, initialAssetID: selection.initialAssetID) { asset in
                         await vm?.shareURL(for: asset)
                     }
                 }

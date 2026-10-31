@@ -545,7 +545,7 @@ struct SearchView: View {
                     isAllowed: { [policy = visibilityPolicy] in policy.allows(id: $0) })
             }
             .fullScreenCover(item: $slideshow) { selection in
-                PhotoSlideshowView(assets: selection.assets, initialAssetID: selection.initialAssetID) { asset in
+                PhotoSlideshowView(assets: selection.assets, session: session, initialAssetID: selection.initialAssetID) { asset in
                     (await vm?.shareURLs(for: [asset.id]))?.first
                 }
             }
