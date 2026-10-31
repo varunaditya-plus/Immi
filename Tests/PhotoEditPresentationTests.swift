@@ -29,6 +29,10 @@ final class PhotoEditPresentationTests: SimulatorHostedTestCase {
         XCTAssertEqual(try slider(in: window).value, initial, accuracy: 0.01)
         try await activateAccessibilityButton(named: "Redo", in: window)
         try await waitUntil("Redo restores the actual slider's edited value") { abs(((try? self.slider(in: window).value) ?? -10) - edited) < 0.01 }
+        try await activateAccessibilityButton(named: "Exposure", in: window)
+        try await waitUntil("Tapping the selected applied adjustment resets it") { abs(((try? self.slider(in: window).value) ?? -10) - initial) < 0.01 }
+        try await activateAccessibilityButton(named: "Undo", in: window)
+        try await waitUntil("Undo restores the adjustment cleared by its selected icon") { abs(((try? self.slider(in: window).value) ?? -10) - edited) < 0.01 }
         try await activateAccessibilityButton(named: "Filters", in: window)
         try await activateAccessibilityButton(named: "Vivid", in: window)
 
@@ -159,23 +163,40 @@ final class PhotoEditPresentationTests: SimulatorHostedTestCase {
     func testTheImageCompareAccessibilityActionShowsTheRealOriginalPixelsWithoutChangingTheSavedRecipe() async throws {
         let (fixture, window) = try await show()
         try await activateAccessibilityButton(named: "Exposure", in: window)
-        _ = try await changeSlider(in: window)
         var edited: NSObject?
         try await waitUntil("The rendered image exposes its real comparison action") {
             edited = self.accessibilityObject("Edited Photo", in: window)
             return edited != nil
         }
         let image = try XCTUnwrap(edited)
-        let editedScreenshot = try await screenshot(window)
         let frame = window.convert(image.accessibilityFrame, from: nil)
-        XCTAssertTrue(image.accessibilityActivate())
+        let baseline = try centerLuminance(await screenshot(window), frame: frame, window: window)
+        _ = try await changeSlider(in: window)
+        var editedScreenshot: UIImage?
+        try await waitUntil("The actual Exposure preview becomes brighter before comparison") {
+            let snapshot = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
+                window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+            }
+            guard let luminance = try? self.centerLuminance(snapshot, frame: frame, window: window),
+                  luminance > baseline + 2 else { return false }
+            editedScreenshot = snapshot
+            return true
+        }
+        let editedPixels = try XCTUnwrap(editedScreenshot)
+        var currentImage: NSObject?
+        try await waitUntil("The updated preview exposes its real comparison action") {
+            currentImage = self.accessibilityObject("Edited Photo", in: window)
+            return currentImage != nil
+        }
+        XCTAssertTrue(try XCTUnwrap(currentImage).accessibilityActivate())
         try await waitUntil("The actual comparison action switches the image to Original") {
             self.accessibilityObject("Original Photo", in: window) != nil
         }
         let originalScreenshot = try await screenshot(window)
 
         XCTAssertLessThan(try centerLuminance(originalScreenshot, frame: frame, window: window),
-            try centerLuminance(editedScreenshot, frame: frame, window: window))
+            try centerLuminance(editedPixels, frame: frame, window: window))
+        XCTAssertEqual(try centerLuminance(originalScreenshot, frame: frame, window: window), baseline, accuracy: 2)
         try await activateAccessibilityButton(named: "Crop", in: window)
         try await waitUntil("Entering Crop exits comparison and restores its editable image") {
             self.accessibilityObject("Edited Photo", in: window) != nil

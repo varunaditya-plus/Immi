@@ -18,6 +18,7 @@ struct PhotoCropEditor: View {
     @State private var revertConfirmation = false
     @State private var error: ErrorEvent?
     @State private var saveTask: Task<Void, Never>?
+    @State private var aspectDrawer = false
 
     init(initialRecipe: PhotoEditRecipe, requiresSave: Bool = false, loadImage: @escaping @MainActor () async -> UIImage?,
          isAllowed: @escaping @MainActor () -> Bool,
@@ -41,7 +42,7 @@ struct PhotoCropEditor: View {
                 if isAllowed(), let image {
                     PhotoEditCanvas(image: image, recipe: recipe, tool: tool, comparing: false,
                         onEditingChanged: history.editingChanged)
-                    PhotoEditToolControls(image: image, recipe: recipe, tool: tool,
+                    PhotoEditToolControls(image: image, recipe: recipe, tool: tool, aspectDrawer: $aspectDrawer,
                         onEditingChanged: history.editingChanged)
                     toolPicker
                 } else if loadFailed {
@@ -57,6 +58,7 @@ struct PhotoCropEditor: View {
                     ProgressView("Loading photo…").frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
+            .ignoresSafeArea(.container, edges: .bottom)
             .disabled(isSaving)
             .allowsHitTesting(!isSaving)
             .foregroundStyle(.primary)
@@ -65,44 +67,51 @@ struct PhotoCropEditor: View {
             .toolbarBackground(Color(uiColor: .systemBackground), for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Cancel", systemImage: "xmark") {
+                    PhotoEditorToolbarButton("Cancel", systemImage: "xmark") {
                         history.editingChanged(false)
                         if history.isDirty { discardConfirmation = true } else { dismiss() }
                     }
-                    .labelStyle(.iconOnly).buttonStyle(.glass).buttonBorderShape(.circle)
-                    .accessibilityLabel("Cancel")
                     .disabled(isSaving)
                 }
                 .sharedBackgroundVisibility(.hidden)
                 ToolbarItem(placement: .topBarLeading) {
-                    HStack(spacing: 8) {
-                        Button("Undo", systemImage: "arrow.uturn.backward", action: history.undo)
-                            .frame(width: 44, height: 44).disabled(!history.canUndo || isSaving)
-                        Button("Redo", systemImage: "arrow.uturn.forward", action: history.redo)
-                            .frame(width: 44, height: 44).disabled(!history.canRedo || isSaving)
-                    }
-                    .labelStyle(.iconOnly).buttonStyle(.plain)
-                    .glassEffect(.regular, in: .capsule)
-                }
-                .sharedBackgroundVisibility(.hidden)
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Text("Edits are saved on this device.")
-                        Button("Revert to Original", systemImage: "arrow.counterclockwise", role: .destructive) {
-                            revertConfirmation = true
+                    if tool == .crop {
+                        PhotoCropTransformButtons(recipe: recipe, onEditingChanged: history.editingChanged)
+                            .disabled(isSaving)
+                    } else {
+                        HStack(spacing: 8) {
+                            Button("Undo", systemImage: "arrow.uturn.backward", action: history.undo)
+                                .frame(width: 44, height: 44).disabled(!history.canUndo || isSaving)
+                            Button("Redo", systemImage: "arrow.uturn.forward", action: history.redo)
+                                .frame(width: 44, height: 44).disabled(!history.canRedo || isSaving)
                         }
-                        .disabled(!history.isDirty && history.initialRecipe.isIdentity && !requiresSave)
-                    } label: { Image(systemName: "ellipsis") }
-                    .labelStyle(.iconOnly).buttonStyle(.glass).buttonBorderShape(.circle)
-                    .accessibilityLabel("More")
-                    .disabled(isSaving || image == nil)
+                        .labelStyle(.iconOnly).buttonStyle(.plain)
+                        .glassEffect(.regular, in: .capsule)
+                    }
                 }
                 .sharedBackgroundVisibility(.hidden)
+                if tool == .crop {
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        Button("Aspect Ratio", systemImage: "aspectratio") {
+                            history.editingChanged(false)
+                            aspectDrawer.toggle()
+                        }
+                        .labelStyle(.iconOnly)
+                        .disabled(isSaving || image == nil)
+                        moreMenu
+                    }
+                    .sharedBackgroundVisibility(.visible)
+                } else {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        moreMenu
+                            .frame(width: 44, height: 44)
+                            .glassEffect(.regular, in: .circle)
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done", systemImage: "checkmark") { save(reverting: false) }
-                        .labelStyle(.iconOnly).buttonStyle(.glass).buttonBorderShape(.circle)
-                        .fontWeight(.semibold).tint(.yellow)
-                        .accessibilityLabel("Done")
+                    PhotoEditorToolbarButton("Done", systemImage: "checkmark",
+                        tint: history.isDirty || requiresSave ? .yellow : .secondary) { save(reverting: false) }
                         .disabled(isSaving || image == nil || !isAllowed())
                 }
                 .sharedBackgroundVisibility(.hidden)
@@ -140,6 +149,8 @@ struct PhotoCropEditor: View {
             .onDisappear { saveTask?.cancel() }
         }
         .interactiveDismissDisabled(history.isDirty || isSaving)
+        .persistentSystemOverlays(.hidden)
+        .statusBarHidden()
     }
 
     private var toolPicker: some View {
@@ -148,7 +159,22 @@ struct PhotoCropEditor: View {
             history.editingChanged(false)
             tool = $0
         }), isEnabled: !isSaving)
-        .padding(.vertical, 12)
+        .padding(.bottom, 16)
+    }
+
+    private var moreMenu: some View {
+        Menu {
+            Text("Edits are saved on this device.")
+            Button("Revert to Original", systemImage: "arrow.counterclockwise", role: .destructive) {
+                revertConfirmation = true
+            }
+            .disabled(!history.isDirty && history.initialRecipe.isIdentity && !requiresSave)
+        } label: {
+            Image(systemName: "ellipsis").font(.system(size: 20, weight: .medium))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("More")
+        .disabled(isSaving || image == nil)
     }
 
     private func save(reverting: Bool) {

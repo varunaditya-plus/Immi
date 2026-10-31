@@ -1,6 +1,43 @@
 import SwiftUI
 import UIKit
 
+enum PhotoEditorMetrics {
+    static let controlPanelHeight: CGFloat = 148
+    static let toolPickerHeight: CGFloat = 60
+}
+
+struct PhotoEditorToolbarButton: View {
+    private let title: LocalizedStringKey
+    private let systemImage: String
+    private let tint: Color
+    private let action: () -> Void
+    @Environment(\.isEnabled) private var isEnabled
+
+    init(_ title: LocalizedStringKey, systemImage: String, tint: Color = .primary,
+         action: @escaping () -> Void) {
+        self.title = title
+        self.systemImage = systemImage
+        self.tint = tint
+        self.action = action
+    }
+
+    var body: some View {
+        Button {
+            guard isEnabled else { return }
+            action()
+        } label: {
+            Image(systemName: systemImage)
+                .font(.system(size: 20))
+                .foregroundStyle(tint)
+                .frame(width: 44, height: 44)
+                .glassEffect(.regular, in: .circle)
+                .opacity(isEnabled ? 1 : 0.4)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(title))
+    }
+}
+
 struct PhotoEditCanvas: View {
     let image: UIImage
     @Binding var recipe: PhotoEditRecipe
@@ -22,10 +59,13 @@ struct PhotoEditCanvas: View {
     private var framing: Binding<CGRect> {
         Binding(get: { recipe.framing }, set: { recipe.framing = $0 })
     }
+    private var displayedImage: UIImage? {
+        shownRecipe.isIdentity && image.imageOrientation == .up ? image : rendered
+    }
 
     var body: some View {
         GeometryReader { geometry in
-            if let rendered {
+            if let rendered = displayedImage {
                 let aspect = rendered.size.width / max(1, rendered.size.height)
                 let size = PhotoEditLayout.fittedSize(aspect: aspect, in: geometry.size)
                 ZStack {
@@ -57,10 +97,14 @@ struct PhotoEditCanvas: View {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 8)
+        .padding(.horizontal, 8).padding(.vertical, 8).padding(.top, 16)
         .frame(maxHeight: .infinity)
         .task(id: PreviewKey(image: ObjectIdentifier(image), recipe: shownRecipe, revision: revision)) {
             let value = shownRecipe
+            if value.isIdentity, image.imageOrientation == .up {
+                renderFailed = false
+                return
+            }
             do {
                 let next = try await PhotoEditRenderer.shared.renderPreview(image, recipe: value)
                 guard !Task.isCancelled else { return }
@@ -88,156 +132,181 @@ struct PhotoEditToolControls: View {
     @Binding var recipe: PhotoEditRecipe
     let tool: PhotoEditorTool
     var onEditingChanged: (Bool) -> Void
+    @Binding private var aspectDrawer: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ScaledMetric(relativeTo: .body) private var panelHeight = PhotoEditorMetrics.controlPanelHeight
+    @ScaledMetric(relativeTo: .body) private var circleSize: CGFloat = 51
+    @ScaledMetric(relativeTo: .caption) private var titleHeight: CGFloat = 18
     @State private var adjustment = PhotoAdjustment.auto
     @State private var geometry = PhotoGeometryTool.straighten
-    @State private var aspectDrawer = false
     @State private var viewportSize = CGSize.zero
 
+    init(image: UIImage, recipe: Binding<PhotoEditRecipe>, tool: PhotoEditorTool,
+         aspectDrawer: Binding<Bool> = .constant(false), onEditingChanged: @escaping (Bool) -> Void) {
+        self.image = image
+        _recipe = recipe
+        self.tool = tool
+        _aspectDrawer = aspectDrawer
+        self.onEditingChanged = onEditingChanged
+    }
+
     var body: some View {
-        VStack(spacing: 12) {
+        Group {
             switch tool {
             case .adjust: adjustmentControls
             case .filters: filterControls
             case .crop: cropControls
             }
         }
-        .padding(.vertical, 10)
+        .frame(height: panelHeight)
         .foregroundStyle(.primary)
         .background(PhotoEditViewportProbe(size: $viewportSize))
     }
 
     private var adjustmentControls: some View {
-        VStack(spacing: 12) {
-            valueLabel(adjustment.title, value: recipe[adjustment])
+        VStack(spacing: 6) {
+            controlTitle(adjustment.title, value: recipe[adjustment] == 0 ? nil : "\(Int((recipe[adjustment] * 100).rounded()))")
+                .opacity(adjustment == .auto && recipe[.auto] == 0 ? 0 : 1)
             ScrollViewReader { proxy in
                 GeometryReader { geometry in
                     ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 18) {
+                        HStack(spacing: 20) {
                             ForEach(PhotoAdjustment.allCases) { option in
+                                let applied = recipe[option] != 0
                                 Button {
                                     onEditingChanged(false)
+                                    if option != .auto, adjustment == option, applied { recipe[option] = 0 }
                                     adjustment = option
                                     if option == .auto { recipe[.auto] = recipe[.auto] == 0 ? 1 : 0 }
                                 } label: {
-                                    Image(systemName: option.symbol).font(.title2)
-                                        .frame(width: 46, height: 46)
-                                        .background(adjustment == option ? Color.yellow : Color.clear, in: Circle())
-                                        .overlay(Circle().stroke(recipe[option] != 0 ? .yellow : .gray, lineWidth: 2))
-                                        .foregroundStyle(adjustment == option ? Color.black : Color.primary)
+                                    PhotoAdjustmentIcon(adjustment: option)
+                                        .frame(width: circleSize, height: circleSize)
+                                        .background(option == .auto ? (applied ? Color.yellow : Color(uiColor: .systemFill))
+                                            : adjustment == option ? Color(uiColor: .tertiarySystemFill) : .clear, in: Circle())
+                                        .overlay(Circle().stroke(option == .auto ? .clear : applied ? .yellow : .gray.opacity(0.65), lineWidth: 1.5))
+                                        .foregroundStyle(option == .auto && applied ? Color.black : Color.primary)
                                 }
                                 .id(option)
+                                .buttonStyle(.plain)
                                 .accessibilityLabel(option.title)
                                 .accessibilityValue("\(Int((recipe[option] * 100).rounded()))")
                                 .accessibilityAddTraits(adjustment == option ? .isSelected : [])
                             }
                         }
-                        .padding(.horizontal, max(0, (geometry.size.width - 46) / 2))
+                        .padding(.horizontal, max(0, (geometry.size.width - circleSize) / 2))
                         .padding(.vertical, 3)
                     }
                     .onAppear { proxy.scrollTo(adjustment, anchor: .center) }
-                    .onChange(of: adjustment) { _, value in
-                        withAnimation(.snappy(duration: 0.22)) { proxy.scrollTo(value, anchor: .center) }
-                    }
+                    .onChange(of: adjustment) { _, value in scroll(value, using: proxy) }
                 }
-                .frame(height: 54)
+                .frame(height: circleSize + 6)
             }
             PhotoEditRulerSlider(value: Binding(get: { recipe[adjustment] }, set: { recipe[adjustment] = $0 }),
                 in: adjustment.range, label: adjustment.title,
                 valueText: "\(Int((recipe[adjustment] * 100).rounded()))", onEditingChanged: onEditingChanged)
-                .overlay(alignment: .leading) {
-                    Button("Reset", systemImage: "arrow.counterclockwise") { recipe[adjustment] = 0 }
-                        .frame(width: 44, height: 44).contentShape(.rect)
-                        .labelStyle(.iconOnly).disabled(recipe[adjustment] == 0)
-                }
                 .padding(.horizontal, 24)
         }
-        .tint(.yellow)
     }
 
     private var filterControls: some View {
-        VStack(spacing: 12) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    ForEach(PhotoEditFilter.allCases) { option in
-                        Button { onEditingChanged(false); recipe.filter = option } label: {
-                            VStack(spacing: 6) {
-                                PhotoFilterThumbnail(image: image, recipe: recipe, filter: option)
-                                    .frame(width: 62, height: 76).clipped()
-                                    .overlay(Rectangle().stroke(recipe.filter == option ? .yellow : .clear, lineWidth: 3))
-                                Text(option.title).font(.caption2)
-                                    .foregroundStyle(recipe.filter == option ? Color.yellow : Color.primary)
+        VStack(spacing: 4) {
+            controlTitle(recipe.filter.title,
+                value: recipe.filter == .original ? nil : "\(Int((recipe.filterIntensity * 100).rounded()))")
+                .foregroundStyle(recipe.filter == .original ? Color.secondary : Color.primary)
+            ScrollViewReader { proxy in
+                GeometryReader { geometry in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 1) {
+                            ForEach(PhotoEditFilter.allCases) { option in
+                                let selected = recipe.filter == option
+                                Button { onEditingChanged(false); recipe.filter = option } label: {
+                                    VStack(spacing: 4) {
+                                        Circle().fill(.primary).frame(width: 3, height: 3).opacity(selected ? 1 : 0)
+                                        PhotoFilterThumbnail(image: image, recipe: recipe, filter: option)
+                                            .frame(width: selected ? 56 : 51, height: selected ? 56 : 51)
+                                            .clipShape(RoundedRectangle(cornerRadius: 7))
+                                            .overlay(RoundedRectangle(cornerRadius: 7).stroke(selected ? .white : .clear, lineWidth: 1.5))
+                                            .shadow(color: .black.opacity(selected ? 0.15 : 0), radius: 2, y: 1)
+                                    }.frame(width: 51, height: 65, alignment: .bottom)
+                                }
+                                .id(option).zIndex(selected ? 1 : 0)
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(option.title)
+                                .accessibilityAddTraits(selected ? .isSelected : [])
                             }
-                        }
-                        .accessibilityLabel(option.title)
-                        .accessibilityAddTraits(recipe.filter == option ? .isSelected : [])
+                        }.padding(.horizontal, max(0, (geometry.size.width - 51) / 2))
                     }
-                }.padding(.horizontal, 16)
+                    .mask(LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.06),
+                        .init(color: .black, location: 0.94), .init(color: .clear, location: 1)], startPoint: .leading, endPoint: .trailing))
+                    .onAppear { proxy.scrollTo(recipe.filter, anchor: .center) }
+                    .onChange(of: recipe.filter) { _, value in scroll(value, using: proxy) }
+                }.frame(height: 65)
             }
-            HStack {
-                Text("Intensity").font(.caption)
+            if recipe.filter == .original { Color.clear.frame(height: 44).accessibilityHidden(true) }
+            else {
                 PhotoEditRulerSlider(value: $recipe.filterIntensity, in: 0...1,
                     label: String(localized: "Filter Intensity"), valueText: "\(Int((recipe.filterIntensity * 100).rounded()))",
                     onEditingChanged: onEditingChanged)
-                    .disabled(recipe.filter == .original)
-                Text("\(Int((recipe.filterIntensity * 100).rounded()))").font(.caption.monospacedDigit())
-                    .frame(width: 28)
-            }.padding(.horizontal, 24)
+                    .padding(.horizontal, 24)
+            }
         }
-        .tint(.yellow)
     }
 
     private var cropControls: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 30) {
-                Button("Flip", systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right") {
-                    onEditingChanged(true)
-                    defer { onEditingChanged(false) }
-                    if recipe.quarterTurns.isMultiple(of: 2) { recipe.flipHorizontal.toggle() }
-                    else { recipe.flipVertical.toggle() }
-                    recipe.framing.origin.x = 1 - recipe.framing.maxX
-                }
-                Button("Rotate Left", systemImage: "rotate.left") {
-                    onEditingChanged(true)
-                    defer { onEditingChanged(false) }
-                    let frame = recipe.framing
-                    recipe.quarterTurns = (recipe.quarterTurns + 3) % 4
-                    recipe.framing = CGRect(x: frame.minY, y: 1 - frame.maxX, width: frame.height, height: frame.width)
-                    if let ratio = recipe.cropAspectRatio, ratio > 0 { recipe.cropAspectRatio = 1 / ratio }
-                }
-                Button("Aspect Ratio", systemImage: "aspectratio") { aspectDrawer.toggle() }
-                Button(recipe.cropAspectRatio == nil ? "Lock Aspect Ratio" : "Unlock Aspect Ratio",
-                    systemImage: recipe.cropAspectRatio == nil ? "lock.open" : "lock") {
-                    onEditingChanged(false)
-                    recipe.cropAspectRatio = recipe.cropAspectRatio == nil
-                        ? Double(recipe.framing.width * baseAspect / max(0.000_001, recipe.framing.height)) : nil
-                }
-                Button("Reset", systemImage: "arrow.counterclockwise") { recipe.resetGeometry() }
-            }
-            .labelStyle(.iconOnly).font(.title3)
-            if aspectDrawer { ratioControls }
-            HStack(spacing: 28) {
-                ForEach(PhotoGeometryTool.allCases) { option in
-                    Button { onEditingChanged(false); geometry = option } label: {
-                        VStack(spacing: 5) {
-                            Image(systemName: option.symbol).font(.title2)
-                            Text(option.title).font(.caption2)
-                        }.foregroundStyle(geometry == option ? Color.yellow : Color.primary)
+        VStack(spacing: 6) {
+            controlTitle(aspectDrawer ? String(localized: "Aspect Ratio") : geometry.title,
+                value: !aspectDrawer && geometryValue.wrappedValue != 0 ? geometryText : nil)
+                .opacity(!aspectDrawer && geometry == .straighten && geometryValue.wrappedValue == 0 && !hasCropCustomization ? 0 : 1)
+                .overlay(alignment: .leading) {
+                    if aspectDrawer || hasCropCustomization {
+                        Button(recipe.cropAspectRatio == nil ? "Lock Aspect Ratio" : "Unlock Aspect Ratio",
+                            systemImage: recipe.cropAspectRatio == nil ? "lock.open" : "lock") {
+                            onEditingChanged(false)
+                            recipe.cropAspectRatio = recipe.cropAspectRatio == nil
+                                ? Double(recipe.framing.width * baseAspect / max(0.000_001, recipe.framing.height)) : nil
+                        }.labelStyle(.iconOnly).frame(width: 44, height: 44)
                     }
-                    .accessibilityAddTraits(geometry == option ? .isSelected : [])
                 }
-            }
-            HStack {
-                Text(geometry.title).font(.caption)
+                .overlay(alignment: .trailing) {
+                    if hasCropCustomization {
+                        Button("Reset", systemImage: "arrow.counterclockwise") { onEditingChanged(false); recipe.resetGeometry() }
+                            .labelStyle(.iconOnly).frame(width: 44, height: 44)
+                    }
+                }
+                .padding(.horizontal, 20)
+            if aspectDrawer { ratioControls.frame(height: circleSize + 56) }
+            else {
+                ScrollViewReader { proxy in
+                    GeometryReader { geometry in
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 20) {
+                                ForEach(PhotoGeometryTool.allCases) { option in
+                                    Button { onEditingChanged(false); self.geometry = option } label: {
+                                        Image(systemName: option.symbol).font(.system(size: 18))
+                                            .frame(width: circleSize, height: circleSize)
+                                            .background(Color(uiColor: .tertiarySystemFill), in: Circle())
+                                            .overlay(Circle().stroke(.gray.opacity(0.65), lineWidth: 1.5))
+                                    }
+                                    .id(option).buttonStyle(.plain)
+                                    .accessibilityLabel(option.title)
+                                    .accessibilityAddTraits(self.geometry == option ? .isSelected : [])
+                                }
+                            }.padding(.horizontal, max(0, (geometry.size.width - circleSize) / 2)).padding(.vertical, 3)
+                        }
+                        .onAppear { proxy.scrollTo(self.geometry, anchor: .center) }
+                        .onChange(of: self.geometry) { _, value in scroll(value, using: proxy) }
+                    }.frame(height: circleSize + 6)
+                }
                 PhotoEditRulerSlider(value: geometryValue, in: geometry == .straighten ? -45...45 : -1...1,
-                    label: geometry.title, valueText: geometry == .straighten ? String(format: "%.1f°", recipe.straighten)
-                        : "\(Int((geometryValue.wrappedValue * 100).rounded()))", onEditingChanged: onEditingChanged)
-                Text(geometry == .straighten ? String(format: "%.1f°", recipe.straighten)
-                    : "\(Int((geometryValue.wrappedValue * 100).rounded()))")
-                    .font(.caption.monospacedDigit()).frame(width: 48)
-            }.padding(.horizontal, 24)
-        }.tint(.yellow)
+                    label: geometry.title, valueText: geometryText, onEditingChanged: onEditingChanged)
+                    .padding(.horizontal, 24)
+            }
+        }
     }
 
+    private var geometryText: String {
+        geometry == .straighten ? String(format: "%.1f°", recipe.straighten) : "\(Int((geometryValue.wrappedValue * 100).rounded()))"
+    }
     private var geometryValue: Binding<Double> {
         switch geometry {
         case .straighten: $recipe.straighten
@@ -245,29 +314,49 @@ struct PhotoEditToolControls: View {
         case .horizontal: $recipe.perspectiveHorizontal
         }
     }
-
+    private var hasCropCustomization: Bool {
+        let initial = PhotoEditRecipe()
+        return recipe.crop != initial.crop || recipe.framing != initial.framing || recipe.quarterTurns != 0
+            || recipe.flipHorizontal || recipe.flipVertical || recipe.straighten != 0
+            || recipe.perspectiveHorizontal != 0 || recipe.perspectiveVertical != 0 || recipe.cropAspectRatio != 0
+    }
     private var ratioControls: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 8) {
             HStack(spacing: 28) {
                 Button("Portrait", systemImage: "rectangle.portrait") { orientCrop(wide: false) }
                 Button("Wide", systemImage: "rectangle") { orientCrop(wide: true) }
-            }.labelStyle(.iconOnly)
+            }.labelStyle(.iconOnly).frame(height: 44)
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 22) {
+                HStack(spacing: 10) {
                     ForEach(PhotoCropPreset.allCases) { preset in
                         Button(preset.title.uppercased()) { selectRatio(preset) }
-                            .font(.caption.weight(.medium)).frame(minHeight: 44)
+                            .font(.caption.weight(selected(preset) ? .semibold : .regular))
+                            .foregroundStyle(.primary).padding(.horizontal, 10).frame(minHeight: 44)
+                            .background(selected(preset) ? Color.yellow.opacity(0.2) : .clear, in: Capsule())
+                            .accessibilityAddTraits(selected(preset) ? .isSelected : [])
                     }
                 }.padding(.horizontal, 20)
             }
         }
     }
-
-    private func valueLabel(_ title: String, value: Double) -> some View {
-        HStack {
+    private func selected(_ preset: PhotoCropPreset) -> Bool {
+        if preset == .original { return recipe.cropAspectRatio == 0 }
+        if preset == .freeform { return recipe.cropAspectRatio == nil }
+        guard let value = recipe.cropAspectRatio, value > 0 else { return false }
+        let portrait = preset.ratio(viewport: viewportSize)
+        guard portrait > 0 else { return false }
+        let target = value > 1 ? max(portrait, 1 / portrait) : min(portrait, 1 / portrait)
+        return abs(value - target) < 0.0001
+    }
+    private func controlTitle(_ title: String, value: String? = nil) -> some View {
+        HStack(spacing: 8) {
             Text(title.uppercased()).font(.caption.weight(.medium))
-            Text("\(Int((value * 100).rounded()))").font(.caption.monospacedDigit())
-        }
+            if let value { Text(value).font(.caption.monospacedDigit()).foregroundStyle(.yellow) }
+        }.frame(maxWidth: .infinity).frame(height: titleHeight)
+    }
+    private func scroll<ID: Hashable>(_ value: ID, using proxy: ScrollViewProxy) {
+        if reduceMotion { proxy.scrollTo(value, anchor: .center) }
+        else { withAnimation(.snappy(duration: 0.22)) { proxy.scrollTo(value, anchor: .center) } }
     }
 
     private var baseAspect: CGFloat {
@@ -316,9 +405,9 @@ private enum PhotoGeometryTool: CaseIterable, Identifiable {
     }
     var symbol: String {
         switch self {
-        case .straighten: "circle.lefthalf.filled"
-        case .vertical: "trapezoid.and.line.vertical"
-        case .horizontal: "trapezoid.and.line.horizontal"
+        case .straighten: "circle.and.line.horizontal.fill"
+        case .vertical: "trapezoid.and.line.vertical.fill"
+        case .horizontal: "trapezoid.and.line.horizontal.fill"
         }
     }
 }
@@ -426,6 +515,29 @@ private enum CropHandle: CaseIterable {
     case topLeft, top, topRight, right, bottomRight, bottom, bottomLeft, left
 }
 
+private struct CropHandleShape: Shape {
+    let handle: CropHandle
+    func path(in rect: CGRect) -> Path {
+        let x = rect.midX, y = rect.midY
+        var path = Path()
+        switch handle {
+        case .topLeft:
+            path.move(to: CGPoint(x: x, y: y + 18)); path.addLine(to: CGPoint(x: x, y: y)); path.addLine(to: CGPoint(x: x + 18, y: y))
+        case .topRight:
+            path.move(to: CGPoint(x: x - 18, y: y)); path.addLine(to: CGPoint(x: x, y: y)); path.addLine(to: CGPoint(x: x, y: y + 18))
+        case .bottomRight:
+            path.move(to: CGPoint(x: x - 18, y: y)); path.addLine(to: CGPoint(x: x, y: y)); path.addLine(to: CGPoint(x: x, y: y - 18))
+        case .bottomLeft:
+            path.move(to: CGPoint(x: x, y: y - 18)); path.addLine(to: CGPoint(x: x, y: y)); path.addLine(to: CGPoint(x: x + 18, y: y))
+        case .top, .bottom:
+            path.move(to: CGPoint(x: x - 12, y: y)); path.addLine(to: CGPoint(x: x + 12, y: y))
+        case .left, .right:
+            path.move(to: CGPoint(x: x, y: y - 12)); path.addLine(to: CGPoint(x: x, y: y + 12))
+        }
+        return path
+    }
+}
+
 private typealias CropRectAnimationData = AnimatablePair<
     AnimatablePair<CGFloat, CGFloat>,
     AnimatablePair<CGFloat, CGFloat>
@@ -462,6 +574,7 @@ private struct CropMaskShape: Shape {
 
 private struct CropGridShape: Shape {
     var cropFrame: CGRect
+    var showsThirds: Bool
 
     var animatableData: CropRectAnimationData {
         get {
@@ -481,13 +594,15 @@ private struct CropGridShape: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
         path.addRect(cropFrame)
-        for index in 1...2 {
-            let x = cropFrame.minX + cropFrame.width * CGFloat(index) / 3
-            let y = cropFrame.minY + cropFrame.height * CGFloat(index) / 3
-            path.move(to: CGPoint(x: x, y: cropFrame.minY))
-            path.addLine(to: CGPoint(x: x, y: cropFrame.maxY))
-            path.move(to: CGPoint(x: cropFrame.minX, y: y))
-            path.addLine(to: CGPoint(x: cropFrame.maxX, y: y))
+        if showsThirds {
+            for index in 1...2 {
+                let x = cropFrame.minX + cropFrame.width * CGFloat(index) / 3
+                let y = cropFrame.minY + cropFrame.height * CGFloat(index) / 3
+                path.move(to: CGPoint(x: x, y: cropFrame.minY))
+                path.addLine(to: CGPoint(x: x, y: cropFrame.maxY))
+                path.move(to: CGPoint(x: cropFrame.minX, y: y))
+                path.addLine(to: CGPoint(x: cropFrame.maxX, y: y))
+            }
         }
         return path
     }
@@ -500,6 +615,7 @@ private struct CropOverlay: View {
     let displayAspect: CGFloat
     var onEditingChanged: (Bool) -> Void = { _ in }
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var dragStart: CGRect?
     private let minimum: CGFloat = 0.06
 
@@ -525,24 +641,20 @@ private struct CropOverlay: View {
             }
         }
         .coordinateSpace(name: "cropCanvas")
-        .animation(.smooth(duration: 0.3), value: crop)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.3), value: crop)
     }
 
     private func grid(in frame: CGRect) -> some View {
-        CropGridShape(cropFrame: frame)
-        .stroke(.white.opacity(0.85), lineWidth: 1)
+        CropGridShape(cropFrame: frame, showsThirds: dragStart != nil)
+        .stroke(.primary.opacity(0.85), lineWidth: 1)
         .allowsHitTesting(false)
     }
 
     private func handleView(
         _ handle: CropHandle, frame: CGRect, canvasSize: CGSize
     ) -> some View {
-        ZStack {
-            Circle()
-                .fill(.white)
-                .frame(width: 16, height: 16)
-                .shadow(color: .black.opacity(0.5), radius: 2)
-        }
+        CropHandleShape(handle: handle)
+            .stroke(.primary, style: StrokeStyle(lineWidth: 2.5, lineCap: .square, lineJoin: .miter))
             .frame(width: 44, height: 44)
             .contentShape(Rectangle())
             .position(position(of: handle, in: frame))
@@ -755,10 +867,82 @@ private struct CropOverlay: View {
     }
 }
 
+private struct PhotoAdjustmentIcon: View {
+    let adjustment: PhotoAdjustment
+    @ScaledMetric(relativeTo: .body) private var manualSize: CGFloat = 18
+    @ScaledMetric(relativeTo: .body) private var autoSize: CGFloat = 25
+    @ScaledMetric(relativeTo: .body) private var colorSize: CGFloat = 20
+
+    private func spectrum(from start: Double, to end: Double) -> [Color] {
+        (0...6).map { Color(hue: start + (end - start) * Double($0) / 6, saturation: 1, brightness: 1) }
+    }
+
+    var body: some View {
+        Group {
+            switch adjustment {
+            case .blackPoint:
+                PhotoBlackPointShape().fill(.primary, style: FillStyle(eoFill: true))
+                    .frame(width: colorSize, height: colorSize)
+            case .saturation:
+                Circle().fill(LinearGradient(colors: spectrum(from: 0.79, to: 0.02), startPoint: .leading, endPoint: .trailing))
+                    .frame(width: colorSize, height: colorSize)
+            case .vibrance:
+                Image(systemName: "lightspectrum.horizontal")
+                    .font(.system(size: colorSize)).symbolRenderingMode(.monochrome)
+                    .foregroundStyle(LinearGradient(colors: spectrum(from: 0.06, to: 0.82), startPoint: .leading, endPoint: .trailing))
+            default:
+                Image(systemName: adjustment.symbol)
+                    .font(.system(size: adjustment == .auto ? autoSize : manualSize)).symbolRenderingMode(.monochrome)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct PhotoBlackPointShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.addEllipse(in: rect)
+        path.addEllipse(in: rect.insetBy(dx: rect.width * 0.35, dy: rect.height * 0.35))
+        return path
+    }
+}
+
+struct PhotoCropTransformButtons: View {
+    @Binding var recipe: PhotoEditRecipe
+    var onEditingChanged: (Bool) -> Void
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button("Flip", systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right") {
+                guard isEnabled else { return }
+                onEditingChanged(true)
+                defer { onEditingChanged(false) }
+                if recipe.quarterTurns.isMultiple(of: 2) { recipe.flipHorizontal.toggle() }
+                else { recipe.flipVertical.toggle() }
+                recipe.framing.origin.x = 1 - recipe.framing.maxX
+            }.frame(width: 44, height: 44)
+            Button("Rotate Left", systemImage: "rotate.left") {
+                guard isEnabled else { return }
+                onEditingChanged(true)
+                defer { onEditingChanged(false) }
+                let frame = recipe.framing
+                recipe.quarterTurns = (recipe.quarterTurns + 3) % 4
+                recipe.framing = CGRect(x: frame.minY, y: 1 - frame.maxX, width: frame.height, height: frame.width)
+                if let ratio = recipe.cropAspectRatio, ratio > 0 { recipe.cropAspectRatio = 1 / ratio }
+            }.frame(width: 44, height: 44)
+        }
+        .labelStyle(.iconOnly).buttonStyle(.plain)
+        .glassEffect(.regular, in: .capsule)
+    }
+}
+
 struct PhotoEditorToolPicker: View {
     @Binding private var selected: PhotoEditorTool?
     private let primary: (title: String, symbol: String)?
     var isEnabled: Bool
+    @ScaledMetric(relativeTo: .body) private var height = PhotoEditorMetrics.toolPickerHeight
 
     init(selected: Binding<PhotoEditorTool>, isEnabled: Bool = true) {
         _selected = Binding<PhotoEditorTool?>(get: { selected.wrappedValue }, set: { if let value = $0 { selected.wrappedValue = value } })
@@ -777,7 +961,7 @@ struct PhotoEditorToolPicker: View {
             if let primary { item(nil, title: primary.title, symbol: primary.symbol) }
             ForEach(PhotoEditorTool.allCases) { tool in item(tool, title: tool.title, symbol: tool.symbol) }
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 12)
         .padding(.vertical, 2)
         .glassEffect(.regular, in: .capsule)
         .disabled(!isEnabled)
@@ -786,11 +970,15 @@ struct PhotoEditorToolPicker: View {
     private func item(_ tool: PhotoEditorTool?, title: String, symbol: String) -> some View {
         Button { guard isEnabled else { return }; selected = tool } label: {
             VStack(spacing: 3) {
-                Image(systemName: symbol).font(.system(size: 20))
-                Text(title).font(.system(size: 11, weight: .medium))
+                Image(systemName: "arrowtriangle.down.fill").resizable().scaledToFit()
+                    .frame(width: 6, height: 4).foregroundStyle(.yellow)
+                    .opacity(selected == tool ? 1 : 0).accessibilityHidden(true)
+                Image(systemName: tool == .adjust && selected != tool ? "dial.low" : symbol)
+                    .font(.system(size: 20)).symbolRenderingMode(.monochrome)
+                Text(title).font(.caption2.weight(.medium)).lineLimit(1)
             }
-            .frame(minWidth: 48, minHeight: 52)
-            .foregroundStyle(selected == tool ? Color.yellow : Color.primary)
+            .frame(minWidth: 48, minHeight: height - 4)
+            .foregroundStyle(selected == tool ? Color.primary : Color.secondary)
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -825,14 +1013,14 @@ struct PhotoEditRulerSlider: View {
         ZStack {
             Canvas { context, size in
                 let span = max(1, size.width * 1.7)
-                for index in 0...100 {
+                for index in -50...150 {
                     let x = size.width / 2 + (CGFloat(index) / 100 - CGFloat(fraction)) * span
                     guard x >= 0, x <= size.width else { continue }
-                    let height: CGFloat = index.isMultiple(of: 10) ? 20 : index.isMultiple(of: 5) ? 14 : 8
+                    let height: CGFloat = 12
                     var tick = Path()
                     tick.move(to: CGPoint(x: x, y: (size.height - height) / 2))
                     tick.addLine(to: CGPoint(x: x, y: (size.height + height) / 2))
-                    context.stroke(tick, with: .color(.primary.opacity(index.isMultiple(of: 10) ? 0.6 : 0.3)), lineWidth: 1)
+                    context.stroke(tick, with: .color(.secondary.opacity(0.65)), style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
                 }
                 var marker = Path()
                 marker.move(to: CGPoint(x: size.width / 2, y: 7))
