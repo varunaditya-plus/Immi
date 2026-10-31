@@ -193,6 +193,11 @@ class AssetDetailRepository {
     }
 
     @MainActor
+    func shareOriginalFiles(_ ids: [String]) async -> [URL] {
+        await shareFiles(ids, preparingFile: { try await self.downloadFile($0, filename: $0, edited: false) })
+    }
+
+    @MainActor
     func shareFiles(_ ids: [String]) async -> [URL] {
         await shareFiles(ids, preparingFile: { try await self.shareFile($0) })
     }
@@ -228,11 +233,16 @@ class AssetDetailRepository {
 
     @MainActor
     func downloadCurrentFile(_ id: String, filename: String) async throws -> URL {
+        try await downloadFile(id, filename: filename, edited: true)
+    }
+
+    @MainActor
+    private func downloadFile(_ id: String, filename: String, edited: Bool) async throws -> URL {
         let context = api.session.snapshot
         let snapshotGeneration = LocalSnapshot.generation
         let download = try await api.rawFile(.init(
             path: "/assets/\(id)/original",
-            query: [.init(name: "edited", value: "true")]))
+            query: [.init(name: "edited", value: edited ? "true" : "false")]))
         defer { try? FileManager.default.removeItem(at: download.url) }
         try Task.checkCancellation()
         try api.checkCurrent(context)

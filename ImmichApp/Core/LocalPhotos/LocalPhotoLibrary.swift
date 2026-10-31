@@ -907,6 +907,22 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
         return (url, resource.originalFilename)
     }
 
+    nonisolated func exportFile(for id: String, unmodified: Bool = false) async -> (url: URL, filename: String)? {
+        guard !Task.isCancelled else { return nil }
+        let resource = await Task.detached(priority: .utility) {
+            guard let asset = Self.fetchAsset(id) else { return PHAssetResource?.none }
+            let resources = PHAssetResource.assetResources(for: asset)
+            let original: PHAssetResourceType = asset.mediaType == .video ? .video : .photo
+            let current: PHAssetResourceType = asset.mediaType == .video ? .fullSizeVideo : .fullSizePhoto
+            if !unmodified, let edited = resources.first(where: { $0.type == current }) { return edited }
+            return resources.first { $0.type == original }
+        }.value
+        guard !Task.isCancelled, let resource,
+              let url = await Self.writeTemporaryFile(resource, allowsNetworkFallback: true) else { return nil }
+        guard !Task.isCancelled else { try? FileManager.default.removeItem(at: url); return nil }
+        return (url, resource.originalFilename)
+    }
+
     /// Motion resource pasangan Live Photo.
     ///
     /// PhotoKit menyimpan Live Photo sebagai `.photo + .pairedVideo`. Asset
