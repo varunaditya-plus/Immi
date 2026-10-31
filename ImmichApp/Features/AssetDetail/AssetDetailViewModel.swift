@@ -30,7 +30,7 @@ final class AssetDetailViewModel {
     }
 
     private enum Mutation: Hashable {
-        case favorite, description, date, location, visibility, edits, delete
+        case favorite, description, date, location, visibility, delete
     }
 
     private struct MutationKey: Hashable {
@@ -405,37 +405,6 @@ final class AssetDetailViewModel {
                 return nil
             }
             return file
-        } catch {
-            reportActionError(Self.describe(error), id: id, selected: selected)
-            return nil
-        }
-    }
-
-    @discardableResult
-    func applyEdits(_ edits: [AssetEditCommand], to id: String) async -> Bool {
-        let mutation = beginMutation(id, kind: .edits)
-        do {
-            let accepted = try await performMutation(mutation) {
-                if edits.isEmpty {
-                    try await self.repo.removeEdits(from: id)
-                } else {
-                    try await self.repo.applyEdits(edits, to: id)
-                }
-            }
-            if accepted, let selected = selection, selected.id == id {
-                await load(selected)
-            }
-            return accepted
-        } catch {
-            reportMutationError(error, mutation)
-            return false
-        }
-    }
-
-    func edits(for id: String) async -> [AssetEditRecord]? {
-        let selected = selection
-        do {
-            return try await repo.edits(for: id)
         } catch {
             reportActionError(Self.describe(error), id: id, selected: selected)
             return nil

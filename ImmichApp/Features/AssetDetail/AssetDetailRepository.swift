@@ -1,39 +1,6 @@
 import Foundation
 import UniformTypeIdentifiers
 
-/// Satu operasi editor yang dipahami endpoint Immich `/assets/{id}/edits`.
-struct AssetEditCommand: Encodable, Sendable {
-    enum Payload: Sendable {
-        case crop(x: Int, y: Int, width: Int, height: Int)
-        case rotate(angle: Double)
-        case mirror(axis: String)
-    }
-
-    let payload: Payload
-
-    private enum CodingKeys: String, CodingKey { case action, parameters }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        switch payload {
-        case .crop(let x, let y, let width, let height):
-            struct Parameters: Encodable { let x: Int; let y: Int; let width: Int; let height: Int }
-            try container.encode("crop", forKey: .action)
-            try container.encode(
-                Parameters(x: x, y: y, width: width, height: height),
-                forKey: .parameters)
-        case .rotate(let angle):
-            struct Parameters: Encodable { let angle: Double }
-            try container.encode("rotate", forKey: .action)
-            try container.encode(Parameters(angle: angle), forKey: .parameters)
-        case .mirror(let axis):
-            struct Parameters: Encodable { let axis: String }
-            try container.encode("mirror", forKey: .action)
-            try container.encode(Parameters(axis: axis), forKey: .parameters)
-        }
-    }
-}
-
 struct AssetEditRecord: Decodable, Sendable {
     struct Parameters: Decodable, Sendable {
         let x: Int?
@@ -325,27 +292,6 @@ class AssetDetailRepository {
             return value.isEmpty ? nil : value
         }
         return nil
-    }
-
-    @MainActor
-    func applyEdits(_ edits: [AssetEditCommand], to id: String) async throws {
-        let context = api.session.snapshot
-        let snapshotGeneration = LocalSnapshot.generation
-        struct Body: Encodable { let edits: [AssetEditCommand] }
-        struct Response: Decodable { let assetId: String }
-        let _: Response = try await api.send(.json(
-            "/assets/\(id)/edits", method: .put, body: Body(edits: edits)))
-        try api.checkCurrent(context)
-        LocalSnapshot.remove(LocalSnapshot.Key.assetDetail(id), expectedGeneration: snapshotGeneration)
-    }
-
-    @MainActor
-    func removeEdits(from id: String) async throws {
-        let context = api.session.snapshot
-        let snapshotGeneration = LocalSnapshot.generation
-        try await api.sendVoid(.init(path: "/assets/\(id)/edits", method: .delete))
-        try api.checkCurrent(context)
-        LocalSnapshot.remove(LocalSnapshot.Key.assetDetail(id), expectedGeneration: snapshotGeneration)
     }
 
     func edits(for id: String) async throws -> [AssetEditRecord] {

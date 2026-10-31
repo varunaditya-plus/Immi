@@ -279,32 +279,6 @@ final class AssetMutationCacheTests: XCTestCase {
         XCTAssertEqual(try body(XCTUnwrap(MockURLProtocol.lastRequest))["force"] as? Bool, true)
     }
 
-    func testSuccessfulEditsAndRevertInvalidateOnlyTheirDetailSnapshot() async throws {
-        stub(status: 200, json: "{\"assetId\":\"\(ids[0])\"}")
-        try await repository.applyEdits([AssetEditCommand(payload: .crop(x: 0, y: 0, width: 100, height: 100))], to: ids[0])
-        XCTAssertNil(snapshot(ids[0]))
-        XCTAssertNotNil(snapshot(ids[1]))
-        LocalSnapshot.save(detail(ids[0]), for: LocalSnapshot.Key.assetDetail(ids[0]))
-        stub(status: 204)
-
-        try await repository.removeEdits(from: ids[0])
-
-        XCTAssertNil(snapshot(ids[0]))
-        XCTAssertNotNil(snapshot(ids[1]))
-        XCTAssertEqual(try XCTUnwrap(reopen().getCachedAsset(id: ids[0])).ratio, 1.5,
-            "Edit commands cannot replace original EXIF dimensions with guessed geometry")
-        XCTAssertEqual(MockURLProtocol.lastRequest?.url?.path, "/api/assets/\(ids[0])/edits")
-        XCTAssertEqual(MockURLProtocol.lastRequest?.httpMethod, "DELETE")
-    }
-
-    func testRejectedEditsKeepTheOfflineDetailSnapshot() async throws {
-        stub(status: 500)
-        await assertRejected { try await self.repository.applyEdits([], to: self.ids[0]) }
-        await assertRejected { try await self.repository.removeEdits(from: self.ids[0]) }
-        XCTAssertNotNil(snapshot(ids[0]))
-        XCTAssertNotNil(snapshot(ids[1]))
-    }
-
     func testMutationRevisionPublishesAfterPersistence() async throws {
         let changed = expectation(description: "mutation revision sees committed favorite")
         let observed = ObservedFavorite()

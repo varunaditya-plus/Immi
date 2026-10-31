@@ -142,37 +142,6 @@ class PhotoPreviewLoader {
         }
     }
 
-    /// Sumber editor harus selalu original. Memakai preview `edited=true`
-    /// kemudian mengirim koordinatnya terhadap original membuat crop kedua
-    /// meleset setelah foto pernah diedit sekali.
-    func originalImageForEditing(_ assetId: String) async -> UIImage? {
-        guard accountGeneration == LocalSnapshot.generation, !Task.isCancelled else { return nil }
-        if LocalPhotoLibrary.isLocal(assetId) {
-            let image = await LocalPhotoLibrary.shared.preview(
-                for: assetId,
-                size: CGSize(width: Self.maxPixelSize, height: Self.maxPixelSize))
-            return accountGeneration == LocalSnapshot.generation && !Task.isCancelled ? image : nil
-        }
-
-        let api = session.imageAPI
-        do {
-            let image = try await ImageCache.shared.image(
-                key: "\(assetId)-preview-original",
-                maxPixelSize: Self.maxPixelSize,
-                fetch: {
-                    try await api.rawData(.init(
-                        path: "/assets/\(assetId)/thumbnail",
-                        query: [
-                            .init(name: "size", value: "preview"),
-                            .init(name: "edited", value: "false"),
-                        ]))
-                })
-            return accountGeneration == LocalSnapshot.generation && !Task.isCancelled ? image : nil
-        } catch {
-            return nil
-        }
-    }
-
     /// URL streaming video beserta header autentikasinya.
     ///
     /// `AVPlayer` mengambil bytenya sendiri, di luar `APIClient` — jadi

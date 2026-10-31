@@ -340,30 +340,25 @@ final class AssetDetailAsyncTests: XCTestCase {
         XCTAssertEqual(cached(a.id)?.originalFileName, "updated.jpg")
     }
 
-    func testOffPageEditAndVisibilitySuccessRemoveOnlyTheirTargetSnapshot() async {
-        for isVisibility in [false, true] {
-            let a = asset("a-\(isVisibility)"), b = asset("b-\(isVisibility)")
-            let gate = DetailResultGate<Void>(started: expectation(description: "A mutation started"))
-            let repo = DetailRaceRepository()
-            repo.fetch = { id in id == a.id ? a : b }
-            repo.metadataUpdate = { id in XCTAssertEqual(id, a.id); try await gate.wait() }
-            let model = AssetDetailViewModel(repo: repo)
-            await model.load(a.id)
-            let action = Task {
-                if isVisibility { return await model.move(a.id, to: .archive) }
-                return await model.applyEdits([], to: a.id)
-            }
-            await fulfillment(of: [gate.started], timeout: 2)
-            await model.load(b.id)
-            gate.resolve(.success(()))
-            let accepted = await action.value
+    func testOffPageVisibilitySuccessRemovesOnlyItsTargetSnapshot() async {
+        let a = asset("a"), b = asset("b")
+        let gate = DetailResultGate<Void>(started: expectation(description: "A visibility mutation started"))
+        let repo = DetailRaceRepository()
+        repo.fetch = { id in id == a.id ? a : b }
+        repo.metadataUpdate = { id in XCTAssertEqual(id, a.id); try await gate.wait() }
+        let model = AssetDetailViewModel(repo: repo)
+        await model.load(a.id)
+        let action = Task { await model.move(a.id, to: .archive) }
+        await fulfillment(of: [gate.started], timeout: 2)
+        await model.load(b.id)
+        gate.resolve(.success(()))
+        let accepted = await action.value
 
-            XCTAssertTrue(accepted)
-            XCTAssertEqual(model.detail?.id, b.id)
-            XCTAssertEqual(repo.fetchRequests, [a.id, b.id])
-            XCTAssertNil(cached(a.id))
-            XCTAssertNotNil(cached(b.id))
-        }
+        XCTAssertTrue(accepted)
+        XCTAssertEqual(model.detail?.id, b.id)
+        XCTAssertEqual(repo.fetchRequests, [a.id, b.id])
+        XCTAssertNil(cached(a.id))
+        XCTAssertNotNil(cached(b.id))
     }
 
     func testReadStartedBeforeFavoriteCommitCannotRevertThatCommit() async throws {
@@ -730,7 +725,6 @@ private final class DetailRaceRepository: AssetDetailRepository {
     override func updateDate(_ id: String, to date: Date) async throws { try await metadataUpdate(id) }
     override func updateLocation(_ id: String, latitude: Double, longitude: Double) async throws { try await metadataUpdate(id) }
     override func setVisibility(_ id: String, to value: Visibility) async throws { try await metadataUpdate(id) }
-    override func removeEdits(from id: String) async throws { try await metadataUpdate(id) }
     override func delete(_ id: String) async throws { try await deletion(id) }
 }
 
