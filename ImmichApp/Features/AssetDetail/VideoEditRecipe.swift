@@ -19,7 +19,8 @@ struct VideoEditRecipe: Codable, Equatable, Sendable {
             trimStart = min(max(time, 0), max(0, end - gap))
         case .end:
             let gap = min(1 / frameRate, duration - trimStart)
-            trimEnd = min(max(time, trimStart + gap), duration)
+            let end = min(max(time, trimStart + gap), duration)
+            trimEnd = end == duration ? nil : end
         }
     }
 
