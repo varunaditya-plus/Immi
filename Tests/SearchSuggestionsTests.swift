@@ -80,6 +80,32 @@ final class SearchSuggestionsTests: XCTestCase {
             "Typing without the accent must still suggest février")
     }
 
+    func testMonthSuggestionsRequireACompleteExplicitYearWhileKeepingLocalizedPrefixes() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "UTC"))
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 11, day: 1)))
+        let cases: [(String, String, Int, [String])] = [
+            ("en_US", "se", 9, ["May 1", "May 24", "May 202", "202 May", "May +2024"]),
+            ("es_ES", "fe", 2, ["febrero 1", "febrero 24", "febrero 202", "202 febrero", "+2024 febrero"]),
+            ("fr_FR", "fev", 2, ["février 1", "février 24", "février 202", "202 février", "février +2024"]),
+        ]
+        for (locale, prefix, month, incomplete) in cases {
+            func suggestions(_ query: String) -> [SearchToken] {
+                SearchSuggestions.tokens(for: query, people: [], cities: [], states: [], countries: [], albums: [],
+                    now: now, calendar: calendar, locale: Locale(identifier: locale))
+            }
+            XCTAssertTrue(suggestions(prefix).contains(.date(.month(year: 2026, month: month))))
+            for query in ["\(prefix) 2024", "2024 \(prefix)"] {
+                XCTAssertTrue(suggestions(query).contains(.date(.month(year: 2024, month: month))), query)
+            }
+            for query in incomplete {
+                XCTAssertFalse(suggestions(query).contains {
+                    if case .date(.month) = $0 { true } else { false }
+                }, "An incomplete or day-like year must not suggest a different historical month: \(query)")
+            }
+        }
+    }
+
     func testRelativeDayPrefixesUseTheSuppliedClockAndCalendar() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))

@@ -121,7 +121,7 @@ enum SearchSuggestions {
             if monthWords.count == 1, let monthWord = monthWords.first, monthWord.count >= 2,
                words.count == 1 || (words.count == 2 && explicitYear != nil),
                explicitYear.map({ (1...9999).contains($0) }) ?? true,
-               allowPrefix || yearWord == nil || (yearWord?.count == 4 && yearWord?.allSatisfy(\.isNumber) == true) {
+               yearWord == nil || (yearWord?.count == 4 && yearWord?.allSatisfy(\.isNumber) == true) {
                 let matchesMonth = allowPrefix
                     ? (name.range(of: monthWord, options: [.anchored, .caseInsensitive, .diacriticInsensitive], locale: locale) != nil
                        || short.range(of: monthWord, options: [.anchored, .caseInsensitive, .diacriticInsensitive], locale: locale) != nil)
