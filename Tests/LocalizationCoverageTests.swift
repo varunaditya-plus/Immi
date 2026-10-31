@@ -44,6 +44,49 @@ final class LocalizationCoverageTests: XCTestCase {
         }
     }
 
+    func testPhotoVideoAndLiveEditingResourcesAreCompiledInEverySupportedLanguage() throws {
+        let keys = ["%@ of %@", "Aspect Ratio", "Auto", "Black Point", "Bounce", "Brightness", "Brilliance",
+            "Choose a valid video range and playback speed.", "Contrast", "Crop", "Definition",
+            "Discard Changes", "Discard Changes?", "Dramatic", "Dramatic Cool", "Dramatic Warm", "Edited Photo",
+            "Edits are saved on this device.", "End Time", "Exposure", "Filter Intensity", "Filters", "Flip",
+            "Freeform", "Highlights", "Horizontal", "Intensity", "Keep Editing", "Live", "Live Off",
+            "Live Photo Effect", "Lock Aspect Ratio", "Long Exposure", "Loop", "Loop Video", "Mono", "Mute",
+            "No Audio", "Noir", "Noise Reduction", "Original", "Original Photo", "Playback Options", "Playback Position",
+            "Playback Speed", "Preview Unavailable", "Redo", "Revert to Original", "Revert to Original?",
+            "Saturation", "Save as Video", "Saved edits could not be read. The original media is unchanged.",
+            "Shadows", "Sharpness", "Sign in to access your saved edits.", "Silvertone", "Square",
+            "Start New Edit", "Start Time", "Straighten", "The account changed. Open the editor again.",
+            "The edited photo could not be rendered.", "The edited video could not be saved.",
+            "The edits could not be saved. Please try again.", "The edits could not be saved. Try again.",
+            "The original media changed. Open the editor again.",
+            "The source changed after your last edit. Start again with the current photo? Your previous edit will only be replaced when you save.",
+            "These edits changed in another editor. Open the editor again.",
+            "These saved edits use an unsupported format. Update the app before changing them.",
+            "This photo could not be opened for editing.", "This photo has changed",
+            "This video cannot be exported in a supported format.", "This video could not be loaded.",
+            "This will remove the edits made on this device.", "This will remove the edits made to this photo.",
+            "Tint", "Undo", "Unlock Aspect Ratio", "Unmute", "Vertical", "Vibrance", "Vignette", "Vivid",
+            "Vivid Cool", "Vivid Warm", "Wallpaper", "Warmth"]
+        for language in languages {
+            let bundle = try localizedBundle(Bundle.main, language: language)
+            for key in keys { assertCompiled(key, in: bundle) }
+            let position = "00:12", duration = "00:30"
+            let progress = String(localized: "\(position) of \(duration)", bundle: bundle,
+                locale: Locale(identifier: language))
+            XCTAssertTrue(progress.contains(position), "\(language): \(progress)")
+            XCTAssertTrue(progress.contains(duration), "\(language): \(progress)")
+            XCTAssertFalse(progress.contains("%@"), "Playback progress must substitute both times")
+        }
+        let french = try localizedBundle(Bundle.main, language: "fr")
+        XCTAssertEqual(french.localizedString(forKey: "Lock Aspect Ratio", value: nil, table: nil),
+            "Verrouiller les proportions")
+        let persian = try localizedBundle(Bundle.main, language: "fa")
+        XCTAssertEqual(persian.localizedString(forKey: "Noise Reduction", value: nil, table: nil), "کاهش نویز")
+        let arabic = try localizedBundle(Bundle.main, language: "ar")
+        XCTAssertNotEqual(arabic.localizedString(forKey: "Edits are saved on this device.", value: nil, table: nil),
+            "Edits are saved on this device.")
+    }
+
     func testPhotosBrowsingAndAlbumControlsAreInEveryCompiledLocalization() throws {
         let keys = ["Collections", "All Items", "Recently Added", "Date Captured", "View Options",
             "Aspect Ratio Grid", "Edited", "Not in an Album", "Pinned", "New Folder", "Custom Order",
