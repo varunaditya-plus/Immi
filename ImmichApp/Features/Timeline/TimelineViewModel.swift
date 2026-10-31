@@ -186,6 +186,17 @@ final class TimelineViewModel {
             libraryOptions.filters.remove(.screenshots)
             libraryOptions.showsScreenshots = true
         }
+        if libraryOptions.filters.contains(.edited), let session = assetRepo?.session {
+            for asset in sources {
+                let edited = MediaEditingPipeline.shared.effectiveEdited(asset.id, fallback: values[asset.id]?.isEdited,
+                    session: session)
+                if edited != nil {
+                    var metadata = values[asset.id] ?? LibraryAssetMetadata()
+                    metadata.isEdited = edited
+                    values[asset.id] = metadata
+                }
+            }
+        }
         libraryAssets = LibraryPresentation.assets(sources, options: libraryOptions, metadata: values)
         librarySections = LibraryPresentation.sections(libraryAssets, sort: libraryOptions.sort)
         let chronological = libraryOptions.sort == .dateCaptured ? libraryAssets : libraryAssets.sorted {

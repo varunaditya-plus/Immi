@@ -188,11 +188,14 @@ final class PhotoSearchRepository: SearchRepository {
         if options.sortOrder == .recentlyAdded, assets.contains(where: { $0.addedAt == nil }) {
             throw PhotoSearchError.missingAddedDates
         }
-        if options.editedOnly, assets.contains(where: { $0.isEdited == nil }) {
+        if options.editedOnly, assets.contains(where: {
+            MediaEditingPipeline.shared.effectiveEdited($0.id, fallback: $0.isEdited, session: api.session) == nil
+        }) {
             throw PhotoSearchError.missingEditInformation
         }
         let metadata = Dictionary(uniqueKeysWithValues: assets.map {
-            ($0.id, LibraryAssetMetadata(addedAt: $0.addedAt, isEdited: $0.isEdited, isFavorite: $0.isFavorite))
+            ($0.id, LibraryAssetMetadata(addedAt: $0.addedAt, isEdited: options.editedOnly ? MediaEditingPipeline.shared.effectiveEdited($0.id, fallback: $0.isEdited,
+                session: api.session) : $0.isEdited, isFavorite: $0.isFavorite))
         })
         let ordered = LibraryPresentation.assets(assets.map(AssetLite.init), options: options.libraryOptions,
             metadata: metadata).reversed()
