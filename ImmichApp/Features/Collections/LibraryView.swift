@@ -1,3 +1,4 @@
+import UniformTypeIdentifiers
 import SwiftUI
 
 /// Daftar koleksi ala Photos: sebagian baris bisa dilipat dan memperlihatkan
@@ -323,7 +324,7 @@ struct LibraryView: View {
         let context = session.snapshot
         copyPreparation.start(ids: [asset.id], prepare: { _ in
             guard let file = await vm?.shareURL(for: asset) else { return [] }
-            return [.init(url: file, isVideo: asset.isVideo)]
+            return [.init(url: file, isVideo: PhotoExportService.contentType(of: file).conforms(to: .movie))]
         }, isAllowed: {
             modelGeneration == LocalSnapshot.generation && (try? api.checkCurrent(context)) != nil
                 && AssetVisibilityPolicy(scope: .timeline).allows(id: $0)

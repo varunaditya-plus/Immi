@@ -1,3 +1,4 @@
+import UniformTypeIdentifiers
 import SwiftUI
 
 /// Cara mengeluarkan foto dari koleksi TANPA menghapusnya dari perpustakaan.
@@ -1143,13 +1144,11 @@ struct PhotoCollectionScreen<Options: View>: View {
         guard ids.count == selectedIDs.count else { return }
         let api = APIClient(session: session)
         let context = session.snapshot
-        let media = Dictionary(ids.compactMap { id in asset(for: id).map { (id, $0.isVideo) } },
-            uniquingKeysWith: { _, current in current })
-        guard media.count == ids.count else { return }
+        guard Set(ids.compactMap { asset(for: $0)?.id }).count == ids.count else { return }
         copyPreparation.start(ids: ids, prepare: { ids in
             let urls = await shareURLs(ids)
             guard urls.count == ids.count else { TemporaryMediaStore.remove(urls); return [] }
-            return zip(ids, urls).map { MediaCopy.Source(url: $0.1, isVideo: media[$0.0] == true) }
+            return urls.map { MediaCopy.Source(url: $0, isVideo: PhotoExportService.contentType(of: $0).conforms(to: .movie)) }
         }, isAllowed: { (try? api.checkCurrent(context)) != nil && visibilityPolicy.allows(id: $0) },
             onError: { actionError.wrappedValue = $0 })
     }

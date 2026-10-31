@@ -1183,6 +1183,19 @@ final class TimelineViewModel {
             let localID = LocalPhotoLibrary.isLocal(asset.id)
                 ? LocalPhotoLibrary.localIdentifier(from: asset.id)
                 : manager.localIdentifier(forServerAsset: asset.id)
+            if let localID,
+               try MediaEditingPipeline.shared.savedEdit(for: asset.id, session: repository.session) != nil {
+                guard let file = try await MediaEditingPipeline.shared.exportDeviceFile(
+                    for: LocalPhotoLibrary.assetID(for: localID), session: repository.session) else {
+                    throw PhotoEditRenderError.unavailable
+                }
+                guard !Task.isCancelled, accountGeneration == LocalSnapshot.generation,
+                      policy.allows(id: asset.id), AssetServerIdentity.resolve(asset, using: manager) == nil else {
+                    TemporaryMediaStore.remove(file.url)
+                    throw CancellationError()
+                }
+                return file.url
+            }
             if let localID, let file = await localOriginalFile(LocalPhotoLibrary.assetID(for: localID)) {
                 defer { try? FileManager.default.removeItem(at: file.url) }
                 try Task.checkCancellation()

@@ -1,3 +1,4 @@
+import UniformTypeIdentifiers
 import SwiftUI
 
 /// Pembungkus supaya kumpulan id bisa dipakai `sheet(item:)`.
@@ -826,12 +827,11 @@ struct TimelineView: View {
     private func copyAssets(_ ids: [String]) {
         let api = APIClient(session: session), context = session.snapshot
         let assets = vm?.libraryAssets.filter { ids.contains($0.id) } ?? []
-        let media = Dictionary(assets.map { ($0.id, $0.isVideo) }, uniquingKeysWith: { _, value in value })
-        guard media.count == ids.count else { return }
+        guard Set(assets.map(\.id)).count == ids.count else { return }
         copyPreparation.start(ids: ids, prepare: { ids in
             let urls = await vm?.shareURLs(for: ids) ?? []
             guard urls.count == ids.count else { TemporaryMediaStore.remove(urls); return [] }
-            return zip(ids, urls).map { MediaCopy.Source(url: $0.1, isVideo: media[$0.0] == true) }
+            return urls.map { MediaCopy.Source(url: $0, isVideo: PhotoExportService.contentType(of: $0).conforms(to: .movie)) }
         }, isAllowed: { (try? api.checkCurrent(context)) != nil && AssetVisibilityPolicy(scope: .timeline).allows(id: $0) },
             onError: { vm?.actionError = $0 })
     }
