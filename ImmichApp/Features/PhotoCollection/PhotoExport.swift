@@ -272,10 +272,12 @@ enum PhotoExportService {
     }
 
     private static func metadataHasLocation(_ item: AVMetadataItem) -> Bool {
-        // QuickTime's user-data GPS key is ©xyz, without a searchable location word.
-        if item.identifier == .quickTimeUserDataLocationISO6709 { return true }
+        // User-data GPS keys use FourCCs without a searchable location word.
+        if item.identifier == .quickTimeUserDataLocationISO6709 || item.identifier == .identifier3GPUserDataLocation { return true }
         if item.keySpace == .quickTimeUserData,
            (item.key as? String == "©xyz" || (item.key as? NSNumber)?.uint32Value == 0xA978797A) { return true }
+        if item.keySpace == .isoUserData,
+           (item.key as? String == "loci" || (item.key as? NSNumber)?.uint32Value == 0x6C6F6369) { return true }
         let identity = (item.identifier?.rawValue ?? "") + " " + (item.key.map { String(describing: $0) } ?? "")
         return identity.lowercased().contains("location") || identity.lowercased().contains("gps")
             || identity.lowercased().contains("latitude") || identity.lowercased().contains("longitude")

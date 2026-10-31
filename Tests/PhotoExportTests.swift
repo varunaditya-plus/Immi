@@ -299,6 +299,42 @@ final class PhotoExportTests: XCTestCase {
         XCTAssertTrue(retainedMetadata.contains { $0.identifier == .quickTimeUserDataLocationISO6709 })
     }
 
+    func testLocationOffRemovesISOUserDataCoordinatesFromCurrentAndAutomaticMP4WithoutChangingTheSource() async throws {
+        let input = try await movie(codec: .h264, audio: true, fileType: .mp4, isoUserDataLocation: true)
+        let bytes = try Data(contentsOf: input)
+        let sourceMetadata = try await movieMetadata(AVURLAsset(url: input))
+        let coordinates = try XCTUnwrap(sourceMetadata.first { $0.identifier == .identifier3GPUserDataLocation })
+        XCTAssertEqual(coordinates.identifier?.rawValue, "uiso/loci")
+        let value = try await coordinates.load(.stringValue)
+        XCTAssertEqual(value, "+37.3317-122.0301+000.000/")
+        XCTAssertEqual(PhotoExportService.contentType(of: input), .mpeg4Movie)
+
+        for format in [PhotoExportOptions.Format.current, .automatic] {
+            let result = try await prepare(input, .init(format: format, includeLocation: false))
+
+            XCTAssertNotEqual(result.fileURL, input)
+            XCTAssertEqual(result.ownedURLs, [result.fileURL])
+            XCTAssertNil(result.compatibleURL)
+            XCTAssertEqual(PhotoExportService.contentType(of: result.fileURL), .mpeg4Movie)
+            let output = AVURLAsset(url: result.fileURL)
+            let metadata = try await movieMetadata(output)
+            XCTAssertFalse(metadata.contains { $0.identifier == .identifier3GPUserDataLocation })
+            for item in metadata {
+                let text = try await item.load(.stringValue)
+                XCTAssertFalse(text?.contains("37.3317") == true)
+            }
+            let video = try await videoCodecs(result.fileURL)
+            let audio = try await audioCodecs(result.fileURL)
+            let duration = try await output.load(.duration)
+            XCTAssertEqual(video, [kCMVideoCodecType_H264])
+            XCTAssertEqual(audio, [kAudioFormatMPEG4AAC])
+            XCTAssertEqual(CMTimeGetSeconds(duration), 1, accuracy: 0.05)
+        }
+        XCTAssertEqual(try Data(contentsOf: input), bytes)
+        let retainedMetadata = try await movieMetadata(AVURLAsset(url: input))
+        XCTAssertTrue(retainedMetadata.contains { $0.identifier == .identifier3GPUserDataLocation })
+    }
+
     func testAlreadyCancelledPreparationLeavesItsSourceAndNoGeneratedFiles() async throws {
         let input = try image(type: .tiff, location: true)
         let bytes = try Data(contentsOf: input)
@@ -429,13 +465,13 @@ final class PhotoExportTests: XCTestCase {
 
     private func movie(codec: AVVideoCodecType, location: Bool = false, timedLocation: Bool = false,
                        audio: Bool = false, fileType: AVFileType = .mov,
-                       userDataLocation: Bool = false) async throws -> URL {
+                       userDataLocation: Bool = false, isoUserDataLocation: Bool = false) async throws -> URL {
         let url = directory.appendingPathComponent("\(UUID()).\(fileType == .mp4 ? "mp4" : "mov")")
         let writer = try AVAssetWriter(outputURL: url, fileType: fileType)
         if location { writer.metadata = [coordinateMetadata()] }
-        if userDataLocation {
+        if userDataLocation || isoUserDataLocation {
             let coordinates = AVMutableMetadataItem()
-            coordinates.identifier = .quickTimeUserDataLocationISO6709
+            coordinates.identifier = isoUserDataLocation ? .identifier3GPUserDataLocation : .quickTimeUserDataLocationISO6709
             coordinates.dataType = kCMMetadataBaseDataType_UTF8 as String
             coordinates.value = "+37.3317-122.0301+000.000/" as NSString
             writer.metadata = [coordinates]
