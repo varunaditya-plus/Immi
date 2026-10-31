@@ -8,6 +8,8 @@ import SwiftUI
 /// panggilnya tidak terbaca lagi.
 struct SearchAssetActions {
     var share: (AssetLite) -> Void
+    var copy: ((AssetLite) -> Void)? = nil
+    var slideshow: ((AssetLite) -> Void)? = nil
     var toggleFavorite: (AssetLite) -> Void
     var archive: (AssetLite) -> Void
     var addToAlbum: (AssetLite) -> Void
@@ -149,6 +151,16 @@ struct SearchResultsGrid: View {
             },
         ]
 
+        if let copy = actions.copy {
+            items.insert(PhotoGridMenuAction(title: String(localized: "Copy"), systemImage: "document.on.document") {
+                copy(asset)
+            }, at: 0)
+        }
+        if let slideshow = actions.slideshow {
+            items.insert(PhotoGridMenuAction(title: String(localized: "Slideshow"), systemImage: "play.rectangle") {
+                slideshow(asset)
+            }, at: 1)
+        }
         if let deviceAction = DeviceCopyDeletion.menuAction(
             for: asset, request: { deviceDeleteID = $0 }) {
             items.append(deviceAction)

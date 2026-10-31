@@ -220,7 +220,8 @@ final class TimelineDeviceActionTests: XCTestCase {
         let fixture = try await fixture(includeUnuploaded: true)
         let view = TimelineView()
         let localMenu = view.menuActions(for: fixture.unuploadedID, fixture.model).map(\.title)
-        XCTAssertEqual(localMenu, [String(localized: "Share"), String(localized: "Delete")])
+        XCTAssertEqual(localMenu, [String(localized: "Copy"), String(localized: "Share"),
+            String(localized: "Slideshow"), String(localized: "Delete")])
         let mappedMenu = view.menuActions(for: fixture.mappedIDs[0], fixture.model).map(\.title)
         XCTAssertTrue(mappedMenu.contains(String(localized: "Favorite")))
         XCTAssertTrue(mappedMenu.contains(String(localized: "Archive")))
@@ -229,7 +230,8 @@ final class TimelineDeviceActionTests: XCTestCase {
         let mixed = view.selectionActions(for: [fixture.serverID, fixture.unuploadedID], fixture.model)
         XCTAssertNil(mixed.favorite)
         XCTAssertNil(mixed.archive)
-        XCTAssertTrue(mixed.menu.isEmpty)
+        XCTAssertEqual(mixed.menu.map(\.title), ["Copy", "Slideshow"],
+            "Device items keep media actions without unsupported server mutations")
         XCTAssertNotNil(mixed.share)
         XCTAssertNotNil(mixed.trashConfirmation)
         XCTAssertNil(mixed.trashConfirmation?.message,
@@ -237,7 +239,8 @@ final class TimelineDeviceActionTests: XCTestCase {
         let mapped = view.selectionActions(for: fixture.mappedIDs + [fixture.serverID], fixture.model)
         XCTAssertNotNil(mapped.favorite)
         XCTAssertNotNil(mapped.archive)
-        XCTAssertEqual(mapped.menu.count, 3)
+        XCTAssertEqual(mapped.menu.map(\.title).prefix(2), ["Copy", "Slideshow"])
+        XCTAssertEqual(mapped.menu.count, 5)
         XCTAssertNil(mapped.trashConfirmation?.message)
     }
 

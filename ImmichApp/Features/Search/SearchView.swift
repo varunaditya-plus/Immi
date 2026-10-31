@@ -19,10 +19,14 @@ struct SearchView: View {
     @State private var isSelecting = false
     @State private var selectedIDs: Set<String> = []
     @State private var sharePreparation = SharePreparation()
+    @State private var copyPreparation = MediaCopyPreparation()
+    @State private var slideshow: PhotoSlideshowPresentation?
     private var isPreparingShare: Bool { sharePreparation.isPreparing }
     @State private var isPerformingAction = false
     @State private var shareURLs: [URL] = []
     @State private var sharedAssetIDs: [String] = []
+    @State private var sharedSourceIDs: [String] = []
+    @State private var sharedRequestContext: SessionRequestContext?
     @State private var isSharePresented = false
     @State private var albumPicker: SelectedAssets?
     @State private var selectionLink: SharedLinkPresentation?
@@ -103,6 +107,7 @@ struct SearchView: View {
         .onDisappear {
             isSearchFocused = false
             sharePreparation.cancel()
+            copyPreparation.cancel()
         }
         // Keep searchable on the stack so the Search tab owns one bottom field,
         // including after the modal photo viewer returns.
@@ -256,7 +261,7 @@ struct SearchView: View {
                     else {
                         SearchResultsGrid(assets: vm.results, isSelecting: isSelecting, selectedIDs: selectedIDs,
                             actions: assetActions, onReachEnd: { Task { await vm.loadMore() } },
-                            onOpen: { _ in sharePreparation.cancel() })
+                            onOpen: { _ in sharePreparation.cancel(); copyPreparation.cancel() })
                     }
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) { paginationFooter(vm) }
@@ -399,9 +404,9 @@ struct SearchView: View {
     }
 
     private var selectionActions: SelectionActions {
-        let ids = Array(selectedIDs)
+        let ids = (vm?.results ?? []).filter { selectedIDs.contains($0.id) }.map(\.id)
         var actions = SelectionActions()
-        actions.isBusy = isPreparingShare || isPerformingAction || selectedIDs.isEmpty
+        actions.isBusy = isPreparingShare || copyPreparation.isPreparing || isPerformingAction || selectedIDs.isEmpty
         actions.share = { share(ids) }
         actions.favorite = {
             runSelection {
@@ -413,6 +418,10 @@ struct SearchView: View {
         actions.archive = { runSelection { await vm?.archive(ids) ?? false } }
         actions.trash = { pendingDelete = SelectedAssets(ids: ids) }
         actions.menu = [
+            SelectionMenuAction(title: "Copy", systemImage: "document.on.document") { copyAssets(ids) },
+            SelectionMenuAction(title: "Slideshow", systemImage: "play.rectangle") {
+                slideshow = PhotoSlideshowPresentation(assets: (vm?.results ?? []).filter { ids.contains($0.id) })
+            },
             SelectionMenuAction(title: "Share Link", systemImage: "link") {
                 createSharedLink(for: ids)
             },
@@ -429,6 +438,8 @@ struct SearchView: View {
     private var assetActions: SearchAssetActions {
         SearchAssetActions(
             share: { share([$0.id]) },
+            copy: { copyAssets([$0.id]) },
+            slideshow: { slideshow = PhotoSlideshowPresentation(assets: vm?.results ?? [], initialAssetID: $0.id) },
             toggleFavorite: { asset in
                 Task {
                     if await vm?.toggleFavorite(asset) == true { favoriteFeedback += 1 }
@@ -456,6 +467,8 @@ struct SearchView: View {
     }
 
     private func exitSelection() {
+        sharePreparation.cancel()
+        copyPreparation.cancel()
         isSelecting = false
         selectedIDs.removeAll()
     }
@@ -464,19 +477,36 @@ struct SearchView: View {
 
     private func share(_ ids: [String]) {
         guard !isSharePresented else { return }
-        sharePreparation.start(ids: ids, prepare: { await vm?.shareURLs(for: $0) ?? [] },
+        sharePreparation.start(ids: ids, session: session, prepare: { await vm?.shareURLs(for: $0) ?? [] },
             isAllowed: { visibilityPolicy.allows(id: $0) },
             onError: { vm?.actionError = $0 }) { urls in
             shareURLs = urls
             sharedAssetIDs = ids
+            sharedSourceIDs = sharePreparation.preparedSourceIDs
+            sharedRequestContext = sharePreparation.preparedContext
             isSharePresented = true
         }
+    }
+
+    private func copyAssets(_ ids: [String]) {
+        let api = APIClient(session: session), context = session.snapshot
+        let assets = vm?.results.filter { ids.contains($0.id) } ?? []
+        let media = Dictionary(assets.map { ($0.id, $0.isVideo) }, uniquingKeysWith: { _, value in value })
+        guard media.count == ids.count else { return }
+        copyPreparation.start(ids: ids, prepare: { ids in
+            let urls = await vm?.shareURLs(for: ids) ?? []
+            guard urls.count == ids.count else { TemporaryMediaStore.remove(urls); return [] }
+            return zip(ids, urls).map { MediaCopy.Source(url: $0.1, isVideo: media[$0.0] == true) }
+        }, isAllowed: { (try? api.checkCurrent(context)) != nil && visibilityPolicy.allows(id: $0) },
+            onError: { vm?.actionError = $0 })
     }
 
     private func cleanupPreparedShare() {
         TemporaryMediaStore.remove(shareURLs)
         shareURLs.removeAll()
         sharedAssetIDs.removeAll()
+        sharedSourceIDs.removeAll()
+        sharedRequestContext = nil
     }
 
     private func createSharedLink(for ids: [String]) {
@@ -510,7 +540,14 @@ struct SearchView: View {
         Color.clear
             .frame(width: 0, height: 0)
             .sheet(isPresented: $isSharePresented, onDismiss: cleanupPreparedShare) {
-                MultiShareSheet(urls: shareURLs)
+                PhotoShareSheet(urls: shareURLs, assetIDs: sharedAssetIDs,
+                    sourceIDs: sharedSourceIDs, requestContext: sharedRequestContext,
+                    isAllowed: { [policy = visibilityPolicy] in policy.allows(id: $0) })
+            }
+            .fullScreenCover(item: $slideshow) { selection in
+                PhotoSlideshowView(assets: selection.assets, initialAssetID: selection.initialAssetID) { asset in
+                    (await vm?.shareURLs(for: [asset.id]))?.first
+                }
             }
             .sheet(item: $albumPicker) { selection in
                 AlbumPickerLoader { album in

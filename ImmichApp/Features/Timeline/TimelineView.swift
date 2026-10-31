@@ -28,6 +28,7 @@ struct TimelineView: View {
     @State private var albumPickerAsset: AssetLite?
     @State private var selectedIDs: Set<String> = []
     @State private var sharePreparation = SharePreparation()
+    @State private var copyPreparation = MediaCopyPreparation()
     private var isPreparingSelectionShare: Bool { sharePreparation.isPreparing }
     @State private var isPerformingSelectionAction = false
     @State private var deviceSelectionRemoval: Task<Void, Never>?
@@ -35,6 +36,8 @@ struct TimelineView: View {
     @State private var selectionShareURLs: [URL] = []
     @State private var isSelectionSharePresented = false
     @State private var sharedAssetIDs: [String] = []
+    @State private var sharedSourceIDs: [String] = []
+    @State private var sharedRequestContext: SessionRequestContext?
     /// Naik satu setiap penghapusan yang dikonfirmasi server.
     @State private var deleteFeedback = 0
     /// Naik satu setiap favorit yang dikonfirmasi server.
@@ -55,6 +58,7 @@ struct TimelineView: View {
     @State private var libraryOptionsTask: Task<Void, Never>?
     @State private var contentWidth: CGFloat = 390
     @State private var showsMap = false
+    @State private var slideshow: PhotoSlideshowPresentation?
 
     /// Mode pilih dibagi dengan AppRouter karena picker compact iPhone hidup
     /// sebagai overlay di luar TimelineView.
@@ -129,7 +133,7 @@ struct TimelineView: View {
             guard let vm else { return }
             returnToNewest(vm)
         }
-        .onDisappear { sharePreparation.cancel(); libraryOptionsTask?.cancel() }
+        .onDisappear { sharePreparation.cancel(); copyPreparation.cancel(); libraryOptionsTask?.cancel() }
     }
 
     private var screen: some View {
@@ -167,9 +171,18 @@ struct TimelineView: View {
         .sheet(isPresented: $isSharePresented, onDismiss: {
             shareFileURL = nil
             sharedAssetIDs.removeAll()
+            sharedSourceIDs.removeAll()
+            sharedRequestContext = nil
         }) {
             if let url = shareFileURL {
-                ShareSheet(url: url)
+                PhotoShareSheet(urls: [url], assetIDs: sharedAssetIDs,
+                    sourceIDs: sharedSourceIDs, requestContext: sharedRequestContext,
+                    isAllowed: { AssetVisibilityPolicy(scope: .timeline).allows(id: $0) })
+            }
+        }
+        .fullScreenCover(item: $slideshow) { selection in
+            PhotoSlideshowView(assets: selection.assets, initialAssetID: selection.initialAssetID) { asset in
+                await vm?.shareURL(for: asset)
             }
         }
         .sheet(item: $albumPickerAsset) { asset in
@@ -180,8 +193,12 @@ struct TimelineView: View {
         .sheet(isPresented: $isSelectionSharePresented, onDismiss: {
             selectionShareURLs.removeAll()
             sharedAssetIDs.removeAll()
+            sharedSourceIDs.removeAll()
+            sharedRequestContext = nil
         }) {
-            MultiShareSheet(urls: selectionShareURLs)
+            PhotoShareSheet(urls: selectionShareURLs, assetIDs: sharedAssetIDs,
+                    sourceIDs: sharedSourceIDs, requestContext: sharedRequestContext,
+                isAllowed: { AssetVisibilityPolicy(scope: .timeline).allows(id: $0) })
         }
         .onChange(of: AssetVisibilityPolicy(scope: .timeline).state) { _, _ in
             if !sharedAssetIDs.allSatisfy({ AssetVisibilityPolicy(scope: .timeline).allows(id: $0) }) {
@@ -327,7 +344,7 @@ struct TimelineView: View {
                 padsFirstRow: !aspectRatioGrid),
             isSelecting: isSelectingBinding,
             selectedIDs: $selectedIDs,
-            onOpen: { _ in sharePreparation.cancel() },
+            onOpen: { _ in sharePreparation.cancel(); copyPreparation.cancel() },
             detailScreen: { id in detailScreen(for: id, vm) },
             menuActions: { id in menuActions(for: id, vm) },
             initialContentReady: initialNewestContentReady,
@@ -383,6 +400,9 @@ struct TimelineView: View {
     ) -> [PhotoGridMenuAction] {
         guard let asset = vm.asset(for: id) else { return [] }
         var actions: [PhotoGridMenuAction] = [
+            PhotoGridMenuAction(title: String(localized: "Copy"), systemImage: "document.on.document") {
+                copyAssets([asset.id])
+            },
             PhotoGridMenuAction(
                 title: String(localized: "Share"),
                 systemImage: "square.and.arrow.up",
@@ -391,6 +411,9 @@ struct TimelineView: View {
                 shareAsset(asset, vm)
             },
         ]
+        actions.append(PhotoGridMenuAction(title: String(localized: "Slideshow"), systemImage: "play.rectangle") {
+            slideshow = PhotoSlideshowPresentation(assets: vm.libraryAssets, initialAssetID: asset.id)
+        })
         if vm.serverAssetIDs(for: [asset.id]) != nil {
             actions.append(contentsOf: [
                 PhotoGridMenuAction(
@@ -630,7 +653,7 @@ struct TimelineView: View {
     /// Aksi mode pilih untuk linimasa.
     private var selectionActions: SelectionActions {
         guard let vm else { return SelectionActions() }
-        return selectionActions(for: Array(selectedIDs), vm)
+        return selectionActions(for: vm.libraryAssets.filter { selectedIDs.contains($0.id) }.map(\.id), vm)
     }
 
     func selectionActions(for ids: [String], _ vm: TimelineViewModel) -> SelectionActions {
@@ -638,6 +661,7 @@ struct TimelineView: View {
         let localIDs = DeviceCopyDeletion.localIdentifiers(for: selectedAssets)
         var actions = SelectionActions()
         actions.isBusy = isPreparingSelectionShare
+            || copyPreparation.isPreparing
             || isPerformingSelectionAction
             || isRemovingDeviceSelection
             || ids.isEmpty
@@ -679,6 +703,10 @@ struct TimelineView: View {
                 },
             ]
         }
+        actions.menu.insert(SelectionMenuAction(title: "Copy", systemImage: "document.on.document") { copyAssets(ids) }, at: 0)
+        actions.menu.insert(SelectionMenuAction(title: "Slideshow", systemImage: "play.rectangle") {
+            slideshow = PhotoSlideshowPresentation(assets: vm.libraryAssets.filter { ids.contains($0.id) })
+        }, at: 1)
         if !localIDs.isEmpty {
             actions.menu.append(SelectionMenuAction(
                 title: removeFromDeviceTitle(localIDs.count),
@@ -748,6 +776,8 @@ struct TimelineView: View {
     // MARK: - Aksi seleksi
 
     private func exitSelection() {
+        sharePreparation.cancel()
+        copyPreparation.cancel()
         timelineNavigation.setSelecting(false)
         selectedIDs.removeAll()
     }
@@ -781,14 +811,29 @@ struct TimelineView: View {
 
     private func shareSelection() {
         guard !isSharePresented, !isSelectionSharePresented else { return }
-        let ids = Array(selectedIDs)
-        sharePreparation.start(ids: ids, prepare: { await vm?.shareURLs(for: $0) ?? [] },
+        let ids = (vm?.libraryAssets ?? []).filter { selectedIDs.contains($0.id) }.map(\.id)
+        sharePreparation.start(ids: ids, session: session, prepare: { await vm?.shareURLs(for: $0) ?? [] },
             isAllowed: { AssetVisibilityPolicy(scope: .timeline).allows(id: $0) },
             onError: { vm?.actionError = $0 }) { urls in
             selectionShareURLs = urls
             sharedAssetIDs = ids
+            sharedSourceIDs = sharePreparation.preparedSourceIDs
+            sharedRequestContext = sharePreparation.preparedContext
             isSelectionSharePresented = true
         }
+    }
+
+    private func copyAssets(_ ids: [String]) {
+        let api = APIClient(session: session), context = session.snapshot
+        let assets = vm?.libraryAssets.filter { ids.contains($0.id) } ?? []
+        let media = Dictionary(assets.map { ($0.id, $0.isVideo) }, uniquingKeysWith: { _, value in value })
+        guard media.count == ids.count else { return }
+        copyPreparation.start(ids: ids, prepare: { ids in
+            let urls = await vm?.shareURLs(for: ids) ?? []
+            guard urls.count == ids.count else { TemporaryMediaStore.remove(urls); return [] }
+            return zip(ids, urls).map { MediaCopy.Source(url: $0.1, isVideo: media[$0.0] == true) }
+        }, isAllowed: { (try? api.checkCurrent(context)) != nil && AssetVisibilityPolicy(scope: .timeline).allows(id: $0) },
+            onError: { vm?.actionError = $0 })
     }
 
     private func deleteSelection() {
@@ -828,13 +873,15 @@ struct TimelineView: View {
 
     private func shareAsset(_ asset: AssetLite, _ vm: TimelineViewModel) {
         guard !isSharePresented, !isSelectionSharePresented else { return }
-        sharePreparation.start(ids: [asset.id], prepare: { _ in
+        sharePreparation.start(ids: [asset.id], session: session, prepare: { _ in
             if let url = await vm.shareURL(for: asset) { return [url] }
             return []
         }, isAllowed: { AssetVisibilityPolicy(scope: .timeline).allows(id: $0) },
             onError: { vm.actionError = $0 }) { urls in
             shareFileURL = urls.first
             sharedAssetIDs = [asset.id]
+            sharedSourceIDs = sharePreparation.preparedSourceIDs
+            sharedRequestContext = sharePreparation.preparedContext
             isSharePresented = true
         }
     }
