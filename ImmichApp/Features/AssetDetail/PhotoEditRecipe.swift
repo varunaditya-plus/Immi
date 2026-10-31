@@ -14,7 +14,7 @@ enum PhotoEditorTool: String, CaseIterable, Identifiable, Sendable {
     }
     var symbol: String {
         switch self {
-        case .adjust: "dial.low"
+        case .adjust: "dial.low.fill"
         case .filters: "camera.filters"
         case .crop: "crop.rotate"
         }
@@ -53,22 +53,22 @@ enum PhotoAdjustment: String, Codable, CaseIterable, Identifiable, Sendable {
     }
     var symbol: String {
         switch self {
-        case .auto: "wand.and.stars"
+        case .auto: "wand.and.stars.inverse"
         case .exposure: "plusminus.circle"
-        case .brilliance: "circle.lefthalf.filled"
-        case .highlights: "sun.max"
-        case .shadows: "circle.bottomhalf.filled"
+        case .brilliance: "swirl.circle.righthalf.filled"
+        case .highlights: "circle.lefthalf.striped.horizontal.inverse"
+        case .shadows: "circle.lefthalf.filled.righthalf.striped.horizontal.inverse"
         case .contrast: "circle.righthalf.filled"
-        case .brightness: "sun.min"
+        case .brightness: "sun.min.fill"
         case .blackPoint: "circle.fill"
-        case .saturation: "drop.fill"
-        case .vibrance: "rainbow"
+        case .saturation: "circle.fill"
+        case .vibrance: "lightspectrum.horizontal"
         case .warmth: "thermometer.medium"
         case .tint: "drop.halffull"
-        case .sharpness: "triangle"
-        case .definition: "circle.dotted.circle"
-        case .noiseReduction: "circle.dotted"
-        case .vignette: "circle.dashed.inset.filled"
+        case .sharpness: "righttriangle.fill"
+        case .definition: "righttriangle.split.diagonal"
+        case .noiseReduction: "circle.bottomrighthalf.pattern.checkered"
+        case .vignette: "circle.dotted.circle"
         }
     }
 }
