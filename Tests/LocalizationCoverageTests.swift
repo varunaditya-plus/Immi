@@ -131,6 +131,43 @@ final class LocalizationCoverageTests: XCTestCase {
         XCTAssertEqual(french.localizedString(forKey: "Load More", value: nil, table: nil), "Charger plus")
     }
 
+    func testSharingOptionsAndSlideshowAreInEveryCompiledLocalization() throws {
+        let keys = [
+            "%lld Photos Selected", "%lld Videos Selected", "%lld of %lld",
+            "1 Photo Selected", "1 Video Selected", "Automatic",
+            "Automatic lets the destination choose a format. Current keeps the file format. Most Compatible uses JPEG, PNG, or H.264.", "Copy", "Copy Items",
+            "Copy Photo", "Copy Photos", "Copy Video",
+            "Could not convert this photo or video for sharing.", "Could not copy these items.", "Could not remove location information from this file.",
+            "Current", "Export Unmodified Original", "Export Unmodified Originals",
+            "Format", "Include", "Item %lld",
+            "Location Is Included", "Location Is Not Included", "Most Compatible",
+            "Next", "Options", "Pause",
+            "Play", "Previous", "Replay",
+            "Slideshow", "Some items could not be prepared. Only the available items are selected.", "Some items could not be prepared. Please try again.",
+            "This photo or video format cannot be shared.", "Unmodified originals include their original metadata. Turn on Location to export them."
+        ]
+        for language in ["en"] + languages {
+            let bundle = try localizedBundle(Bundle.main, language: language)
+            for key in keys { assertCompiled(key, in: bundle) }
+        }
+        let french = try localizedBundle(Bundle.main, language: "fr")
+        XCTAssertEqual(french.localizedString(forKey: "Export Unmodified Original", value: nil, table: nil),
+            "Exporter l’original non modifié")
+        XCTAssertEqual(String(localized: "\(2) of \(7)", bundle: french, locale: Locale(identifier: "fr")), "2 sur 7")
+        let arabic = try localizedBundle(Bundle.main, language: "ar")
+        XCTAssertEqual(String(localized: "\(2) Photos Selected", bundle: arabic, locale: Locale(identifier: "ar")),
+            "تم تحديد صورتين")
+        let polish = try localizedBundle(Bundle.main, language: "pl")
+        for (count, expected) in [(2, "zdjęcia"), (5, "zdjęć")] {
+            let value = String(localized: "\(count) Photos Selected", bundle: polish, locale: Locale(identifier: "pl"))
+            XCTAssertTrue(value.contains(expected), value)
+            XCTAssertTrue(value.contains(String(count)), value)
+        }
+        let bengali = try localizedBundle(Bundle.main, language: "bn")
+        let progress = String(localized: "\(2) of \(7)", bundle: bengali, locale: Locale(identifier: "en"))
+        XCTAssertEqual(progress, "7টির মধ্যে 2টি", "A translated progress label must retain ordinal and total meaning")
+    }
+
     func testSettingsCountsChooseEnglishAndRussianPluralForms() throws {
         let english = try localizedBundle(Bundle.main, language: "en")
         XCTAssertEqual(SettingsView.assetCounts(images: 1, videos: 2, bundle: english,
