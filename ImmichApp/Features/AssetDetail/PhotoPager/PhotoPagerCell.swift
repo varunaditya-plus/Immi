@@ -39,6 +39,9 @@ final class PhotoPagerCell: UICollectionViewCell {
 
     private let scrollView = LayoutReportingScrollView()
     private let imageView = UIImageView()
+    private var imageAnalysis: PhotoImageAnalysis?
+    private var imageAnalysisActive = false
+    private var analyzableImage: UIImage?
 
     private var loadTask: Task<Void, Never>?
     private var currentAssetID: String?
@@ -184,12 +187,14 @@ final class PhotoPagerCell: UICollectionViewCell {
         let doubleTap = UITapGestureRecognizer(
             target: self, action: #selector(handleDoubleTap(_:)))
         doubleTap.numberOfTapsRequired = 2
+        doubleTap.delegate = self
         scrollView.addGestureRecognizer(doubleTap)
         self.doubleTap = doubleTap
 
         let singleTap = UITapGestureRecognizer(
             target: self, action: #selector(handleSingleTap))
         singleTap.numberOfTapsRequired = 1
+        singleTap.delegate = self
         // Ketukan tunggal menunggu ketukan ganda gagal; tanpa ini toolbar
         // berkedip setiap kali foto di-zoom lewat dua ketukan.
         singleTap.require(toFail: doubleTap)
@@ -351,6 +356,9 @@ final class PhotoPagerCell: UICollectionViewCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        imageAnalysisActive = false
+        analyzableImage = nil
+        imageAnalysis?.clear()
         loadTask?.cancel()
         loadTask = nil
         livePhotoDetectionTask?.cancel()
@@ -378,6 +386,38 @@ final class PhotoPagerCell: UICollectionViewCell {
         scrollView.setZoomScale(1, animated: false)
     }
 
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        updateImageAnalysis()
+    }
+
+    func setImageAnalysisActive(_ active: Bool) {
+        imageAnalysisActive = active
+        updateImageAnalysis()
+    }
+
+    func setImageAnalyzer(_ analyzer: any PhotoImageAnalyzing) {
+        imageAnalysis?.clear()
+        imageAnalysis = PhotoImageAnalysis(imageView: imageView, analyzer: analyzer,
+            onForeground: { [weak self] in self?.updateImageAnalysis() })
+    }
+
+    private func updateImageAnalysis() {
+        guard imageAnalysisActive, !isVideo,
+              livePhotoVideoID == nil, localLivePhotoAssetID == nil else {
+            imageAnalysis?.clear()
+            return
+        }
+        if imageAnalysis == nil {
+            imageAnalysis = PhotoImageAnalysis(imageView: imageView,
+                onForeground: { [weak self] in self?.updateImageAnalysis() })
+        }
+        imageAnalysis?.update(image: analyzableImage, assetID: currentAssetID,
+            generation: accountGeneration, isAllowed: { [weak self] in
+                self?.imageAnalysisActive == true && self?.isPlaybackContextCurrent == true
+            })
+    }
+
     // MARK: - Isi
 
     func configure(with asset: AssetLite, loader: PhotoPreviewLoader) {
@@ -400,6 +440,7 @@ final class PhotoPagerCell: UICollectionViewCell {
             livePhotoDetectionTask = nil
             livePhotoHint = nil
             stopPlayback()
+            imageAnalysis?.clear()
         }
         currentAssetID = asset.id
         accountGeneration = LocalSnapshot.generation
@@ -415,8 +456,8 @@ final class PhotoPagerCell: UICollectionViewCell {
 
         // Yang sudah ada di memori dipasang seketika — termasuk thumbnail
         // seukuran grid kalau versi tajamnya belum datang.
-        setImage(loader.cachedImage(for: asset.id)
-            ?? ThumbHash.placeholder(for: asset.thumbhash))
+        let cached = loader.cachedImage(for: asset.id)
+        setImage(cached ?? ThumbHash.placeholder(for: asset.thumbhash), isAnalyzable: cached != nil)
 
         guard !loader.hasPreview(for: asset.id) else { return }
         startLoad(asset.id, loader: loader)
@@ -448,6 +489,7 @@ final class PhotoPagerCell: UICollectionViewCell {
         }
         livePhotoVideoID = videoID
         updateLiveBadgeVisibility(animated: true)
+        updateImageAnalysis()
 
         guard localLivePhotoAssetID == nil,
               livePhotoDetectionTask == nil,
@@ -466,6 +508,7 @@ final class PhotoPagerCell: UICollectionViewCell {
             guard let matchedID else { return }
             self.localLivePhotoAssetID = matchedID
             self.updateLiveBadgeVisibility(animated: true)
+            self.updateImageAnalysis()
         }
     }
 
@@ -535,12 +578,14 @@ final class PhotoPagerCell: UICollectionViewCell {
     ///
     /// Gambarnya sendiri selalu tahu rasionya. Metadata cukup jadi tebakan awal
     /// sebelum gambar apa pun ada.
-    private func setImage(_ image: UIImage?) {
+    private func setImage(_ image: UIImage?, isAnalyzable: Bool = true) {
         imageView.image = image
+        analyzableImage = isAnalyzable ? image : nil
         if let image, image.size.width > 0, image.size.height > 0 {
             imageAspect = image.size.width / image.size.height
         }
         setNeedsLayoutFit()
+        updateImageAnalysis()
     }
 
     func apply(_ rules: PhotoPagerLayout) {
@@ -649,6 +694,7 @@ final class PhotoPagerCell: UICollectionViewCell {
             imageView.layer.borderColor = UIColor.systemGray
                 .withAlphaComponent(0.35).cgColor
             centerContent()
+            imageAnalysis?.layoutDidChange()
         }
 
         if shouldAnimate {
@@ -1472,6 +1518,7 @@ extension PhotoPagerCell: UIScrollViewDelegate {
         guard !isRefitting else { return }
         centerContent()
         reportZoom()
+        imageAnalysis?.layoutDidChange()
     }
 
     func scrollViewDidEndZooming(
@@ -1487,6 +1534,11 @@ extension PhotoPagerCell: UIScrollViewDelegate {
 // MARK: - Koordinasi gesture
 
 extension PhotoPagerCell: UIGestureRecognizerDelegate {
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        guard gestureRecognizer is UITapGestureRecognizer else { return true }
+        return imageAnalysis?.handlesTouch(at: touch.location(in: imageView)) != true
+    }
+
     func gestureRecognizer(
         _ gestureRecognizer: UIGestureRecognizer,
         shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer

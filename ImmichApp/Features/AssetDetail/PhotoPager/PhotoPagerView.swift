@@ -78,6 +78,11 @@ struct PhotoPagerView: UIViewControllerRepresentable {
         // Pemutar tidak boleh menunggu sel dilepas dari memori karena audionya
         // akan terus terdengar di layar sebelumnya selama jeda itu.
         controller.stopAllPlayback()
+        controller.stopImageAnalysis()
+        controller.onPageChanged = nil
+        controller.onZoomChanged = nil
+        controller.onTap = nil
+        controller.onScrollProgress = nil
     }
 
     private func bind(_ controller: PhotoPagerController) {
@@ -92,9 +97,13 @@ struct PhotoPagerView: UIViewControllerRepresentable {
 @MainActor
 final class PhotoPagerController: UIViewController {
     var visibilityPolicy = AssetVisibilityPolicy() {
-        didSet { loader.visibilityPolicy = visibilityPolicy }
+        didSet {
+            loader.visibilityPolicy = visibilityPolicy
+            updateImageAnalysisActivation()
+        }
     }
     private let loader: PhotoPreviewLoader
+    private let imageAnalyzer: (any PhotoImageAnalyzing)?
 
     private var collectionView: UICollectionView!
     private var assets: [AssetLite] = []
@@ -111,6 +120,7 @@ final class PhotoPagerController: UIViewController {
     /// Penjaga supaya lompatan ke halaman awal hanya sekali, dan hanya setelah
     /// ukurannya nyata.
     private var hasPositioned = false
+    private var isVisibleForImageAnalysis = false
     var onPageChanged: ((AssetLite) -> Void)?
     var onZoomChanged: ((Bool) -> Void)?
     var onTap: (() -> Void)?
@@ -118,8 +128,9 @@ final class PhotoPagerController: UIViewController {
     /// Bar kontrol video; dipegang lemah karena ia hidup di sisi SwiftUI.
     weak var playbackObserver: (any PhotoPlaybackObserver)?
 
-    init(loader: PhotoPreviewLoader) {
+    init(loader: PhotoPreviewLoader, imageAnalyzer: (any PhotoImageAnalyzing)? = nil) {
         self.loader = loader
+        self.imageAnalyzer = imageAnalyzer
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -164,10 +175,17 @@ final class PhotoPagerController: UIViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        stopImageAnalysis()
         // `dismantleUIViewController` adalah pagar terakhir saat representable
         // dibuang. Ini menghentikan audio lebih awal, tepat ketika layar detail
         // mulai meninggalkan layar selama transisi dismiss.
         stopAllPlayback()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        isVisibleForImageAnalysis = true
+        updateImageAnalysisActivation()
     }
 
     override func viewDidLayoutSubviews() {
@@ -186,6 +204,7 @@ final class PhotoPagerController: UIViewController {
         }
 
         positionAtStartIfNeeded()
+        updateImageAnalysisActivation()
     }
 
     // MARK: - Data
@@ -231,6 +250,7 @@ final class PhotoPagerController: UIViewController {
             // Dipilih dari strip thumbnail, bukan diusap: pagernya yang menyusul.
             scrollToCurrent(animated: false)
         }
+        updateImageAnalysisActivation()
     }
 
     func apply(layout newLayout: PhotoPagerLayout, isPagingEnabled: Bool) {
@@ -313,6 +333,7 @@ final class PhotoPagerController: UIViewController {
         let offset = CGPoint(
             x: CGFloat(currentIndex) * collectionView.bounds.width, y: 0)
         collectionView.setContentOffset(offset, animated: animated)
+        updateImageAnalysisActivation()
     }
 
     private func reportPageIfChanged() {
@@ -358,6 +379,31 @@ final class PhotoPagerController: UIViewController {
             cell.stopPlayback()
         }
         reportPlaybackState()
+    }
+
+    func stopImageAnalysis() {
+        isVisibleForImageAnalysis = false
+        deactivateVisibleImageAnalysis()
+    }
+
+    private func deactivateVisibleImageAnalysis() {
+        guard isViewLoaded else { return }
+        for case let cell as PhotoPagerCell in collectionView.visibleCells {
+            cell.setImageAnalysisActive(false)
+        }
+    }
+
+    private func updateImageAnalysisActivation() {
+        guard isViewLoaded else { return }
+        for case let cell as PhotoPagerCell in collectionView.visibleCells {
+            let active = collectionView.indexPath(for: cell)?.item == currentIndex
+            cell.setImageAnalysisActive(active && canAnalyzeCurrentImage)
+        }
+    }
+
+    private var canAnalyzeCurrentImage: Bool {
+        isVisibleForImageAnalysis && hasPositioned && view.window != nil
+            && !collectionView.isDragging && !collectionView.isDecelerating
     }
 
     // MARK: - Kendali video
@@ -413,6 +459,7 @@ final class PhotoPagerController: UIViewController {
         for case let cell as PhotoPagerCell in collectionView.visibleCells {
             cell.retryIfNeeded(loader: loader)
         }
+        updateImageAnalysisActivation()
 
         let page = visiblePage
         guard page >= 0 else { return }
@@ -442,8 +489,10 @@ extension PhotoPagerController: UICollectionViewDataSource {
               assets.indices.contains(indexPath.item)
         else { return cell }
 
+        if let imageAnalyzer { pageCell.setImageAnalyzer(imageAnalyzer) }
         pageCell.configure(with: assets[indexPath.item], loader: loader)
         pageCell.apply(layoutRules)
+        pageCell.setImageAnalysisActive(indexPath.item == currentIndex && canAnalyzeCurrentImage)
         pageCell.onZoomChanged = { [weak self] zoomed, blocksPaging in
             self?.handleZoomChanged(
                 zoomed,
@@ -464,6 +513,11 @@ extension PhotoPagerController: UICollectionViewDataSource {
 // MARK: - Delegate
 
 extension PhotoPagerController: UICollectionViewDelegate {
+    func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell,
+                        forItemAt indexPath: IndexPath) {
+        (cell as? PhotoPagerCell)?.setImageAnalysisActive(indexPath.item == currentIndex && canAnalyzeCurrentImage)
+    }
+
     func collectionView(
         _ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell,
         forItemAt indexPath: IndexPath
@@ -471,6 +525,7 @@ extension PhotoPagerController: UICollectionViewDelegate {
         // Offscreen cells can remain retained without prepareForReuse, and
         // visibleCells no longer includes them during the final dismiss pass.
         (cell as? PhotoPagerCell)?.stopPlayback()
+        (cell as? PhotoPagerCell)?.setImageAnalysisActive(false)
     }
 
     // Pager sengaja TIDAK berdetak: ketukan haptic hanya milik strip thumbnail,
@@ -490,6 +545,7 @@ extension PhotoPagerController: UICollectionViewDelegate {
     }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        deactivateVisibleImageAnalysis()
         // Hentikan sejak jari mulai menggeser, bukan setelah deselerasi selesai.
         // Dengan membongkar item, kembali ke video ini selalu mulai dari awal.
         stopAllPlayback()

@@ -41,6 +41,10 @@ struct PhotoFilmstripView: UIViewControllerRepresentable {
         return controller
     }
 
+    static func dismantleUIViewController(_ controller: PhotoFilmstripController, coordinator: ()) {
+        controller.onSelect = nil
+    }
+
     func updateUIViewController(_ controller: PhotoFilmstripController, context: Context) {
         controller.visibilityPolicy = visibilityPolicy
         controller.onSelect = onSelect
