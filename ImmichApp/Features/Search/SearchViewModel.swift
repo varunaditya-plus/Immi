@@ -269,7 +269,7 @@ final class SearchViewModel {
     func setTokens(_ tokens: [SearchToken]) {
         guard isCurrent else { return }
         var updated = SearchFilters()
-        for token in tokens { apply(token, to: &updated) }
+        for token in tokens { _ = apply(token, to: &updated) }
         guard updated != filters else { filters = updated; return }
         filters = updated
         scheduleSearch()
@@ -279,7 +279,9 @@ final class SearchViewModel {
     func applySuggestion(_ token: SearchToken, consuming query: String, now: Date = .now,
                          calendar: Calendar = .current, locale: Locale = .current) -> String {
         guard isCurrent else { return searchText }
-        apply(token, to: &filters)
+        var updated = filters
+        guard apply(token, to: &updated) else { return searchText }
+        filters = updated
         if searchText == query {
             searchText = SearchSuggestions.remainingQuery(query, after: token, now: now, calendar: calendar, locale: locale)
         }
@@ -300,20 +302,23 @@ final class SearchViewModel {
         return applySuggestion(token, consuming: text, now: now, calendar: calendar, locale: locale)
     }
 
-    private func apply(_ token: SearchToken, to filters: inout SearchFilters) {
+    private func apply(_ token: SearchToken, to filters: inout SearchFilters) -> Bool {
         switch token {
         case .person(let candidate):
             let person = people.first { $0.id == candidate.id } ?? self.filters.people.first { $0.id == candidate.id }
-            if let person, !person.isHidden, !filters.people.contains(where: { $0.id == person.id }) { filters.people.append(person) }
+            guard let person, !person.isHidden else { return false }
+            if !filters.people.contains(where: { $0.id == person.id }) { filters.people.append(person) }
         case .city(let city): filters.city = city
         case .state(let state): filters.state = state
         case .country(let country): filters.country = country
         case .date(let date): filters.dateRange = date
         case .media(let media): filters.mediaType = media
         case .album(let candidate):
-            filters.album = albums.first { $0.id == candidate.id }
-                ?? (self.filters.album?.id == candidate.id ? self.filters.album : nil)
+            guard let album = albums.first(where: { $0.id == candidate.id })
+                ?? (self.filters.album?.id == candidate.id ? self.filters.album : nil) else { return false }
+            filters.album = album
         }
+        return true
     }
 
     func loadFilterOptions(force: Bool = false) async {

@@ -269,6 +269,66 @@ final class SearchSuggestionsTests: XCTestCase {
         XCTAssertEqual(model.filters.people.map(\.id), ["maya"])
     }
 
+    func testRejectedPersonSuggestionsPreserveTheQueryCriteriaAndHeldSearch() async throws {
+        for isHidden in [false, true] {
+            let (model, repository) = fixture()
+            let maya = makePeopleStatePerson("maya", name: "Maya")
+            model.people = [maya]
+            model.searchText = "May"
+            let filters = SearchFilters(city: "Paris", country: "France", dateRange: .year(2024), mediaType: .video)
+            model.filters = filters
+            let pending = Task { await model.search() }
+            let sent = try await repository.probe.waitForRequest(0, testCase: self)
+            XCTAssertEqual(sent.request.query, "May")
+
+            if isHidden {
+                var hidden = maya
+                hidden.isHidden = true
+                model.applyPersonUpdate(.init(person: hidden, fields: [.hidden]))
+            } else {
+                model.people = []
+            }
+            XCTAssertEqual(model.applySuggestion(.person(maya), consuming: "May"), "May")
+
+            XCTAssertEqual(model.searchText, "May")
+            XCTAssertEqual(model.filters, filters)
+            try await repository.probe.succeed(0, ids: ["current-result"], total: 1)
+            await pending.value
+            XCTAssertEqual(model.results.map(\.id), ["current-result"], "A rejected queued suggestion must not invalidate the current request")
+            XCTAssertEqual(model.totalResults, 1)
+            let requests = await repository.probe.requests
+            XCTAssertEqual(requests.count, 1)
+        }
+    }
+
+    func testRejectedAlbumSuggestionPreservesAnotherScopeAndTheHeldSearch() async throws {
+        let (model, repository) = fixture()
+        let removed = AlbumResponseDTO(id: "removed", albumName: "Holiday", description: nil, assetCount: 0,
+            albumThumbnailAssetId: nil, shared: false, createdAt: .distantPast, assets: nil)
+        let current = AlbumResponseDTO(id: "current", albumName: "Current", description: nil, assetCount: 0,
+            albumThumbnailAssetId: nil, shared: false, createdAt: .distantPast, assets: nil)
+        model.albums = [removed, current]
+        model.searchText = "Holiday"
+        let filters = SearchFilters(city: "Paris", album: current, dateRange: .year(2024), mediaType: .live)
+        model.filters = filters
+        let pending = Task { await model.search() }
+        let sent = try await repository.probe.waitForRequest(0, testCase: self)
+        XCTAssertEqual(sent.request.query, "Holiday")
+        XCTAssertEqual(sent.request.albumIds, [current.id])
+        model.removeAlbum(removed.id)
+
+        XCTAssertEqual(model.applySuggestion(.album(removed), consuming: "Holiday"), "Holiday")
+
+        XCTAssertEqual(model.searchText, "Holiday")
+        XCTAssertEqual(model.filters, filters)
+        try await repository.probe.succeed(0, ids: ["scoped-result"], total: 1)
+        await pending.value
+        XCTAssertEqual(model.results.map(\.id), ["scoped-result"], "A rejected album must not replace the live query or remove an independent scope")
+        XCTAssertEqual(model.totalResults, 1)
+        let requests = await repository.probe.requests
+        XCTAssertEqual(requests.count, 1)
+    }
+
     func testAConfirmedHideCannotBeRestoredByStaleTokens() {
         let (model, _) = fixture()
         let source = makePeopleStatePerson("source", name: "Maya")
