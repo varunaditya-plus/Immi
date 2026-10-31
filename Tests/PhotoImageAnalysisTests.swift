@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 import UIKit
 import VisionKit
 import XCTest
@@ -72,6 +73,7 @@ final class PhotoImageAnalysisPresentationTests: SimulatorHostedTestCase {
     private var controllers: [PhotoPagerController] = []
     private weak var retainedCell: PhotoPagerCell?
     private weak var retainedController: PhotoPagerController?
+    private var mappings: [(recordID: String, localID: String)] = []
 
     override func tearDown() async throws {
         cells.forEach { $0.prepareForReuse() }
@@ -87,6 +89,15 @@ final class PhotoImageAnalysisPresentationTests: SimulatorHostedTestCase {
         try await waitUntil("The closed pager releases its cell and controller") {
             self.retainedCell == nil && self.retainedController == nil
         }
+        for mapping in mappings {
+            let recordID = mapping.recordID
+            let descriptor = FetchDescriptor<BackupRecord>(predicate: #Predicate { $0.id == recordID })
+            for record in try SwiftDataManager.shared.modelContext.fetch(descriptor) {
+                SwiftDataManager.shared.modelContext.delete(record)
+            }
+            try SwiftDataManager.shared.unlinkDeviceAsset(localIdentifier: mapping.localID)
+        }
+        mappings.removeAll()
     }
 
     func testSystemCapabilityUsesTheActualPlatformGate() async throws {
@@ -223,6 +234,126 @@ final class PhotoImageAnalysisPresentationTests: SimulatorHostedTestCase {
         XCTAssertNil(try imageView(in: cell).image)
     }
 
+    func testRemappingAnAliasClearsHeldAndCompletedInteractionsWithoutAuthorizingTheSameOldBitmapAgain() async throws {
+        for completed in [false, true] {
+            let localID = UUID().uuidString, oldID = UUID().uuidString, newID = UUID().uuidString
+            try link(localID, to: oldID)
+            let asset = AssetLite(id: LocalPhotoLibrary.assetID(for: localID), isVideo: false, ratio: 1,
+                thumbhash: nil, createdAt: .now, origin: .both)
+            let analyzer = analyzer(), loader = AnalysisPreviewLoader(), removed = RemovedAssets()
+            loader.visibilityPolicy = AssetVisibilityPolicy(scope: .collection, removed: removed)
+            let oldImage = image(.red), replacementImage = image(.blue)
+            loader.cached[asset.id] = oldImage
+            let cell = PhotoPagerCell(frame: .zero)
+            cell.setImageAnalyzer(analyzer)
+            track(cell)
+            let window = try await host(AnalysisCellHost(cell: cell))
+            cell.configure(with: asset, loader: loader)
+            cell.setImageAnalysisActive(true)
+            try await waitUntil("The original mapped bitmap reaches the analyzer") { analyzer.images.count == 1 }
+            if completed {
+                analyzer.finishAll()
+                try await waitUntil("The analysis request finishes while its native interaction stays mounted") { analyzer.activeCount == 0 }
+            }
+            XCTAssertEqual(interactions(in: cell).count, 1)
+
+            try SwiftDataManager.shared.upsertBackupRecord(assetID: newID, checksum: "", localIdentifier: localID)
+            removed.remove([oldID])
+            XCTAssertTrue(loader.visibilityPolicy.allows(id: asset.id))
+            XCTAssertFalse(loader.visibilityPolicy.allows(id: oldID))
+            try await waitUntil("Remapping removes the original image's interaction even though the alias is still public") {
+                self.interactions(in: cell).isEmpty
+            }
+            analyzer.finishAll()
+            try await waitUntil("The obsolete analyzer returns without restoring its interaction") { analyzer.activeCount == 0 }
+            XCTAssertEqual(analyzer.cancelledCount, completed ? 0 : 1)
+
+            cell.configure(with: asset, loader: loader)
+            _ = try await screenshot(window)
+            XCTAssertTrue(try imageView(in: cell).image === oldImage)
+            XCTAssertTrue(interactions(in: cell).isEmpty)
+            XCTAssertEqual(analyzer.images.count, 1, "Reusing an old UIImage must preserve its original source binding")
+            loader.cached[asset.id] = replacementImage
+            cell.configure(with: asset, loader: loader)
+            try await waitUntil("A new bitmap can be analyzed under the replacement identity") { analyzer.images.count == 2 }
+            XCTAssertTrue(analyzer.images.last === replacementImage)
+            cell.prepareForReuse()
+            analyzer.finishAll()
+        }
+    }
+
+    func testChangingTheSessionRejectsHeldAnalysisAndCannotReauthorizeItsStillMountedOldBitmap() async throws {
+        let session = MockSessionManager()
+        try session.setServer("https://analysis-before.example")
+        let analyzer = analyzer(), loader = AnalysisPreviewLoader(session: session), asset = photo()
+        let oldImage = image(.red), freshImage = image(.blue)
+        loader.cached[asset.id] = oldImage
+        let cell = PhotoPagerCell(frame: .zero)
+        cell.setImageAnalyzer(analyzer)
+        track(cell)
+        let window = try await host(AnalysisCellHost(cell: cell))
+        cell.configure(with: asset, loader: loader)
+        cell.setImageAnalysisActive(true)
+        try await waitUntil("The original session starts one held analysis") { analyzer.images.count == 1 }
+        let generation = LocalSnapshot.generation
+
+        try session.setServer("https://analysis-after.example")
+
+        XCTAssertEqual(LocalSnapshot.generation, generation)
+        try await waitUntil("The changed request context removes the actual native interaction") { self.interactions(in: cell).isEmpty }
+        analyzer.finishAll()
+        try await waitUntil("The old session's held analysis is cancelled") { analyzer.activeCount == 0 }
+        XCTAssertEqual(analyzer.cancelledCount, 1)
+        cell.configure(with: asset, loader: loader)
+        _ = try await screenshot(window)
+        XCTAssertTrue(interactions(in: cell).isEmpty)
+        XCTAssertEqual(analyzer.images.count, 1)
+        loader.cached[asset.id] = freshImage
+        cell.configure(with: asset, loader: loader)
+        try await waitUntil("A fresh image under the new session can be analyzed") { analyzer.images.count == 2 }
+        XCTAssertTrue(analyzer.images.last === freshImage)
+    }
+
+    func testAHeldPreviewCannotInstallOldPixelsAfterItsAliasOrSessionChanges() async throws {
+        for invalidation in ["mapping", "session"] {
+            let session = MockSessionManager()
+            try session.setServer("https://held-preview-before.example")
+            let localID = UUID().uuidString
+            try link(localID, to: UUID().uuidString)
+            let asset = AssetLite(id: LocalPhotoLibrary.assetID(for: localID), isVideo: false, ratio: 1,
+                thumbhash: nil, createdAt: .now, origin: .both)
+            let analyzer = analyzer(), loader = AnalysisPreviewLoader(session: session)
+            let gate = PeopleStateGate<UIImage?>(), oldImage = image(.red)
+            loader.imageOperation = { _ in try? await gate.value() }
+            let cell = PhotoPagerCell(frame: .zero)
+            cell.setImageAnalyzer(analyzer)
+            track(cell)
+            try await host(AnalysisCellHost(cell: cell))
+            cell.configure(with: asset, loader: loader)
+            cell.setImageAnalysisActive(true)
+            addTeardownBlock { await gate.complete(.success(nil)) }
+            await fulfillment(of: [gate.started], timeout: 2)
+            XCTAssertTrue(analyzer.images.isEmpty)
+            if invalidation == "mapping" {
+                try SwiftDataManager.shared.upsertBackupRecord(assetID: UUID().uuidString, checksum: "", localIdentifier: localID)
+            } else { try session.setServer("https://held-preview-after.example") }
+            gate.complete(.success(oldImage))
+            try await waitUntil("The original preview loader returns after \(invalidation) changes") { loader.completedImageLoads == 1 }
+
+            XCTAssertNil(try imageView(in: cell).image, invalidation)
+            XCTAssertTrue(analyzer.images.isEmpty, invalidation)
+            XCTAssertTrue(interactions(in: cell).isEmpty, invalidation)
+            let freshImage = image(.blue)
+            loader.imageOperation = { _ in freshImage }
+            cell.retryIfNeeded(loader: loader)
+            try await waitUntil("The stale preview releases its request handle so a fresh source can retry") {
+                analyzer.images.count == 1
+            }
+            XCTAssertTrue(try imageView(in: cell).image === freshImage, invalidation)
+            XCTAssertTrue(analyzer.images.first === freshImage, invalidation)
+        }
+    }
+
     func testWindowRemovalAndBackgroundSuspensionClearTheNativeInteractionAndCanResume() async throws {
         let analyzer = analyzer(), loader = AnalysisPreviewLoader(), asset = photo()
         let cell = PhotoPagerCell(frame: .zero)
@@ -292,6 +423,13 @@ final class PhotoImageAnalysisPresentationTests: SimulatorHostedTestCase {
 
     private func track(_ cell: PhotoPagerCell) { cells.append(cell); retainedCell = cell }
 
+    private func link(_ localID: String, to serverID: String) throws {
+        let recordID = UUID().uuidString
+        mappings.append((recordID, localID))
+        try SwiftDataManager.shared.insertBackupRecord(BackupRecord(id: recordID, assetId: serverID,
+            deviceAssetId: "", localIdentifier: localID))
+    }
+
     private func analyzer() -> HeldPhotoImageAnalyzer {
         let analyzer = HeldPhotoImageAnalyzer()
         analyzers.append(analyzer)
@@ -344,10 +482,16 @@ private final class HeldPhotoImageAnalyzer: PhotoImageAnalyzing {
 @MainActor
 private final class AnalysisPreviewLoader: PhotoPreviewLoader {
     var cached: [String: UIImage] = [:]
-    init() { super.init(session: MockSessionManager()) }
+    var imageOperation: ((String) async -> UIImage?)?
+    private(set) var completedImageLoads = 0
+    init(session: SessionManager? = nil) { super.init(session: session ?? MockSessionManager()) }
     override func cachedImage(for assetId: String) -> UIImage? { cached[assetId] }
     override func hasPreview(for assetId: String) -> Bool { cached[assetId] != nil }
-    override func image(for assetId: String) async -> UIImage? { cached[assetId] }
+    override func image(for assetId: String) async -> UIImage? {
+        defer { completedImageLoads += 1 }
+        if let imageOperation { return await imageOperation(assetId) }
+        return cached[assetId]
+    }
     override func localLivePhotoAssetID(for assetID: String) -> String? { nil }
     override func prefetch(_ assetIds: [String]) {}
 }

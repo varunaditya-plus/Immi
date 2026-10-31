@@ -42,8 +42,15 @@ final class PhotoPagerCell: UICollectionViewCell {
     private var imageAnalysis: PhotoImageAnalysis?
     private var imageAnalysisActive = false
     private var analyzableImage: UIImage?
+    private struct RenderedImageContext {
+        let assetID: String
+        let sourceID: String
+        let requestContext: SessionRequestContext
+    }
+    private var renderedImageContext: RenderedImageContext?
 
     private var loadTask: Task<Void, Never>?
+    private var imageLoadRequest = UUID()
     private var currentAssetID: String?
     private var accountGeneration = LocalSnapshot.generation
     private var isVideo = false
@@ -358,7 +365,9 @@ final class PhotoPagerCell: UICollectionViewCell {
         super.prepareForReuse()
         imageAnalysisActive = false
         analyzableImage = nil
+        renderedImageContext = nil
         imageAnalysis?.clear()
+        imageLoadRequest = UUID()
         loadTask?.cancel()
         loadTask = nil
         livePhotoDetectionTask?.cancel()
@@ -414,8 +423,25 @@ final class PhotoPagerCell: UICollectionViewCell {
         }
         imageAnalysis?.update(image: analyzableImage, assetID: currentAssetID,
             generation: accountGeneration, isAllowed: { [weak self] in
-                self?.imageAnalysisActive == true && self?.isPlaybackContextCurrent == true
+                self?.imageAnalysisActive == true && self?.isImageAnalysisContextCurrent == true
             })
+    }
+
+    private var isImageAnalysisContextCurrent: Bool {
+        guard let context = renderedImageContext, let loader,
+              context.assetID == currentAssetID, isPlaybackContextCurrent else { return false }
+        return imageContextIsCurrent(context, loader: loader)
+    }
+
+    private func imageContext(for assetID: String, loader: PhotoPreviewLoader) -> RenderedImageContext {
+        RenderedImageContext(assetID: assetID,
+            sourceID: loader.sourceID(for: assetID), requestContext: loader.requestContext)
+    }
+
+    private func imageContextIsCurrent(_ context: RenderedImageContext, loader: PhotoPreviewLoader) -> Bool {
+        _ = SwiftDataManager.shared.backupMappingRevision
+        return context.requestContext == loader.requestContext
+            && context.sourceID == loader.sourceID(for: context.assetID)
     }
 
     // MARK: - Isi
@@ -425,6 +451,7 @@ final class PhotoPagerCell: UICollectionViewCell {
             prepareForReuse()
             return
         }
+        imageLoadRequest = UUID()
         loadTask?.cancel()
         loadTask = nil
         let newLocalLivePhotoAssetID = loader.localLivePhotoAssetID(for: asset.id)
@@ -457,7 +484,8 @@ final class PhotoPagerCell: UICollectionViewCell {
         // Yang sudah ada di memori dipasang seketika — termasuk thumbnail
         // seukuran grid kalau versi tajamnya belum datang.
         let cached = loader.cachedImage(for: asset.id)
-        setImage(cached ?? ThumbHash.placeholder(for: asset.thumbhash), isAnalyzable: cached != nil)
+        setImage(cached ?? ThumbHash.placeholder(for: asset.thumbhash), isAnalyzable: cached != nil,
+            context: imageContext(for: asset.id, loader: loader))
 
         guard !loader.hasPreview(for: asset.id) else { return }
         startLoad(asset.id, loader: loader)
@@ -554,14 +582,19 @@ final class PhotoPagerCell: UICollectionViewCell {
     }
 
     private func startLoad(_ assetID: String, loader: PhotoPreviewLoader) {
+        let context = imageContext(for: assetID, loader: loader)
+        let request = UUID()
+        imageLoadRequest = request
         loadTask = Task { [weak self] in
             let image = await loader.image(for: assetID)
-            guard let self, !Task.isCancelled, self.currentAssetID == assetID,
+            guard let self else { return }
+            defer { if self.imageLoadRequest == request { self.loadTask = nil } }
+            guard !Task.isCancelled, self.imageLoadRequest == request, self.currentAssetID == assetID,
+                  self.loader === loader, self.imageContextIsCurrent(context, loader: loader),
                   loader.visibilityPolicy.allows(id: assetID)
             else { return }
-            self.loadTask = nil
             guard let image else { return }
-            self.setImage(image)
+            self.setImage(image, context: context)
         }
     }
 
@@ -578,7 +611,11 @@ final class PhotoPagerCell: UICollectionViewCell {
     ///
     /// Gambarnya sendiri selalu tahu rasionya. Metadata cukup jadi tebakan awal
     /// sebelum gambar apa pun ada.
-    private func setImage(_ image: UIImage?, isAnalyzable: Bool = true) {
+    private func setImage(_ image: UIImage?, isAnalyzable: Bool = true, context: RenderedImageContext) {
+        // A reused bitmap keeps its original authorization even when its display alias changes source.
+        if image !== imageView.image || renderedImageContext?.assetID != context.assetID {
+            renderedImageContext = isAnalyzable && image != nil ? context : nil
+        }
         imageView.image = image
         analyzableImage = isAnalyzable ? image : nil
         if let image, image.size.width > 0, image.size.height > 0 {

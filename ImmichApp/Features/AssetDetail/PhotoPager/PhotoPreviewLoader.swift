@@ -23,6 +23,8 @@ class PhotoPreviewLoader {
     private let serverIDForLocalAsset: @MainActor (String) -> String?
     private let localPreview: @MainActor (String) async -> UIImage?
 
+    var requestContext: SessionRequestContext { session.snapshot }
+
     init(
         session: SessionManager,
         imageCache: ImageCache = .shared,
@@ -50,6 +52,8 @@ class PhotoPreviewLoader {
         guard let serverID = serverIDForLocalAsset(localID), !serverID.isEmpty else { return nil }
         return serverID
     }
+
+    func sourceID(for assetID: String) -> String { serverPreviewID(for: assetID) ?? assetID }
 
     /// Gambar terbaik yang SUDAH ada di memori, tanpa `await`.
     ///
