@@ -35,6 +35,7 @@ struct MemoryStoryView: View {
     }
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(SessionManager.self) private var session
 
     @State private var currentStoryID: String?
     /// Foto yang sedang tampil di TIAP kenangan.
@@ -47,6 +48,8 @@ struct MemoryStoryView: View {
     @State private var isPressing = false
     @State private var shareItem: SharedLinkPresentation?
     @State private var sharedAssetID: String?
+    @State private var sharedSourceIDs: [String] = []
+    @State private var sharedRequestContext: SessionRequestContext?
     @State private var sharePreparation = SharePreparation()
     @State private var shareError: ErrorEvent?
     private var isPreparingShare: Bool { sharePreparation.isPreparing }
@@ -64,9 +67,13 @@ struct MemoryStoryView: View {
             .padding(.top, 6)
             .padding(.bottom, 4)
         }
-        .sheet(item: $shareItem, onDismiss: { sharedAssetID = nil }) { ShareSheet(url: $0.url) }
+        .sheet(item: $shareItem, onDismiss: { sharedAssetID = nil; sharedSourceIDs = []; sharedRequestContext = nil }) { item in
+            PhotoShareSheet(urls: [item.url], assetIDs: sharedAssetID.map { [$0] } ?? [],
+                sourceIDs: sharedSourceIDs, requestContext: sharedRequestContext,
+                isAllowed: { AssetVisibilityPolicy(scope: .timeline).allows(id: $0) })
+        }
         .errorToast($shareError)
-        .onDisappear { sharePreparation.cancel() }
+        .onDisappear { sharePreparation.cancel(); sharedSourceIDs = []; sharedRequestContext = nil }
         .onChange(of: currentAsset?.id) { _, _ in sharePreparation.cancel() }
         .onAppear {
             currentStoryID = initialStoryID ?? stories.first?.id
@@ -75,6 +82,8 @@ struct MemoryStoryView: View {
             if let sharedAssetID, !AssetVisibilityPolicy(scope: .timeline).allows(id: sharedAssetID) {
                 shareItem = nil
                 self.sharedAssetID = nil
+                sharedSourceIDs = []
+                sharedRequestContext = nil
             }
             if stories.isEmpty {
                 dismiss()
@@ -317,7 +326,7 @@ struct MemoryStoryView: View {
     private func share() {
         guard let asset = currentAsset, !isPreparingShare, shareItem == nil else { return }
         shareError = nil
-        sharePreparation.start(ids: [asset.id], prepare: { _ in
+        sharePreparation.start(ids: [asset.id], session: session, prepare: { _ in
             if let url = await prepareShare(asset) { return [url] }
             return []
         }, isAllowed: {
@@ -325,6 +334,8 @@ struct MemoryStoryView: View {
                 && AssetVisibilityPolicy(scope: .timeline).allows(id: $0)
         }, onError: { shareError = ErrorEvent($0) }) { urls in
             sharedAssetID = asset.id
+            sharedSourceIDs = sharePreparation.preparedSourceIDs
+            sharedRequestContext = sharePreparation.preparedContext
             shareItem = urls.first.map { SharedLinkPresentation(url: $0) }
         }
     }
@@ -332,68 +343,100 @@ struct MemoryStoryView: View {
 
 // MARK: - Satu halaman
 
-private struct MemoryStorySlide: View {
+struct MemoryStorySlide: View {
     let asset: AssetLite
     /// Halaman ini yang sedang dilihat.
     let isActive: Bool
     /// Jari sedang menahan layar.
     let isPaused: Bool
+    var previewLoader: PhotoPreviewLoader? = nil
+    var visibilityPolicy = AssetVisibilityPolicy(scope: .timeline)
 
     @Environment(SessionManager.self) private var session
 
     var body: some View {
         ZStack {
-            // TIGA lapis, tapi hanya DUA permintaan jaringan.
-            //
-            // Sebelumnya latar buram meminta `preview` dengan ukuran decode
-            // sendiri (400px). Kunci cache memori memuat ukuran decode-nya, jadi
-            // itu bukan permintaan yang sama dengan `preview` di depannya — tiap
-            // slide mengunduh preview 2048px DUA KALI. `LazyHStack` menyiapkan
-            // beberapa slide sekaligus dan pager tegak menyiapkan beberapa
-            // kenangan sekaligus, sementara jatah kerja berat cuma empat: yang
-            // sedang dilihat mengantre di belakang belasan unduhan besar untuk
-            // halaman yang belum tentu dibuka. Itulah "buram lama"; pada
-            // pembukaan kedua semuanya sudah di cache, jadi terlihat normal.
-            //
-            // Sekarang latar dan lapis cepat memakai THUMBNAIL — kecil, cepat,
-            // dan kunci cache-nya sama persis untuk keduanya sehingga hanya satu
-            // unduhan yang benar-benar jalan.
-            AuthImage(assetId: asset.id, thumbhash: asset.thumbhash)
-                .blur(radius: 40)
-                .overlay(Color.black.opacity(0.25))
+            if LocalPhotoLibrary.isLocal(asset.id) {
+                MemoryStoryLocalImage(assetID: asset.id, loader: previewLoader, visibilityPolicy: visibilityPolicy)
+            } else {
+                // TIGA lapis, tapi hanya DUA permintaan jaringan.
+                //
+                // Sebelumnya latar buram meminta `preview` dengan ukuran decode
+                // sendiri (400px). Kunci cache memori memuat ukuran decode-nya, jadi
+                // itu bukan permintaan yang sama dengan `preview` di depannya — tiap
+                // slide mengunduh preview 2048px DUA KALI. `LazyHStack` menyiapkan
+                // beberapa slide sekaligus dan pager tegak menyiapkan beberapa
+                // kenangan sekaligus, sementara jatah kerja berat cuma empat: yang
+                // sedang dilihat mengantre di belakang belasan unduhan besar untuk
+                // halaman yang belum tentu dibuka. Itulah "buram lama"; pada
+                // pembukaan kedua semuanya sudah di cache, jadi terlihat normal.
+                //
+                // Sekarang latar dan lapis cepat memakai THUMBNAIL — kecil, cepat,
+                // dan kunci cache-nya sama persis untuk keduanya sehingga hanya satu
+                // unduhan yang benar-benar jalan.
+                AuthImage(assetId: asset.id, thumbhash: asset.thumbhash)
+                    .blur(radius: 40)
+                    .overlay(Color.black.opacity(0.25))
 
-            // Lapis cepat: foto sungguhan muncul dalam sekejap, meski belum
-            // tajam. Tanpa ini yang terlihat cuma buram thumbhash sampai preview
-            // penuh selesai diunduh.
-            AuthImage(
-                assetId: asset.id,
-                thumbhash: asset.thumbhash,
-                contentMode: .fit)
+                // Lapis cepat: foto sungguhan muncul dalam sekejap, meski belum
+                // tajam. Tanpa ini yang terlihat cuma buram thumbhash sampai preview
+                // penuh selesai diunduh.
+                AuthImage(
+                    assetId: asset.id,
+                    thumbhash: asset.thumbhash,
+                    contentMode: .fit)
 
-            // Lapis tajam, menimpa yang cepat begitu datang.
-            //
-            // Bingkai video pun tetap menumpang di atasnya: frame pertama baru
-            // datang setelah beberapa ratus milidetik, dan tanpa gambar di
-            // belakangnya yang terlihat adalah kotak hitam yang berkedip di
-            // setiap perpindahan halaman.
-            AuthImage(
-                assetId: asset.id,
-                size: "preview",
-                thumbhash: asset.thumbhash,
-                contentMode: .fit,
-                // Kartunya tidak pernah lebih lebar dari layar; 1400px sudah
-                // melampaui itu di layar 3x, sementara membongkar 2048px berarti
-                // beberapa kali lipat memori dan waktu decode untuk ketajaman
-                // yang tidak bisa dilihat.
-                pixelSize: 1400)
+                // Lapis tajam, menimpa yang cepat begitu datang.
+                //
+                // Bingkai video pun tetap menumpang di atasnya: frame pertama baru
+                // datang setelah beberapa ratus milidetik, dan tanpa gambar di
+                // belakangnya yang terlihat adalah kotak hitam yang berkedip di
+                // setiap perpindahan halaman.
+                AuthImage(
+                    assetId: asset.id,
+                    size: "preview",
+                    thumbhash: asset.thumbhash,
+                    contentMode: .fit,
+                    // Kartunya tidak pernah lebih lebar dari layar; 1400px sudah
+                    // melampaui itu di layar 3x, sementara membongkar 2048px berarti
+                    // beberapa kali lipat memori dan waktu decode untuk ketajaman
+                    // yang tidak bisa dilihat.
+                    pixelSize: 1400)
+            }
 
             if asset.isVideo {
                 MemoryStoryVideo(
                     assetID: asset.id,
                     isActive: isActive,
                     isPaused: isPaused,
-                    session: session)
+                    session: session, localLoader: previewLoader, visibilityPolicy: visibilityPolicy)
             }
+        }
+    }
+}
+
+private struct MemoryStoryLocalImage: View {
+    let assetID: String
+    let loader: PhotoPreviewLoader?
+    let visibilityPolicy: AssetVisibilityPolicy
+    @Environment(SessionManager.self) private var session
+    @State private var image: UIImage?
+
+    var body: some View {
+        ZStack {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill().blur(radius: 40)
+                    .overlay(Color.black.opacity(0.25))
+                Image(uiImage: image).resizable().scaledToFit()
+            }
+        }
+        .task(id: assetID) {
+            let generation = LocalSnapshot.generation
+            let loader = loader ?? PhotoPreviewLoader(session: session)
+            let loaded = await loader.image(for: assetID)
+            guard !Task.isCancelled, generation == LocalSnapshot.generation,
+                  visibilityPolicy.allows(id: assetID) else { return }
+            image = loaded
         }
     }
 }
@@ -412,6 +455,8 @@ private struct MemoryStoryVideo: UIViewRepresentable {
     let isActive: Bool
     let isPaused: Bool
     let session: SessionManager
+    var localLoader: PhotoPreviewLoader? = nil
+    var visibilityPolicy = AssetVisibilityPolicy(scope: .timeline)
 
     func makeUIView(context: Context) -> MemoryStoryVideoView {
         MemoryStoryVideoView()
@@ -422,7 +467,7 @@ private struct MemoryStoryVideo: UIViewRepresentable {
             assetID: assetID,
             session: session,
             isActive: isActive,
-            isPaused: isPaused)
+            isPaused: isPaused, localLoader: localLoader, visibilityPolicy: visibilityPolicy)
     }
 
     static func dismantleUIView(_ view: MemoryStoryVideoView, coordinator: ()) {
@@ -437,6 +482,13 @@ final class MemoryStoryVideoView: UIView {
     private var player: AVPlayer?
     private var loadedAssetID: String?
     private var endObserver: NSObjectProtocol?
+    private var playbackNotifications = NotificationCenter.default
+    private var playerFactory: (AVPlayerItem) -> AVPlayer = { AVPlayer(playerItem: $0) }
+    private var playbackGeneration: UUID?
+    private var isPlaybackActive = false
+    private var isPlaybackPaused = true
+    private var localLoadTask: Task<Void, Never>?
+    private var localLoadRequest = UUID()
     /// Halaman ini sedang aktif pada pembaruan sebelumnya.
     ///
     /// Dipakai untuk membedakan "lanjutkan setelah jeda" dari "masuk lagi ke
@@ -445,8 +497,16 @@ final class MemoryStoryVideoView: UIView {
     /// sendiri-sendiri.
     private var wasActive = false
 
+    convenience init(playbackNotifications: NotificationCenter,
+                     playerFactory: @escaping (AVPlayerItem) -> AVPlayer) {
+        self.init(frame: .zero)
+        self.playbackNotifications = playbackNotifications
+        self.playerFactory = playerFactory
+    }
+
     @MainActor
-    func update(assetID: String, session: SessionManager, isActive: Bool, isPaused: Bool) {
+    func update(assetID: String, session: SessionManager, isActive: Bool, isPaused: Bool,
+                localLoader: PhotoPreviewLoader? = nil, visibilityPolicy: AssetVisibilityPolicy? = nil) {
         // Pemutar baru dibuat saat halamannya benar-benar dilihat.
         //
         // `LazyHStack` membangun beberapa halaman sekaligus di kiri dan kanan;
@@ -457,14 +517,22 @@ final class MemoryStoryVideoView: UIView {
             return
         }
 
-        if loadedAssetID != assetID {
+        if loadedAssetID != assetID || playbackGeneration != LocalSnapshot.generation {
             teardown()
             loadedAssetID = assetID
-            makePlayer(assetID: assetID, session: session)
+            playbackGeneration = LocalSnapshot.generation
+            makePlayer(assetID: assetID, session: session, localLoader: localLoader,
+                visibilityPolicy: visibilityPolicy ?? AssetVisibilityPolicy(scope: .timeline))
         }
 
+        isPlaybackActive = true
+        isPlaybackPaused = isPaused
+        applyPlaybackIntent()
+    }
+
+    private func applyPlaybackIntent() {
         guard let player else { return }
-        if isPaused {
+        if isPlaybackPaused {
             player.pause()
         } else if player.timeControlStatus != .playing {
             // Baru masuk lagi ke halaman ini: klipnya diulang dari awal supaya
@@ -476,19 +544,43 @@ final class MemoryStoryVideoView: UIView {
     }
 
     func teardown() {
+        localLoadRequest = UUID()
+        localLoadTask?.cancel()
+        localLoadTask = nil
         VideoPlaybackLifecycle.stop(player)
         if let endObserver {
-            NotificationCenter.default.removeObserver(endObserver)
+            playbackNotifications.removeObserver(endObserver)
             self.endObserver = nil
         }
         playerLayer.player = nil
         player = nil
         loadedAssetID = nil
+        playbackGeneration = nil
+        isPlaybackActive = false
+        isPlaybackPaused = true
         wasActive = false
     }
 
     @MainActor
-    private func makePlayer(assetID: String, session: SessionManager) {
+    private func makePlayer(assetID: String, session: SessionManager, localLoader: PhotoPreviewLoader?,
+                            visibilityPolicy: AssetVisibilityPolicy) {
+        if LocalPhotoLibrary.isLocal(assetID) {
+            let loader = localLoader ?? PhotoPreviewLoader(session: session)
+            let generation = LocalSnapshot.generation, request = UUID()
+            localLoadRequest = request
+            localLoadTask = Task { [weak self] in
+                let asset = await loader.playbackAsset(for: assetID)
+                guard let self, !Task.isCancelled, self.localLoadRequest == request,
+                      self.loadedAssetID == assetID, self.isPlaybackActive,
+                      generation == LocalSnapshot.generation,
+                      visibilityPolicy.allows(id: assetID) else { return }
+                self.localLoadTask = nil
+                guard let asset else { return }
+                self.installPlayer(item: AVPlayerItem(asset: asset), assetID: assetID)
+                self.applyPlaybackIntent()
+            }
+            return
+        }
         guard let source = PhotoPreviewLoader(session: session).videoSource(for: assetID)
         else { return }
 
@@ -496,21 +588,31 @@ final class MemoryStoryVideoView: UIView {
             url: source.url,
             options: ["AVURLAssetHTTPHeaderFieldsKey": source.headers])
         let item = AVPlayerItem(asset: urlAsset)
+        installPlayer(item: item, assetID: assetID)
+    }
+
+    private func installPlayer(item: AVPlayerItem, assetID: String) {
         item.preferredForwardBufferDuration = 2
-        let newPlayer = AVPlayer(playerItem: item)
+        let newPlayer = playerFactory(item)
         // Bisu: story berpindah sendiri, dan suara yang menyala tiba-tiba saat
         // baris kenangan disentuh bukan yang diharapkan siapa pun.
         newPlayer.isMuted = true
 
         // Klip yang lebih pendek dari perkiraan durasinya diulang, bukan
         // dibiarkan berhenti di frame terakhir sampai bar kemajuannya habis.
-        endObserver = NotificationCenter.default.addObserver(
+        endObserver = playbackNotifications.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: newPlayer.currentItem,
             queue: .main
-        ) { [weak newPlayer] _ in
-            newPlayer?.seek(to: .zero)
-            newPlayer?.play()
+        ) { [weak self, weak newPlayer, weak item] _ in
+            MainActor.assumeIsolated {
+                guard let self, let newPlayer, let item,
+                      self.player === newPlayer, newPlayer.currentItem === item,
+                      self.loadedAssetID == assetID, self.playbackGeneration == LocalSnapshot.generation,
+                      self.isPlaybackActive, !self.isPlaybackPaused else { return }
+                newPlayer.seek(to: .zero)
+                newPlayer.play()
+            }
         }
 
         playerLayer.videoGravity = .resizeAspect
