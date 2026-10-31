@@ -51,6 +51,7 @@ struct AssetEditRecord: Decodable, Sendable {
 class AssetDetailRepository {
     private let api: APIClient
     private let dataManager: SwiftDataManager?
+    @MainActor var session: SessionManager { api.session }
 
     init(api: APIClient, dataManager: SwiftDataManager? = nil) {
         self.api = api
@@ -233,7 +234,27 @@ class AssetDetailRepository {
 
     @MainActor
     func downloadCurrentFile(_ id: String, filename: String) async throws -> URL {
-        try await downloadFile(id, filename: filename, edited: true)
+        let pipeline = MediaEditingPipeline.shared
+        guard let saved = try pipeline.savedEdit(for: id, session: api.session) else {
+            return try await downloadFile(id, filename: filename, edited: true)
+        }
+        if let deviceID = saved.document.deviceAssetID {
+            guard let output = try await pipeline.exportDeviceFile(for: deviceID, session: api.session) else {
+                throw PhotoExportError.unsupportedMedia
+            }
+            return output.url
+        }
+        let original = try await downloadOriginalFile(id, filename: filename)
+        do {
+            let result = try await pipeline.currentFile(original, assetID: id, api: api, saved: saved)
+            if result != original { TemporaryMediaStore.remove(original) }
+            return result
+        } catch { TemporaryMediaStore.remove(original); throw error }
+    }
+
+    @MainActor
+    func downloadOriginalFile(_ id: String, filename: String) async throws -> URL {
+        try await downloadFile(id, filename: filename, edited: false)
     }
 
     @MainActor

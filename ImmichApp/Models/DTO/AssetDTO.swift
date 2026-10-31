@@ -36,6 +36,8 @@ struct AssetResponseDTO: Codable, Identifiable {
     let people: [PersonDTO]?
     /// Id aset video pasangan sebuah Live Photo; nil untuk foto biasa.
     let livePhotoVideoId: String?
+    var checksum: String? = nil
+    var fileModifiedAt: Date? = nil
 
     var isTimelineVisible: Bool {
         !isArchived && !isTrashed && (visibility == nil || visibility == "timeline")
@@ -57,7 +59,7 @@ struct AssetResponseDTO: Codable, Identifiable {
     private enum CodingKeys: String, CodingKey {
         case id, type, originalFileName, fileCreatedAt, isFavorite, isArchived, visibility
         case isTrashed, duration, thumbhash, localDateTime, exifInfo, people
-        case livePhotoVideoId
+        case livePhotoVideoId, checksum, fileModifiedAt
         case addedAt = "createdAt"
         case isEdited
     }
@@ -79,6 +81,8 @@ struct AssetResponseDTO: Codable, Identifiable {
         exifInfo = try c.decodeIfPresent(ExifDTO.self, forKey: .exifInfo)
         people = try c.decodeIfPresent([PersonDTO].self, forKey: .people)
         livePhotoVideoId = try c.decodeIfPresent(String.self, forKey: .livePhotoVideoId)
+        checksum = try c.decodeIfPresent(String.self, forKey: .checksum)
+        fileModifiedAt = try c.decodeIfPresent(Date.self, forKey: .fileModifiedAt)
 
         // Terima string "H:MM:SS.sss" maupun angka, supaya perubahan format di
         // sisi server tidak lagi menjatuhkan seluruh decoding. JSON API Immich
