@@ -11,6 +11,7 @@ final class DerivedCollectionActionTests: XCTestCase {
             XCTAssertFalse(localTitles.contains(String(localized: String.LocalizationValue(title))))
         }
         XCTAssertTrue(localTitles.contains(String(localized: "Share")))
+        XCTAssertTrue(localTitles.contains(String(localized: "Copy")))
         XCTAssertTrue(localTitles.contains(String(localized: "Delete")))
         let remoteTitles = Set(fixture.menuActions(for: "remote").map(\.title))
         for title in ["Favorite", "Archive", "Add to Album", "Move to Locked Folder", "Share Link"] {
@@ -25,12 +26,13 @@ final class DerivedCollectionActionTests: XCTestCase {
         XCTAssertNotNil(mixed.trashConfirmation)
         XCTAssertNil(mixed.favorite)
         XCTAssertNil(mixed.archive)
-        XCTAssertTrue(mixed.menu.isEmpty)
+        XCTAssertEqual(mixed.menu.map(\.title), ["Copy", "Slideshow"], "A mixed selection keeps media copying without server mutations")
 
         let remote = fixture.selectionActions(for: ["remote"])
         XCTAssertNotNil(remote.favorite)
         XCTAssertNotNil(remote.archive)
-        XCTAssertEqual(remote.menu.count, 1, "Server-backed items retain the Locked Folder action")
+        XCTAssertEqual(remote.menu.map(\.title), ["Copy", "Slideshow", "Move to Locked Folder"],
+            "Server-backed items retain Copy and the Locked Folder action")
     }
 
     private func screen() -> PhotoCollectionScreen<EmptyView> {

@@ -137,10 +137,14 @@ struct PhotoCollectionScreen<Options: View>: View {
     @State private var isSelecting = false
     @State private var selectedIDs: Set<String> = []
     @State private var sharePreparation = SharePreparation()
+    @State private var copyPreparation = MediaCopyPreparation()
+    @State private var slideshow: PhotoSlideshowPresentation?
     private var isPreparingShare: Bool { sharePreparation.isPreparing }
     @State private var isPerformingAction = false
     @State private var preparedURLs: [URL] = []
     @State private var preparedAssetIDs: [String] = []
+    @State private var sharedSourceIDs: [String] = []
+    @State private var sharedRequestContext: SessionRequestContext?
     @State private var isSharePresented = false
     @State private var showsMap = false
     @State private var showsFaces = false
@@ -149,7 +153,7 @@ struct PhotoCollectionScreen<Options: View>: View {
     /// Terpisah dari konfirmasi mode pilih, dan bentuknya alert, bukan dialog:
     /// yang ditanyakan menyangkut satu foto yang barusan ditekan lama, bukan
     /// sekumpulan pilihan atas seleksi.
-    @State private var menuDeleteID: String?
+    @State private var menuDeleteAsset: AssetLite?
     @State private var deviceDeleteID: String?
     /// Naik satu setiap penghapusan dan setiap favorit yang selesai dikerjakan.
     @State private var deleteFeedback = 0
@@ -219,7 +223,15 @@ struct PhotoCollectionScreen<Options: View>: View {
                     : .hidden,
                 for: .tabBar)
             .sheet(isPresented: $isSharePresented, onDismiss: cleanupPreparedShare) {
-                MultiShareSheet(urls: preparedURLs)
+                PhotoShareSheet(urls: preparedURLs, assetIDs: preparedAssetIDs,
+                    sourceIDs: sharedSourceIDs, requestContext: sharedRequestContext,
+                    isAllowed: { [policy = visibilityPolicy] in policy.allows(id: $0) })
+            }
+            .fullScreenCover(item: $slideshow) { selection in
+                PhotoSlideshowView(assets: selection.assets, initialAssetID: selection.initialAssetID,
+                    visibilityPolicy: visibilityPolicy) { asset in
+                    (await shareURLs([asset.id])).first
+                }
             }
             .sheet(isPresented: $showsMap) {
                 NavigationStack {
@@ -240,16 +252,16 @@ struct PhotoCollectionScreen<Options: View>: View {
             // — konfirmasinya menempel di tombolnya sendiri, lihat
             // `SelectionConfirmation`.
             .alert(
-                "Delete Photo",
+                contextDeleteTitle,
                 isPresented: Binding(
-                    get: { menuDeleteID != nil },
-                    set: { if !$0 { menuDeleteID = nil } }),
-                presenting: menuDeleteID
-            ) { id in
-                Button("Delete", role: .destructive) {
-                    menuDeleteID = nil
-                    runAction([id]) {
-                        await onDelete([id])
+                    get: { menuDeleteAsset != nil },
+                    set: { if !$0 { menuDeleteAsset = nil } }),
+                presenting: menuDeleteAsset
+            ) { asset in
+                Button(deleteActionTitle, role: .destructive) {
+                    menuDeleteAsset = nil
+                    runAction([asset.id]) {
+                        await onDelete([asset.id])
                         // Getarnya sama dengan jalur bar seleksi; tanpa ini,
                         // menghapus lewat context menu terasa berbeda dari
                         // menghapus hal yang sama lewat mode pilih.
@@ -257,8 +269,12 @@ struct PhotoCollectionScreen<Options: View>: View {
                     }
                 }
                 Button("Cancel", role: .cancel) {}
-            } message: { _ in
-                Text("This cannot be undone.")
+            } message: { asset in
+                if deletesPermanently { Text("This cannot be undone.") }
+                else {
+                    Text(asset.isVideo ? "Are you sure you want to delete this video?"
+                        : "Are you sure you want to delete this photo?")
+                }
             }
             .alert("Action Failed", isPresented: Binding(
                 get: { actionError.wrappedValue != nil },
@@ -282,10 +298,10 @@ struct PhotoCollectionScreen<Options: View>: View {
             .onChange(of: assetsSignature) { _, _ in
                 selectedIDs.formIntersection(Set(visibleAssets.map(\.id)))
                 if selectedIDs.isEmpty { endSelection() }
-                if let id = menuDeleteID, !visibilityPolicy.allows(id: id) { menuDeleteID = nil }
+                if let asset = menuDeleteAsset, !visibilityPolicy.allows(id: asset.id) { menuDeleteAsset = nil }
                 if let id = deviceDeleteID, !visibilityPolicy.allows(id: id) { deviceDeleteID = nil }
             }
-            .onDisappear { sharePreparation.cancel() }
+            .onDisappear { sharePreparation.cancel(); copyPreparation.cancel() }
             .onChange(of: isSelecting, initial: true) { _, value in onSelectionChanged(value) }
     }
 
@@ -326,7 +342,7 @@ struct PhotoCollectionScreen<Options: View>: View {
             hero: heroView,
             isSelecting: $isSelecting,
             selectedIDs: $selectedIDs,
-            onOpen: { _ in sharePreparation.cancel() },
+            onOpen: { _ in sharePreparation.cancel(); copyPreparation.cancel() },
             detailScreen: { id in detailScreen(for: id) },
             onAddTapped: onAddPhotos,
             // Ambangnya diukur dari judul sungguhan; mode bulanan tidak punya
@@ -639,6 +655,12 @@ struct PhotoCollectionScreen<Options: View>: View {
 
     // MARK: - Context menu
 
+    private var contextDeleteTitle: LocalizedStringKey {
+        let isVideo = menuDeleteAsset?.isVideo == true
+        if deletesPermanently { return isVideo ? "Permanently Delete Video?" : "Permanently Delete Photo?" }
+        return isVideo ? "Delete Video" : "Delete Photo"
+    }
+
     /// Dibangun dari id, bukan dari salinan aset milik grid — dengan begitu
     /// status favoritnya selalu yang terbaru, bukan yang sempat tersimpan saat
     /// grid terakhir disusun.
@@ -665,7 +687,7 @@ struct PhotoCollectionScreen<Options: View>: View {
                     systemImage: "trash",
                     isDestructive: true
                 ) {
-                    if visibilityPolicy.allows(id: asset.id) { menuDeleteID = asset.id }
+                    if visibilityPolicy.allows(id: asset.id) { menuDeleteAsset = asset }
                 },
             ]
         }
@@ -684,6 +706,9 @@ struct PhotoCollectionScreen<Options: View>: View {
                 ) {
                     share([asset.id])
                 },
+                PhotoGridMenuAction(title: String(localized: "Copy"), systemImage: "doc.on.doc") {
+                    copy([asset.id])
+                },
                 PhotoGridMenuAction(
                     title: String(localized: "Unlock"),
                     systemImage: "lock.open"
@@ -695,7 +720,7 @@ struct PhotoCollectionScreen<Options: View>: View {
                     systemImage: "trash",
                     isDestructive: true
                 ) {
-                    if visibilityPolicy.allows(id: asset.id) { menuDeleteID = asset.id }
+                    if visibilityPolicy.allows(id: asset.id) { menuDeleteAsset = asset }
                 },
             ]
         }
@@ -713,6 +738,15 @@ struct PhotoCollectionScreen<Options: View>: View {
                 ) {
                     share([asset.id])
                 })
+            actions.append(PhotoGridMenuAction(
+                title: String(localized: "Copy"), systemImage: "doc.on.doc"
+            ) { copy([asset.id]) })
+        }
+
+        if allowsSelectionShare, visibilityScope != .locked {
+            actions.append(PhotoGridMenuAction(title: String(localized: "Slideshow"), systemImage: "play.rectangle") {
+                slideshow = PhotoSlideshowPresentation(assets: visibleAssets, initialAssetID: asset.id)
+            })
         }
 
         if let onToggleFavorite, allowsServerActions {
@@ -794,18 +828,8 @@ struct PhotoCollectionScreen<Options: View>: View {
             systemImage: "trash",
             isDestructive: true
         ) {
-            // Penghapusan PERMANEN selalu bertanya dulu.
-            //
-            // Di layar lain, "Delete" memindahkan foto ke tong sampah dan masih
-            // bisa dibatalkan dari sana — bertanya di situ cuma menambah satu
-            // ketukan. Di layar yang menghapus selamanya, menekan sekali dari
-            // context menu tidak boleh cukup untuk menghilangkan foto.
             guard visibilityPolicy.allows(id: asset.id) else { return }
-            guard deletesPermanently else {
-                runAction([asset.id]) { await onDelete([asset.id]) }
-                return
-            }
-            menuDeleteID = asset.id
+            menuDeleteAsset = asset
         })
 
         return actions
@@ -896,6 +920,9 @@ struct PhotoCollectionScreen<Options: View>: View {
                     if visibilityScope != .locked && onRestoreSelection == nil && onUnlockSelection == nil,
                        visibleAssets.contains(where: { mapPolicy.allows(id: $0.id) }) {
                         Button("Show Map", systemImage: "map") { showsMap = true }
+                        Button("Slideshow", systemImage: "play.rectangle") {
+                            slideshow = PhotoSlideshowPresentation(assets: visibleAssets)
+                        }
                     }
                 }
                 options()
@@ -943,6 +970,7 @@ struct PhotoCollectionScreen<Options: View>: View {
         } label: {
             Image(systemName: "xmark")
         }
+        .accessibilityLabel("Cancel")
     }
 
     /// Aksi mode pilih untuk layar ini.
@@ -951,7 +979,7 @@ struct PhotoCollectionScreen<Options: View>: View {
     /// toolbar: susunannya sama di semua layar, dan yang berbeda cuma aksi mana
     /// yang tersedia.
     private var selectionActions: SelectionActions {
-        selectionActions(for: Array(selectedIDs))
+        selectionActions(for: visibleAssets.filter { selectedIDs.contains($0.id) }.map(\.id))
     }
 
     func selectionActions(for ids: [String]) -> SelectionActions {
@@ -963,7 +991,7 @@ struct PhotoCollectionScreen<Options: View>: View {
         // Tombolnya tetap terlihat saat belum ada yang dipilih, hanya dimatikan.
         // Bar yang berubah-ubah isinya sesuai jumlah pilihan lebih membingungkan
         // daripada tombol kelabu.
-        actions.isBusy = isPreparingShare || isPerformingAction || ids.isEmpty
+        actions.isBusy = isPreparingShare || copyPreparation.isPreparing || isPerformingAction || ids.isEmpty
 
         if allowsSelectionShare { actions.share = { share(ids) } }
         actions.trashConfirmation = SelectionConfirmation(
@@ -997,6 +1025,14 @@ struct PhotoCollectionScreen<Options: View>: View {
                     return
                 }
                 action.handler()
+            }
+        }
+        if allowsSelectionShare {
+            menu.insert(SelectionMenuAction(title: "Copy", systemImage: "doc.on.doc") { copy(ids) }, at: 0)
+            if visibilityScope != .locked {
+                menu.insert(SelectionMenuAction(title: "Slideshow", systemImage: "play.rectangle") {
+                    slideshow = PhotoSlideshowPresentation(assets: visibleAssets.filter { ids.contains($0.id) })
+                }, at: 1)
             }
         }
         if let onMoveToLocked, allowsServerActions {
@@ -1094,13 +1130,32 @@ struct PhotoCollectionScreen<Options: View>: View {
 
     // MARK: - Aksi
 
+    private func copy(_ selectedIDs: [String]) {
+        let selected = Set(selectedIDs)
+        let ids = visibleAssets.filter { selected.contains($0.id) }.map(\.id)
+        guard ids.count == selectedIDs.count else { return }
+        let api = APIClient(session: session)
+        let context = session.snapshot
+        let media = Dictionary(ids.compactMap { id in asset(for: id).map { (id, $0.isVideo) } },
+            uniquingKeysWith: { _, current in current })
+        guard media.count == ids.count else { return }
+        copyPreparation.start(ids: ids, prepare: { ids in
+            let urls = await shareURLs(ids)
+            guard urls.count == ids.count else { TemporaryMediaStore.remove(urls); return [] }
+            return zip(ids, urls).map { MediaCopy.Source(url: $0.1, isVideo: media[$0.0] == true) }
+        }, isAllowed: { (try? api.checkCurrent(context)) != nil && visibilityPolicy.allows(id: $0) },
+            onError: { actionError.wrappedValue = $0 })
+    }
+
     private func share(_ ids: [String]) {
         guard !isSharePresented else { return }
-        sharePreparation.start(ids: ids, prepare: { await shareURLs($0) },
+        sharePreparation.start(ids: ids, session: session, prepare: { await shareURLs($0) },
             isAllowed: { visibilityPolicy.allows(id: $0) },
             onError: { actionError.wrappedValue = $0 }) { urls in
             preparedURLs = urls
             preparedAssetIDs = ids
+            sharedSourceIDs = sharePreparation.preparedSourceIDs
+            sharedRequestContext = sharePreparation.preparedContext
             isSharePresented = true
         }
     }
@@ -1109,6 +1164,8 @@ struct PhotoCollectionScreen<Options: View>: View {
         TemporaryMediaStore.remove(preparedURLs)
         preparedURLs.removeAll()
         preparedAssetIDs.removeAll()
+        sharedSourceIDs.removeAll()
+        sharedRequestContext = nil
     }
 
     private func runRemoval(_ removal: PhotoCollectionRemoval) {
@@ -1125,6 +1182,8 @@ struct PhotoCollectionScreen<Options: View>: View {
     }
 
     private func endSelection() {
+        sharePreparation.cancel()
+        copyPreparation.cancel()
         selectedIDs.removeAll()
         isSelecting = false
     }

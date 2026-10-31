@@ -8,6 +8,8 @@ import SwiftUI
 struct AssetActionsMenu: View {
     let asset: AssetLite
     var onShare: () -> Void
+    var onCopy: (() -> Void)? = nil
+    var onSlideshow: (() -> Void)? = nil
     var onToggleFavorite: () -> Void
     var onArchive: () -> Void
     var onAddToAlbum: () -> Void
@@ -16,6 +18,14 @@ struct AssetActionsMenu: View {
     var body: some View {
         Button(action: onShare) {
             Label("Share", systemImage: "square.and.arrow.up")
+        }
+
+        if let onCopy {
+            Button("Copy", systemImage: "doc.on.doc", action: onCopy)
+        }
+
+        if let onSlideshow {
+            Button("Slideshow", systemImage: "play.rectangle", action: onSlideshow)
         }
 
         // Teks dan ikonnya mengikuti status sekarang, bukan selalu "Favorite".

@@ -27,7 +27,12 @@ struct LibraryView: View {
     @State private var albumPickerAsset: AssetLite?
     @State private var assetToDelete: AssetLite?
     @State private var shareFileURL: SharedLinkPresentation?
+    @State private var sharedFileAssetID: String?
+    @State private var sharedSourceIDs: [String] = []
+    @State private var sharedRequestContext: SessionRequestContext?
     @State private var sharePreparation = SharePreparation()
+    @State private var copyPreparation = MediaCopyPreparation()
+    @State private var slideshow: PhotoSlideshowPresentation?
     @State private var deleteFeedback = 0
     @State private var backupSetupJourney = BackupSetupJourney.shared
     @State private var navigation = AppNavigation.shared
@@ -57,6 +62,7 @@ struct LibraryView: View {
                 .onDisappear {
                     isRootVisible = false
                     sharePreparation.cancel()
+                    copyPreparation.cancel()
                 }
                 // Nav bar TETAP dipakai — blur tepi progresifnya digambar oleh
                 // bar itu; menyembunyikannya berarti kehilangan blurnya. Yang
@@ -96,6 +102,11 @@ struct LibraryView: View {
                     openBackupScreen()
                 }
                 .fullScreenCover(isPresented: openedStoryBinding) { memoryStoryCover }
+                .fullScreenCover(item: $slideshow) { selection in
+                    PhotoSlideshowView(assets: selection.assets, initialAssetID: selection.initialAssetID) { asset in
+                        await vm?.shareURL(for: asset)
+                    }
+                }
                 .navigationDestination(for: ExternalRoute.self) { route in
                     externalDestination(route)
                 }
@@ -190,8 +201,9 @@ struct LibraryView: View {
 
     private var assetActionPresentations: some View {
         albumActionPresentations
-            .sheet(item: $shareFileURL) { item in
-                ShareSheet(url: item.url)
+            .sheet(item: $shareFileURL, onDismiss: { sharedFileAssetID = nil; sharedSourceIDs.removeAll(); sharedRequestContext = nil }) { item in
+                PhotoShareSheet(urls: [item.url], assetIDs: sharedFileAssetID.map { [$0] } ?? [], sourceIDs: sharedSourceIDs, requestContext: sharedRequestContext,
+                    isAllowed: { AssetVisibilityPolicy(scope: .timeline).allows(id: $0) })
             }
             .sheet(item: $albumPickerAsset) { asset in
                 AlbumPickerSheet(albums: vm?.albums ?? []) { album in
@@ -290,24 +302,45 @@ struct LibraryView: View {
             AssetActionsMenu(
                 asset: asset,
                 onShare: { shareAsset(asset) },
+                onCopy: { copyAsset(asset) },
+                onSlideshow: { slideshow = PhotoSlideshowPresentation(assets: vm?.favorites ?? [], initialAssetID: asset.id) },
                 onToggleFavorite: { Task { await vm?.toggleFavorite(asset) } },
                 onArchive: { Task { await vm?.archive(asset) } },
                 onAddToAlbum: { albumPickerAsset = asset },
                 onDelete: { assetToDelete = asset })
         } else {
             Button("Share", systemImage: "square.and.arrow.up") { shareAsset(asset) }
+            Button("Copy", systemImage: "doc.on.doc") { copyAsset(asset) }
+            Button("Slideshow", systemImage: "play.rectangle") {
+                slideshow = PhotoSlideshowPresentation(assets: vm?.favorites ?? [], initialAssetID: asset.id)
+            }
             Button("Delete", systemImage: "trash", role: .destructive) { assetToDelete = asset }
         }
     }
 
+    private func copyAsset(_ asset: AssetLite) {
+        let api = APIClient(session: session)
+        let context = session.snapshot
+        copyPreparation.start(ids: [asset.id], prepare: { _ in
+            guard let file = await vm?.shareURL(for: asset) else { return [] }
+            return [.init(url: file, isVideo: asset.isVideo)]
+        }, isAllowed: {
+            modelGeneration == LocalSnapshot.generation && (try? api.checkCurrent(context)) != nil
+                && AssetVisibilityPolicy(scope: .timeline).allows(id: $0)
+        }, onError: { if vm?.actionError == nil { vm?.actionError = $0 } })
+    }
+
     private func shareAsset(_ asset: AssetLite) {
         guard shareFileURL == nil else { return }
-        sharePreparation.start(ids: [asset.id], prepare: { _ in
+        sharePreparation.start(ids: [asset.id], session: session, prepare: { _ in
             if let url = await vm?.shareURL(for: asset) { return [url] }
             return []
         }, isAllowed: { AssetVisibilityPolicy(scope: .timeline).allows(id: $0) },
             onError: { if vm?.actionError == nil { vm?.actionError = $0 } }) { urls in
             shareFileURL = urls.first.map { SharedLinkPresentation(url: $0) }
+            sharedFileAssetID = asset.id
+            sharedSourceIDs = sharePreparation.preparedSourceIDs
+            sharedRequestContext = sharePreparation.preparedContext
         }
     }
 

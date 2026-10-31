@@ -183,6 +183,7 @@ struct SelectionToolbar: ToolbarContent {
             } label: {
                 Image(systemName: "ellipsis")
             }
+            .accessibilityLabel("More")
             .disabled(actions.isBusy)
         }
     }

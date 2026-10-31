@@ -58,6 +58,7 @@ final class CollectionShareFeedbackTests: XCTestCase {
         stub(status: 200)
         try await activate("Share")
 
+        try await continueFromComposer()
         let activity: UIActivityViewController = try await presentedController()
         XCTAssertNotNil(activity.presentingViewController ?? activity.parent?.presentingViewController)
         XCTAssertEqual(observation.preparations, 2)
@@ -73,6 +74,7 @@ final class CollectionShareFeedbackTests: XCTestCase {
         let target = try XCTUnwrap(item.target)
         let action = try XCTUnwrap(item.action)
         XCTAssertTrue(UIApplication.shared.sendAction(action, to: target, from: item, for: nil))
+        try await continueFromComposer()
         let _: UIActivityViewController = try await presentedController()
         let firstFile = try XCTUnwrap(observation.files.first)
         XCTAssertTrue(FileManager.default.fileExists(atPath: firstFile.path))
@@ -131,6 +133,8 @@ final class CollectionShareFeedbackTests: XCTestCase {
             "Opening the viewer must cancel the old grid download before it can publish share files")
         XCTAssertNil(observation.error)
         XCTAssertNil(findPresented(UIActivityViewController.self, from: root))
+        XCTAssertNil(findPresented(PhotoShareViewController.self, from: root),
+            "A cancelled grid share must not open a composer over the viewer")
         XCTAssertTrue(grid.presentedViewController === detail)
         await withCheckedContinuation { continuation in
             grid.dismiss(animated: false) { continuation.resume() }
@@ -227,6 +231,21 @@ final class CollectionShareFeedbackTests: XCTestCase {
         let own = (controller.navigationItem.leftBarButtonItems ?? []) + (controller.navigationItem.rightBarButtonItems ?? [])
             + (controller.toolbarItems ?? []) + groups.flatMap(\.barButtonItems)
         return own + controller.children.flatMap { barItems($0) }
+    }
+
+    private func continueFromComposer() async throws {
+        let composer: PhotoShareViewController = try await presentedController()
+        XCTAssertNil(findPresented(UIActivityViewController.self, from: try XCTUnwrap(window?.rootViewController)))
+        await waitUntil("The actual composer Share button is enabled") {
+            self.continueButton(in: composer.view).map { $0.isEnabled && $0.window != nil } == true
+        }
+        let button = try XCTUnwrap(continueButton(in: composer.view))
+        button.sendActions(for: .touchUpInside)
+    }
+
+    private func continueButton(in view: UIView) -> UIButton? {
+        if let button = view as? UIButton, button.accessibilityIdentifier == "photoShare.continue" { return button }
+        return view.subviews.compactMap { continueButton(in: $0) }.first
     }
 
     private func presentedController<T: UIViewController>() async throws -> T {
