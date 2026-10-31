@@ -3,26 +3,6 @@ import Observation
 import Photos
 import UIKit
 
-/// `PHImageManager` dapat memanggil result handler lebih dari sekali (preview
-/// terdegradasi lalu hasil final). Continuation Swift hanya boleh diselesaikan
-/// sekali, jadi seluruh jalan keluar melewati gerbang ini.
-private final class PhotoContinuationGate<Value>: @unchecked Sendable {
-    private let lock = NSLock()
-    private var continuation: CheckedContinuation<Value, Never>?
-
-    init(_ continuation: CheckedContinuation<Value, Never>) {
-        self.continuation = continuation
-    }
-
-    func resume(returning value: Value) {
-        lock.lock()
-        let continuation = self.continuation
-        self.continuation = nil
-        lock.unlock()
-        continuation?.resume(returning: value)
-    }
-}
-
 /// Satu album di perangkat yang bisa dipilih untuk ikut ditampilkan.
 struct LocalAlbum: Identifiable, Sendable {
     let id: String
@@ -749,29 +729,29 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
     /// lokal ini membuat video yang baru saja diunggah mulai seketika; kalau
     /// salinan penuhnya tidak ada di perangkat, pemanggil segera beralih ke
     /// streaming server alih-alih menggantung menunggu iCloud.
-    func videoAsset(for id: String) async -> AVAsset? {
+    func videoAsset(for id: String, allowsNetworkAccess: Bool = false) async -> AVAsset? {
         guard let asset = Self.fetchAsset(id), asset.mediaType == .video else {
             return nil
         }
 
         let options = PHVideoRequestOptions()
         options.deliveryMode = .automatic
-        options.isNetworkAccessAllowed = false
+        options.isNetworkAccessAllowed = allowsNetworkAccess
 
-        return await withCheckedContinuation { continuation in
-            imageManager.requestAVAsset(
-                forVideo: asset,
-                options: options
-            ) { videoAsset, _, _ in
-                continuation.resume(returning: videoAsset)
+        let manager = imageManager
+        return await PhotoMediaRequest.load(request: { completion in
+            manager.requestAVAsset(forVideo: asset, options: options) { videoAsset, _, _ in
+                completion(videoAsset)
             }
-        }
+        }, cancel: { manager.cancelImageRequest($0) })
     }
 
     /// Apakah aset PhotoKit ini benar-benar Live Photo.
     ///
     /// Deteksi dari `mediaSubtypes`, bukan dari ekstensi atau durasi. Sebuah
     /// Live Photo terlihat sebagai image biasa sampai flag ini dibaca.
+    func hasAdjustments(_ id: String) -> Bool { Self.fetchAsset(id)?.hasAdjustments == true }
+
     func isLivePhoto(_ id: String) -> Bool {
         guard let asset = Self.fetchAsset(id) else { return false }
         return asset.mediaType == .image && asset.mediaSubtypes.contains(.photoLive)
@@ -850,19 +830,13 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
         options.deliveryMode = .highQualityFormat
         options.isNetworkAccessAllowed = true
 
-        return await withCheckedContinuation { continuation in
-            let gate = PhotoContinuationGate<PHLivePhoto?>(continuation)
-            imageManager.requestLivePhoto(
-                for: asset,
-                targetSize: targetSize,
-                contentMode: .aspectFit,
-                options: options
-            ) { livePhoto, info in
-                let degraded = info?[PHImageResultIsDegradedKey] as? Bool ?? false
-                if degraded { return }
-                gate.resume(returning: livePhoto)
+        let manager = imageManager
+        return await PhotoMediaRequest.load(request: { completion in
+            manager.requestLivePhoto(for: asset, targetSize: targetSize, contentMode: .aspectFit, options: options) { livePhoto, info in
+                guard info?[PHImageResultIsDegradedKey] as? Bool != true else { return }
+                completion(livePhoto)
             }
-        }
+        }, cancel: { manager.cancelImageRequest($0) })
     }
 
     func startCaching(_ ids: [String], size: CGSize) {
