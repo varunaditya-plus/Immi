@@ -78,8 +78,12 @@ class PhotoThumbnailLoader {
         }
     }
 
+    func displayAsset(_ asset: AssetLite) -> AssetLite {
+        MediaEditingPipeline.shared.displayAsset(asset, session: session)
+    }
+
     func cacheKey(for assetId: String) -> String {
-        "\(assetId)-thumbnail"
+        MediaEditingPipeline.shared.cacheKey("\(assetId)-thumbnail", assetID: assetId, session: session)
     }
 
     /// Cache hit, tanpa `await`. Dipakai sel untuk memasang gambar seketika.
@@ -107,17 +111,24 @@ class PhotoThumbnailLoader {
         // diunduh) bukan aset rusak. Membuangnya berarti menghapus petak untuk
         // foto yang masih ada di perangkat.
         if LocalPhotoLibrary.isLocal(assetId) {
-            let image = await LocalPhotoLibrary.shared.thumbnail(
+            let key = cacheKey(for: assetId)
+            let context = session.snapshot
+            let original = await LocalPhotoLibrary.shared.thumbnail(
                 for: assetId, size: Self.deviceTargetSize)
-            guard accountGeneration == LocalSnapshot.generation,
-                  visibilityPolicy.allows(id: assetId) else { return nil }
+            let image: UIImage?
+            if let original, context == session.snapshot, key == cacheKey(for: assetId) {
+                image = try? await MediaEditingPipeline.shared.devicePreview(original, id: assetId,
+                    session: session, maxPixelSize: Self.maxPixelSize)
+            } else { image = nil }
+            guard accountGeneration == LocalSnapshot.generation, context == session.snapshot,
+                  key == cacheKey(for: assetId), visibilityPolicy.allows(id: assetId) else { return nil }
             if let image {
                 // Dititipkan ke cache MEMORI saja, bukan ke disk: byte-nya sudah
                 // ada di perangkat, dan menyalinnya ke cache aplikasi hanya
                 // menggandakan penyimpanan untuk sesuatu yang tak perlu diunduh.
                 ImageMemoryCache.shared.insert(
                     image,
-                    for: ImageCache.memoryKey(cacheKey(for: assetId), Self.maxPixelSize))
+                    for: ImageCache.memoryKey(key, Self.maxPixelSize))
             }
             return image
         }
@@ -132,7 +143,7 @@ class PhotoThumbnailLoader {
             let image = try await ImageCache.shared.image(
                 key: key,
                 maxPixelSize: Self.maxPixelSize,
-                fetch: { try await api.rawData(endpoint) })
+                fetch: { try await MediaEditingPipeline.shared.imageData(endpoint, api: api) })
             // Keberhasilan ikut dicatat: itulah yang membedakan "aset ini
             // hilang" dari "sambungannya sedang rusak".
             guard accountGeneration == LocalSnapshot.generation,
@@ -168,14 +179,15 @@ class PhotoThumbnailLoader {
         guard !serverIDs.isEmpty else { return }
 
         let api = session.imageAPI
+        let idsByKey = Dictionary(serverIDs.map { (cacheKey(for: $0), $0) }, uniquingKeysWith: { _, value in value })
         ImageCache.shared.prefetch(
-            keys: serverIDs.map(cacheKey(for:)),
+            keys: Array(idsByKey.keys),
             maxPixelSize: Self.maxPixelSize,
             fetch: { key in
-                let assetId = String(key.dropLast("-thumbnail".count))
-                let data = try await api.rawData(.init(
+                guard let assetId = idsByKey[key] else { throw CancellationError() }
+                let data = try await MediaEditingPipeline.shared.imageData(.init(
                     path: "/assets/\(assetId)/thumbnail",
-                    query: [.init(name: "size", value: "thumbnail")]))
+                    query: [.init(name: "size", value: "thumbnail")]), api: api)
                 // Keberhasilan prefetch ikut dicatat, dan itu penting justru di
                 // sini: yang melaporkan kegagalan di jalur ini juga prefetch,
                 // dan laporan itu dibuang kalau tidak ada satu pun keberhasilan
@@ -190,7 +202,7 @@ class PhotoThumbnailLoader {
             // masih beberapa baris di luar layar — jadi pembuangannya terjadi di
             // tempat yang tidak terlihat, bukan tepat saat barisnya tiba.
             onFailure: { key, error in
-                let assetId = String(key.dropLast("-thumbnail".count))
+                guard let assetId = idsByKey[key] else { return }
                 Task { @MainActor in
                     guard generation == LocalSnapshot.generation else { return }
                     UnreadableAssets.shared.report(assetId, error: error)

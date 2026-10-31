@@ -782,7 +782,9 @@ struct AuthImage: View {
     }
 
     private var cacheKey: String {
-        path ?? "\(assetId)-\(size)"
+        let base = path ?? "\(assetId)-\(size)"
+        guard path == nil || path == "/assets/\(assetId)/thumbnail" else { return base }
+        return MediaEditingPipeline.shared.cacheKey(base, assetID: assetId, session: session)
     }
 
     private var memoryKey: String {
@@ -811,7 +813,8 @@ struct AuthImage: View {
     /// resmi terasa tanpa loading.
     private var thumbnailMemoryKey: String? {
         guard path == nil, size != "thumbnail" else { return nil }
-        return ImageCache.memoryKey("\(assetId)-thumbnail", 600)
+        return ImageCache.memoryKey(MediaEditingPipeline.shared.cacheKey("\(assetId)-thumbnail",
+            assetID: assetId, session: session), 600)
     }
 
     private func load() async {
@@ -832,7 +835,7 @@ struct AuthImage: View {
             let loaded = try await ImageCache.shared.image(
                 key: key,
                 maxPixelSize: maxPixelSize,
-                fetch: { try await api.rawData(endpoint) })
+                fetch: { try await MediaEditingPipeline.shared.imageData(endpoint, api: api) })
 
             // Hasilnya DIPASANG meski task-nya sudah dibatalkan.
             //
