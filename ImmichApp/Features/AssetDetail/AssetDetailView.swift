@@ -1,3 +1,6 @@
+import AVFoundation
+import ImageIO
+import UniformTypeIdentifiers
 import CoreLocation
 import LinkPresentation
 import SwiftUI
@@ -85,6 +88,10 @@ struct AssetDetailView: View {
     @State private var locationTarget: AssetViewerState.Target?
     @State private var albumTarget: AssetViewerState.Target?
     @State private var photoEditorTarget: PhotoEditorTarget?
+    @State private var changedSourceEditor: PhotoEditorTarget?
+    @State private var liveActionID: UUID?
+    private var isApplyingLiveAction: Bool { liveActionID != nil }
+    @State private var editorOwnedFiles: [URL] = []
     @State private var descriptionTarget: AssetViewerState.Target?
     @State private var removeDeviceTarget: AssetViewerState.Target?
     @State private var showRemoveDeviceConfirm = false
@@ -175,6 +182,13 @@ struct AssetDetailView: View {
                 Color(.systemBackground)
             }
         }
+        .disabled(isApplyingLiveAction)
+        .overlay {
+            if isApplyingLiveAction {
+                ProgressView("Applying edits…")
+                    .padding(20).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+            }
+        }
         .background {
             GeometryReader { _ in
                 Color.clear
@@ -213,6 +227,7 @@ struct AssetDetailView: View {
             pagerController?.stopAllPlayback()
             vm?.invalidateSelection()
             photoEditorTarget = nil
+            discardChangedSourceEditor()
             dateTarget = nil
             locationTarget = nil
             albumTarget = nil
@@ -280,6 +295,7 @@ struct AssetDetailView: View {
             .onDisappear {
                 OfflineBannerSuppression.shared.end()
                 if photoEditorTarget == nil {
+                    discardChangedSourceEditor()
                     viewer.deactivate()
                     vm?.invalidateSelection()
                 }
@@ -298,6 +314,7 @@ struct AssetDetailView: View {
                 locationTarget = nil
                 albumTarget = nil
                 photoEditorTarget = nil
+                discardChangedSourceEditor()
                 showDeleteConfirm = false
                 trashActionError = nil
                 showRemoveDeviceConfirm = false
@@ -351,7 +368,33 @@ struct AssetDetailView: View {
             .sheet(item: $dateTarget) { dateEditor($0) }
             .sheet(item: $locationTarget) { locationEditor($0) }
             .sheet(item: $albumTarget) { albumPicker($0) }
-            .fullScreenCover(item: $photoEditorTarget, onDismiss: { viewer.activate() }) { photoEditor($0) }
+            .alert("This photo has changed", isPresented: Binding(
+                get: { changedSourceEditor != nil },
+                set: { if !$0 { changedSourceEditor = nil } }
+            )) {
+                Button("Start New Edit") {
+                    if let prepared = changedSourceEditor, editorIsCurrent(prepared) {
+                        photoEditorTarget = prepared
+                    } else {
+                        TemporaryMediaStore.remove(editorOwnedFiles)
+                        editorOwnedFiles.removeAll()
+                    }
+                    changedSourceEditor = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    changedSourceEditor = nil
+                    TemporaryMediaStore.remove(editorOwnedFiles)
+                    editorOwnedFiles.removeAll()
+                    viewer.activate()
+                }
+            } message: {
+                Text("The source changed after your last edit. Start again with the current photo? Your previous edit will only be replaced when you save.")
+            }
+            .fullScreenCover(item: $photoEditorTarget, onDismiss: {
+                TemporaryMediaStore.remove(editorOwnedFiles)
+                editorOwnedFiles.removeAll()
+                viewer.activate()
+            }) { photoEditor($0) }
             .confirmationDialog(
                 (removeDeviceTarget?.asset.needsUpload ?? currentAsset.needsUpload) ? "Remove This Photo?" : "Remove from Device",
                 isPresented: $showRemoveDeviceConfirm,
@@ -370,18 +413,85 @@ struct AssetDetailView: View {
             }
     }
 
+    @ViewBuilder
     private func photoEditor(_ context: PhotoEditorTarget) -> some View {
-        PhotoCropEditor(
-            assetID: context.serverID,
-            originalPixelSize: context.pixelSize,
-            existingEdits: context.edits,
-            onSave: { edits in
-                let serverID = context.serverID
-                guard await vm?.applyEdits(edits, to: serverID) == true else { return false }
-                await pagerController?.reloadImage(for: context.target.asset.id)
-                onAssetUpdated?(serverID)
-                return true
-            })
+        if context.document.kind == .photo {
+            PhotoCropEditor(initialRecipe: context.document.photo, requiresSave: context.sourceChanged, loadImage: {
+                await Task.detached(priority: .userInitiated) { UIImage(contentsOfFile: context.originalURL.path) }.value
+            }, isAllowed: { editorIsCurrent(context) }, onSave: { recipe in
+                var document = context.document
+                document.photo = recipe.normalized()
+                return await saveEditor(document, context: context)
+            }, onRevert: { await revertEditor(context) })
+        } else {
+            MediaVideoEditor(sourceURL: context.motionURL ?? context.originalURL,
+                stillURL: context.document.kind == .livePhoto ? context.originalURL : nil,
+                isLivePhoto: context.document.kind == .livePhoto,
+                video: context.document.video, live: context.document.live, photo: context.document.photo,
+                isAllowed: { editorIsCurrent(context) }, onSave: { video, live, photo in
+                    var document = context.document
+                    document.photo = photo.normalized()
+                    document.video = video
+                    document.live = live
+                    return await saveEditor(document, context: context)
+                }, onRevert: { await revertEditor(context) })
+        }
+    }
+
+    private func discardChangedSourceEditor() {
+        guard changedSourceEditor != nil else { return }
+        changedSourceEditor = nil
+        TemporaryMediaStore.remove(editorOwnedFiles)
+        editorOwnedFiles.removeAll()
+    }
+
+    private func editorIsCurrent(_ context: PhotoEditorTarget) -> Bool {
+        !Task.isCancelled && context.requestContext == session.snapshot
+            && context.target.asset.id == currentAsset.id
+            && (serverAssetID(for: context.target.asset) ?? context.target.asset.id) == context.sourceID
+            && visibilityPolicy.allows(id: context.target.asset.id)
+            && visibilityPolicy.allows(id: context.sourceID)
+    }
+
+    private func saveEditor(_ document: MediaEditDocument, context: PhotoEditorTarget, readyVisit: UUID? = nil) async -> Bool {
+        func isCurrent() -> Bool {
+            editorIsCurrent(context) && (readyVisit == nil || readyVisit == viewer.visit)
+        }
+        guard isCurrent() else { return false }
+        vm?.actionError = nil
+        do {
+            if let deviceID = document.deviceAssetID {
+                guard let metadata = await LocalPhotoLibrary.shared.photoMetadata(for: deviceID),
+                      MediaEditingPipeline.deviceFingerprint(metadata) == context.token.sourceFingerprint else {
+                    throw MediaEditStoreError.sourceChanged
+                }
+            } else if let metadata = LocalSnapshot.load(AssetResponseDTO.self,
+                for: LocalSnapshot.Key.assetDetail(context.sourceID)),
+                      MediaEditingPipeline.fingerprint(metadata) != context.token.sourceFingerprint {
+                throw MediaEditStoreError.sourceChanged
+            }
+            guard isCurrent() else { return false }
+            let record = try MediaEditRecord(type: MediaEditingPipeline.recordType,
+                schemaVersion: MediaEditingPipeline.schemaVersion,
+                sourceFingerprint: context.token.sourceFingerprint, value: document)
+            try MediaEditStore.shared.save(record, using: context.token, isCurrent: isCurrent)
+            await pagerController?.reloadImage(for: context.target.asset.id)
+            guard isCurrent() else { return false }
+            onAssetUpdated?(context.sourceID)
+            Task { await WidgetSnapshotExporter.refresh(session: session) }
+            return true
+        } catch {
+            if isCurrent() { vm?.actionError = ErrorEvent(error.localizedDescription) }
+            return false
+        }
+    }
+
+    private func revertEditor(_ context: PhotoEditorTarget) async -> Bool {
+        var original = context.document
+        original.photo = PhotoEditRecipe()
+        original.video = VideoEditRecipe()
+        original.live = LivePhotoEditRecipe()
+        return await saveEditor(original, context: context)
     }
 
     private func albumPicker(_ target: AssetViewerState.Target) -> some View {
@@ -1018,10 +1128,11 @@ struct AssetDetailView: View {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if currentAsset.needsUpload {
                     uploadButton
+                    editPhotoButton
                 } else {
                     // Urutannya mengikuti Photos iPad: edit, info, hapus,
                     // kemudian menu tindakan tambahan.
-                    if !currentAsset.isVideo { editPhotoButton }
+                    editPhotoButton
                     infoButton
                     deleteButton
                 }
@@ -1039,6 +1150,19 @@ struct AssetDetailView: View {
         Menu {
             Button("Copy", systemImage: "doc.on.doc") { copyCurrentMedia() }
                 .disabled(viewer.isPreparing(.copy))
+
+            if currentAsset.isLivePhoto, trashActions == nil {
+                Menu("Live Photo", systemImage: "livephoto") {
+                    ForEach(LivePhotoEditRecipe.Mode.allCases) { mode in
+                        Button(mode.title) { preparePhotoEditor(action: .liveMode(mode)) }
+                    }
+                }
+                .disabled(isPreparingEditor || isApplyingLiveAction)
+                Button("Save as Video", systemImage: "video.badge.plus") {
+                    preparePhotoEditor(action: .saveLiveVideo)
+                }
+                .disabled(isPreparingEditor || isApplyingLiveAction)
+            }
 
             if visibilityPolicy.scope != .locked, trashActions == nil {
                 Button("Slideshow", systemImage: "play.rectangle") {
@@ -1155,7 +1279,7 @@ struct AssetDetailView: View {
             }
             defer { TemporaryMediaStore.remove(file) }
             do {
-                return try await MediaCopy.prepare([.init(url: file, isVideo: target.asset.isVideo)])
+                return try await MediaCopy.prepare([.init(url: file, isVideo: PhotoExportService.contentType(of: file).conforms(to: .movie))])
             } catch {
                 if copyIsCurrent(target, generation: generation, context: context), !(error is CancellationError) {
                     vm?.actionError = ErrorEvent(error.localizedDescription)
@@ -1212,6 +1336,8 @@ struct AssetDetailView: View {
             // sengaja hanya menawarkan dua hal yang benar-benar bisa dilakukan.
             ToolbarItem(placement: .bottomBar) { shareButton }
             ToolbarSpacer(.flexible, placement: .bottomBar)
+            ToolbarItem(placement: .bottomBar) { editPhotoButton }
+            ToolbarSpacer(.flexible, placement: .bottomBar)
             ToolbarItem(placement: .bottomBar) { uploadButton }
         } else {
             ToolbarItem(placement: .bottomBar) { shareButton }
@@ -1221,7 +1347,7 @@ struct AssetDetailView: View {
                 favoriteButton
                 infoButton
                 // Editor hanya untuk image; video tidak menyisakan placeholder.
-                if !currentAsset.isVideo { editPhotoButton }
+                editPhotoButton
             }
 
             ToolbarSpacer(.flexible, placement: .bottomBar)
@@ -1309,18 +1435,177 @@ struct AssetDetailView: View {
             if isPreparingEditor {
                 ProgressView()
             } else {
-                Image(systemName: "crop.rotate")
+                Image(systemName: "slider.horizontal.3")
             }
         }
-        .disabled(currentServerAssetID == nil || editablePixelSize == nil || isPreparingEditor)
-        .accessibilityLabel("Edit Photo")
+        .disabled(isPreparingEditor || isApplyingLiveAction)
+        .accessibilityLabel(currentAsset.isVideo ? "Edit Video" : "Edit Photo")
     }
 
-    private func preparePhotoEditor() {
+    private enum EditorAction { case edit, liveMode(LivePhotoEditRecipe.Mode), saveLiveVideo }
+
+    private func preparePhotoEditor(action: EditorAction = .edit) {
         let target = currentTarget
-        guard let serverID = target.serverID, let size = editablePixelSize else { return }
-        viewer.prepareEditor(target, operation: { await vm?.edits(for: serverID) }) { edits in
-            photoEditorTarget = PhotoEditorTarget(target: target, serverID: serverID, pixelSize: size, edits: edits)
+        let sourceID = target.serverID ?? target.asset.id
+        let request = session.snapshot
+        guard visibilityPolicy.allows(id: target.asset.id), visibilityPolicy.allows(id: sourceID) else { return }
+        viewer.prepareEditor(target, operation: { () async -> PhotoEditorTarget? in
+            var owned: [URL] = []
+            do {
+                let saved = try MediaEditingPipeline.shared.savedEdit(for: target.asset.id, session: session)
+                var document = saved?.document ?? MediaEditDocument()
+                let recordID = saved?.assetID ?? sourceID
+                let sourceDeviceID = document.deviceAssetID ?? (LocalPhotoLibrary.isLocal(sourceID) ? sourceID : nil)
+                let source: URL
+                let fingerprint: String
+                var serverEdits: [AssetEditRecord] = []
+                if let deviceID = sourceDeviceID {
+                    guard let metadata = await LocalPhotoLibrary.shared.photoMetadata(for: deviceID),
+                          let file = await LocalPhotoLibrary.shared.exportFile(for: deviceID) else {
+                        throw PhotoEditRenderError.unavailable
+                    }
+                    defer { try? FileManager.default.removeItem(at: file.url) }
+                    source = try TemporaryMediaStore.adoptShareFile(at: file.url, suggestedFilename: file.filename)
+                    owned.append(source)
+                    fingerprint = MediaEditingPipeline.deviceFingerprint(metadata)
+                    document.deviceAssetID = deviceID
+                    document.kind = metadata.isVideo ? .video : metadata.isLivePhoto ? .livePhoto : .photo
+                } else {
+                    let api = APIClient(session: session), repository = AssetDetailRepository(api: api)
+                    let detail = try await repository.fetchAsset(sourceID)
+                    fingerprint = MediaEditingPipeline.fingerprint(detail)
+                    document.kind = detail.isVideo ? .video : detail.isLivePhoto ? .livePhoto : .photo
+                    document.motionAssetID = detail.livePhotoVideoId
+                    if document.kind == .photo { serverEdits = try await repository.edits(for: sourceID) }
+                    source = try await repository.downloadOriginalFile(sourceID, filename: detail.originalFileName)
+                    owned.append(source)
+                    try await MediaEditingPipeline.validateOriginal(source, checksum: detail.checksum)
+                    if saved == nil, document.kind == .photo {
+                        let exif = detail.exifInfo
+                        var size = CGSize(width: exif?.exifImageWidth ?? 0, height: exif?.exifImageHeight ?? 0)
+                        if [5, 6, 7, 8, -90, 90].contains(Int(exif?.orientation ?? "") ?? 1) {
+                            size = CGSize(width: size.height, height: size.width)
+                        }
+                        if size.width <= 0 || size.height <= 0,
+                           let image = CGImageSourceCreateWithURL(source as CFURL, nil),
+                           let properties = CGImageSourceCopyPropertiesAtIndex(image, 0, nil) as? [String: Any],
+                           let width = properties[kCGImagePropertyPixelWidth as String] as? NSNumber,
+                           let height = properties[kCGImagePropertyPixelHeight as String] as? NSNumber {
+                            size = CGSize(width: width.doubleValue, height: height.doubleValue)
+                            if [5, 6, 7, 8].contains((properties[kCGImagePropertyOrientation as String] as? NSNumber)?.intValue ?? 1) {
+                                size = CGSize(width: size.height, height: size.width)
+                            }
+                        }
+                        guard size.width > 0, size.height > 0 else { throw PhotoEditRenderError.unavailable }
+                        document.photo = PhotoEditRecipe(serverEdits: serverEdits, originalPixelSize: size)
+                    }
+                }
+                guard !Task.isCancelled, request == session.snapshot,
+                      (serverAssetID(for: target.asset) ?? target.asset.id) == sourceID,
+                      visibilityPolicy.allows(id: target.asset.id), visibilityPolicy.allows(id: sourceID) else {
+                    throw CancellationError()
+                }
+                let sourceChanged = saved.map { $0.record.sourceFingerprint != fingerprint } ?? false
+                if sourceChanged {
+                    document.photo = PhotoEditRecipe()
+                    document.video = VideoEditRecipe()
+                    document.live = LivePhotoEditRecipe()
+                }
+                document.sourceAspectRatio = try await MediaEditingPipeline.sourceAspectRatio(source,
+                    isVideo: document.kind == .video)
+                if document.kind == .photo {
+                    guard let image = CGImageSourceCreateWithURL(source as CFURL, nil),
+                          CGImageSourceGetCount(image) == 1,
+                          let type = CGImageSourceGetType(image) as String?,
+                          UTType(type)?.conforms(to: .rawImage) != true else { throw PhotoEditRenderError.unavailable }
+                }
+                MediaEditStore.shared.configure(session: session)
+                let token = try MediaEditStore.shared.capture(assetID: recordID, sourceFingerprint: fingerprint)
+                guard try MediaEditStore.shared.read(using: token) == saved?.record else { throw MediaEditStoreError.editChanged }
+                var motion: URL?
+                if document.kind == .livePhoto {
+                    if let deviceID = document.deviceAssetID {
+                        guard let file = await LocalPhotoLibrary.shared.livePhotoMotionFile(for: deviceID) else {
+                            throw MediaVideoEditError.unavailableVideo
+                        }
+                        defer { try? FileManager.default.removeItem(at: file.url) }
+                        motion = try TemporaryMediaStore.adoptShareFile(at: file.url, suggestedFilename: file.filename)
+                    } else if let id = document.motionAssetID {
+                        motion = try await AssetDetailRepository(api: APIClient(session: session)).downloadOriginalFile(id, filename: id)
+                    }
+                    guard let motion else { throw MediaVideoEditError.unavailableVideo }
+                    owned.append(motion)
+                }
+                guard !Task.isCancelled, request == session.snapshot,
+                      (serverAssetID(for: target.asset) ?? target.asset.id) == sourceID,
+                      visibilityPolicy.allows(id: target.asset.id), visibilityPolicy.allows(id: sourceID) else { throw CancellationError() }
+                return PhotoEditorTarget(target: target, sourceID: sourceID, requestContext: request,
+                    originalURL: source, motionURL: motion, document: document, token: token,
+                    ownedFiles: owned, sourceChanged: sourceChanged)
+            } catch {
+                TemporaryMediaStore.remove(owned)
+                if !Task.isCancelled, request == session.snapshot, viewer.isCurrent(target), !(error is CancellationError) {
+                    vm?.actionError = ErrorEvent(error.localizedDescription)
+                }
+                return nil
+            }
+        }, discard: { TemporaryMediaStore.remove($0.ownedFiles) }) { prepared in
+            let readyVisit = viewer.visit
+            editorOwnedFiles = prepared.ownedFiles
+            if prepared.sourceChanged { changedSourceEditor = prepared; return }
+            switch action {
+            case .edit: photoEditorTarget = prepared
+            case .liveMode(let mode):
+                guard prepared.document.kind == .livePhoto else {
+                    TemporaryMediaStore.remove(prepared.ownedFiles)
+                    if editorOwnedFiles == prepared.ownedFiles { editorOwnedFiles.removeAll() }
+                    viewer.activate()
+                    return
+                }
+                liveActionID = prepared.id
+                var document = prepared.document
+                document.live.mode = mode
+                _ = await saveEditor(document, context: prepared, readyVisit: readyVisit)
+                finishLiveAction(prepared, readyVisit: readyVisit)
+            case .saveLiveVideo:
+                liveActionID = prepared.id
+                await saveLiveVideo(prepared, readyVisit: readyVisit)
+                finishLiveAction(prepared, readyVisit: readyVisit)
+            }
+        }
+    }
+
+    private func finishLiveAction(_ context: PhotoEditorTarget, readyVisit: UUID) {
+        TemporaryMediaStore.remove(context.ownedFiles)
+        if editorOwnedFiles == context.ownedFiles { editorOwnedFiles.removeAll() }
+        guard liveActionID == context.id else { return }
+        liveActionID = nil
+        if editorIsCurrent(context), viewer.visit == readyVisit { viewer.activate() }
+    }
+
+    private func saveLiveVideo(_ context: PhotoEditorTarget, readyVisit: UUID) async {
+        guard context.document.kind == .livePhoto, let motion = context.motionURL, editorIsCurrent(context), viewer.visit == readyVisit else { return }
+        var owned: [URL] = []
+        defer { TemporaryMediaStore.remove(owned) }
+        do {
+            let output: URL
+            if [.loop, .bounce].contains(context.document.live.mode) {
+                let result = try await MediaLiveRenderer.shared.render(motionURL: motion,
+                    stillURL: context.originalURL, video: context.document.video,
+                    live: context.document.live, photo: context.document.photo)
+                output = result.primaryURL
+                owned += result.ownedURLs
+            } else {
+                output = try await MediaVideoRenderer.shared.renderVideo(sourceURL: motion,
+                    video: context.document.video, photo: context.document.photo)
+                owned.append(output)
+            }
+            guard editorIsCurrent(context), viewer.visit == readyVisit else { return }
+            guard await LocalPhotoLibrary.shared.saveDownloadedFile(output, isVideo: true) != nil else {
+                throw PhotoEditRenderError.unavailable
+            }
+        } catch {
+            if editorIsCurrent(context), viewer.visit == readyVisit { vm?.actionError = ErrorEvent(error.localizedDescription) }
         }
     }
 
@@ -1492,22 +1777,6 @@ struct AssetDetailView: View {
         AssetServerIdentity.resolve(asset)
     }
 
-    private var editablePixelSize: CGSize? {
-        guard let exif = matchingDetail?.exifInfo,
-              let width = exif.exifImageWidth,
-              let height = exif.exifImageHeight,
-              width > 0, height > 0
-        else { return nil }
-
-        // Samakan dengan `getDimensions()` milik server Immich. Crop endpoint
-        // memvalidasi terhadap dimensi yang sudah memperhitungkan EXIF rotate.
-        let orientation = Int(exif.orientation ?? "")
-        let swapsDimensions = orientation.map { [5, 6, 7, 8, -90, 90].contains($0) } ?? false
-        return swapsDimensions
-            ? CGSize(width: height, height: width)
-            : CGSize(width: width, height: height)
-    }
-
     // A backup mapping identifies the original, not whether device and server edits match.
     private func fileURL(for target: AssetViewerState.Target) async -> URL? {
         let accountGeneration = LocalSnapshot.generation
@@ -1517,19 +1786,16 @@ struct AssetDetailView: View {
             let localID = LocalPhotoLibrary.isLocal(target.asset.id)
                 ? LocalPhotoLibrary.localIdentifier(from: target.asset.id)
                 : SwiftDataManager.shared.localIdentifier(forServerAsset: target.asset.id)
-            if let localID, let file = await LocalPhotoLibrary.shared.exportFile(
-                for: LocalPhotoLibrary.assetID(for: localID)) {
-                defer { try? FileManager.default.removeItem(at: file.url) }
-                guard viewer.isCurrent(target), accountGeneration == LocalSnapshot.generation,
-                      visibilityPolicy.allows(id: target.asset.id),
-                      serverAssetID(for: target.asset) == nil,
-                      !Task.isCancelled else { return nil }
+            if let localID {
                 do {
-                    return try TemporaryMediaStore.adoptShareFile(
-                        at: file.url, suggestedFilename: file.filename)
+                    guard let file = try await MediaEditingPipeline.shared.exportDeviceFile(
+                        for: LocalPhotoLibrary.assetID(for: localID), session: session) else { return nil }
+                    guard viewer.isCurrent(target), accountGeneration == LocalSnapshot.generation,
+                          visibilityPolicy.allows(id: target.asset.id), serverAssetID(for: target.asset) == nil,
+                          !Task.isCancelled else { TemporaryMediaStore.remove(file.url); return nil }
+                    return file.url
                 } catch {
-                    if viewer.isCurrent(target), accountGeneration == LocalSnapshot.generation,
-                       !Task.isCancelled {
+                    if viewer.isCurrent(target), accountGeneration == LocalSnapshot.generation, !Task.isCancelled {
                         vm?.actionError = ErrorEvent(error.localizedDescription)
                     }
                     return nil
@@ -1561,10 +1827,9 @@ struct AssetDetailView: View {
         let file: URL?
         if let serverID {
             file = await vm?.downloadCurrentFile(serverID, filename: serverID)
-        } else if let local = await LocalPhotoLibrary.shared.exportFile(for: asset.id) {
-            defer { try? FileManager.default.removeItem(at: local.url) }
-            file = try? TemporaryMediaStore.adoptShareFile(at: local.url, suggestedFilename: local.filename)
-        } else { file = nil }
+        } else {
+            file = try? await MediaEditingPipeline.shared.exportDeviceFile(for: asset.id, session: session)?.url
+        }
         guard let file else { return nil }
         guard !Task.isCancelled, generation == LocalSnapshot.generation, session.snapshot == context,
               serverAssetID(for: asset) == serverID, visibilityPolicy.allows(id: asset.id) else {
@@ -1611,7 +1876,7 @@ struct AssetDetailView: View {
             guard let file = await vm.downloadCurrentFile(serverID, filename: filename) else { return false }
             defer { TemporaryMediaStore.remove(file) }
             guard accountGeneration == LocalSnapshot.generation, !Task.isCancelled else { return false }
-            guard let localID = await LocalPhotoLibrary.shared.saveDownloadedFile(file, isVideo: target.asset.isVideo) else {
+            guard let localID = await LocalPhotoLibrary.shared.saveDownloadedFile(file, isVideo: PhotoExportService.contentType(of: file).conforms(to: .movie)) else {
                 if viewer.isCurrent(target), accountGeneration == LocalSnapshot.generation,
                    !Task.isCancelled { vm.actionError = ErrorEvent(String(localized: "Could not save to Photos.")) }
                 return false
@@ -1739,9 +2004,14 @@ struct AssetDetailView: View {
 
 private struct PhotoEditorTarget: Identifiable {
     let target: AssetViewerState.Target
-    let serverID: String
-    let pixelSize: CGSize
-    let edits: [AssetEditRecord]
+    let sourceID: String
+    let requestContext: SessionRequestContext
+    let originalURL: URL
+    let motionURL: URL?
+    let document: MediaEditDocument
+    let token: MediaEditStore.Token
+    let ownedFiles: [URL]
+    let sourceChanged: Bool
     var id: UUID { target.id }
 }
 

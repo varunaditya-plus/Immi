@@ -122,9 +122,10 @@ final class AssetViewerState {
     func prepareEditor<Value>(
         _ target: Target,
         operation: @escaping @MainActor () async -> Value?,
+        discard: @escaping @MainActor (Value) -> Void = { _ in },
         completion: @escaping @MainActor (Value) async -> Void
     ) -> Task<Void, Never>? {
-        prepare(target, kind: .editor, operation: operation) { value in
+        prepare(target, kind: .editor, operation: operation, discard: discard) { value in
             // The ready editor must not cancel itself when covering the viewer.
             self.preparations[.editor]?[target.visit] = nil
             self.deactivate()
