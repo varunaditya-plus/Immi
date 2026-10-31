@@ -153,7 +153,7 @@ struct PhotoCollectionScreen<Options: View>: View {
     /// Terpisah dari konfirmasi mode pilih, dan bentuknya alert, bukan dialog:
     /// yang ditanyakan menyangkut satu foto yang barusan ditekan lama, bukan
     /// sekumpulan pilihan atas seleksi.
-    @State private var menuDeleteAsset: AssetLite?
+    @State private var menuDeleteTarget: PhotoCollectionDeleteTarget?
     @State private var deviceDeleteID: String?
     /// Naik satu setiap penghapusan dan setiap favorit yang selesai dikerjakan.
     @State private var deleteFeedback = 0
@@ -254,14 +254,16 @@ struct PhotoCollectionScreen<Options: View>: View {
             .alert(
                 contextDeleteTitle,
                 isPresented: Binding(
-                    get: { menuDeleteAsset != nil },
-                    set: { if !$0 { menuDeleteAsset = nil } }),
-                presenting: menuDeleteAsset
-            ) { asset in
+                    get: { menuDeleteTarget != nil },
+                    set: { if !$0 { menuDeleteTarget = nil } }),
+                presenting: menuDeleteTarget
+            ) { target in
                 Button(deleteActionTitle, role: .destructive) {
-                    menuDeleteAsset = nil
-                    runAction([asset.id]) {
-                        await onDelete([asset.id])
+                    menuDeleteTarget = nil
+                    guard target.isCurrent(session: session, policy: visibilityPolicy) else { return }
+                    runAction([target.asset.id]) {
+                        guard target.isCurrent(session: session, policy: visibilityPolicy) else { return }
+                        await onDelete([target.asset.id])
                         // Getarnya sama dengan jalur bar seleksi; tanpa ini,
                         // menghapus lewat context menu terasa berbeda dari
                         // menghapus hal yang sama lewat mode pilih.
@@ -269,10 +271,10 @@ struct PhotoCollectionScreen<Options: View>: View {
                     }
                 }
                 Button("Cancel", role: .cancel) {}
-            } message: { asset in
+            } message: { target in
                 if deletesPermanently { Text("This cannot be undone.") }
                 else {
-                    Text(asset.isVideo ? "Are you sure you want to delete this video?"
+                    Text(target.asset.isVideo ? "Are you sure you want to delete this video?"
                         : "Are you sure you want to delete this photo?")
                 }
             }
@@ -298,7 +300,7 @@ struct PhotoCollectionScreen<Options: View>: View {
             .onChange(of: assetsSignature) { _, _ in
                 selectedIDs.formIntersection(Set(visibleAssets.map(\.id)))
                 if selectedIDs.isEmpty { endSelection() }
-                if let asset = menuDeleteAsset, !visibilityPolicy.allows(id: asset.id) { menuDeleteAsset = nil }
+                if let target = menuDeleteTarget, !target.isCurrent(session: session, policy: visibilityPolicy) { menuDeleteTarget = nil }
                 if let id = deviceDeleteID, !visibilityPolicy.allows(id: id) { deviceDeleteID = nil }
             }
             .onDisappear { sharePreparation.cancel(); copyPreparation.cancel() }
@@ -655,8 +657,14 @@ struct PhotoCollectionScreen<Options: View>: View {
 
     // MARK: - Context menu
 
+    private func requestMenuDelete(_ asset: AssetLite) {
+        let target = PhotoCollectionDeleteTarget(asset: asset, session: session)
+        guard target.isCurrent(session: session, policy: visibilityPolicy) else { return }
+        menuDeleteTarget = target
+    }
+
     private var contextDeleteTitle: LocalizedStringKey {
-        let isVideo = menuDeleteAsset?.isVideo == true
+        let isVideo = menuDeleteTarget?.asset.isVideo == true
         if deletesPermanently { return isVideo ? "Permanently Delete Video?" : "Permanently Delete Photo?" }
         return isVideo ? "Delete Video" : "Delete Photo"
     }
@@ -687,7 +695,7 @@ struct PhotoCollectionScreen<Options: View>: View {
                     systemImage: "trash",
                     isDestructive: true
                 ) {
-                    if visibilityPolicy.allows(id: asset.id) { menuDeleteAsset = asset }
+                    requestMenuDelete(asset)
                 },
             ]
         }
@@ -720,7 +728,7 @@ struct PhotoCollectionScreen<Options: View>: View {
                     systemImage: "trash",
                     isDestructive: true
                 ) {
-                    if visibilityPolicy.allows(id: asset.id) { menuDeleteAsset = asset }
+                    requestMenuDelete(asset)
                 },
             ]
         }
@@ -828,8 +836,7 @@ struct PhotoCollectionScreen<Options: View>: View {
             systemImage: "trash",
             isDestructive: true
         ) {
-            guard visibilityPolicy.allows(id: asset.id) else { return }
-            menuDeleteAsset = asset
+            requestMenuDelete(asset)
         })
 
         return actions
@@ -1322,5 +1329,25 @@ enum PhotoCollectionCover {
             return [asset]
         }
         return Array(visibleAssets.prefix(8))
+    }
+}
+
+@MainActor
+private struct PhotoCollectionDeleteTarget {
+    let asset: AssetLite
+    private let sourceID: String
+    private let generation = LocalSnapshot.generation
+    private let context: SessionRequestContext
+
+    init(asset: AssetLite, session: SessionManager) {
+        self.asset = asset
+        sourceID = AssetServerIdentity.resolve(asset) ?? asset.id
+        context = session.snapshot
+    }
+
+    func isCurrent(session: SessionManager, policy: AssetVisibilityPolicy) -> Bool {
+        generation == LocalSnapshot.generation && context == session.snapshot
+            && (AssetServerIdentity.resolve(asset) ?? asset.id) == sourceID
+            && policy.allows(id: asset.id) && policy.allows(id: sourceID)
     }
 }

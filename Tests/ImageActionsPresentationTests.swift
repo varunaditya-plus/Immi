@@ -1,5 +1,6 @@
 import Observation
 import SwiftUI
+import SwiftData
 import UIKit
 import UniformTypeIdentifiers
 import XCTest
@@ -15,6 +16,7 @@ final class ImageActionsPresentationTests: SimulatorHostedTestCase {
     private var viewerModel: AssetDetailViewModel?
     private weak var retainedViewerModel: AssetDetailViewModel?
     private var http: ImageActionsHTTP?
+    private var mappings: [(recordID: String, localID: String)] = []
 
     override func setUp() async throws {
         try await super.setUp()
@@ -43,6 +45,15 @@ final class ImageActionsPresentationTests: SimulatorHostedTestCase {
         transports.removeAll()
         TemporaryMediaStore.remove(collectionFixture?.files ?? [])
         collectionFixture = nil
+        for mapping in mappings {
+            let recordID = mapping.recordID
+            let descriptor = FetchDescriptor<BackupRecord>(predicate: #Predicate { $0.id == recordID })
+            for record in try SwiftDataManager.shared.modelContext.fetch(descriptor) {
+                SwiftDataManager.shared.modelContext.delete(record)
+            }
+            try SwiftDataManager.shared.unlinkDeviceAsset(localIdentifier: mapping.localID)
+        }
+        mappings.removeAll()
         if let clipboard { UIPasteboard.general.setItems(clipboard) }
         clipboard = nil
         try await waitUntil("Closing the image actions releases the viewer model") { self.retainedViewerModel == nil }
@@ -110,6 +121,55 @@ final class ImageActionsPresentationTests: SimulatorHostedTestCase {
         _ = try await screenshot(window)
         XCTAssertEqual(alert.title, "Delete Video", "The pending target must not change with the grid's source array")
         XCTAssertTrue(fixture.deletions.isEmpty)
+    }
+
+    func testContextDeleteConfirmsOnlyTheCapturedSourceAndSession() async throws {
+        for change in ["unchanged", "remap", "unlink", "server"] {
+            let fixture = try ImageActionsCollectionFixture(count: 1)
+            let localID = UUID().uuidString, recordID = UUID().uuidString
+            let sourceID = UUID().uuidString
+            let displayID = LocalPhotoLibrary.assetID(for: localID)
+            mappings.append((recordID, localID))
+            try SwiftDataManager.shared.insertBackupRecord(BackupRecord(id: recordID, assetId: sourceID,
+                deviceAssetId: "", localIdentifier: localID))
+            fixture.assets = [AssetLite(id: displayID, isVideo: false, ratio: 1, thumbhash: nil, createdAt: .now)]
+            let session = MockSessionManager()
+            try session.setServer("https://delete-before.example")
+            let window = try await showCollection(fixture, session: session)
+            let grid = try await collectionGrid(in: window)
+            let action = try XCTUnwrap(grid.menuActions?(displayID).first { $0.title == "Delete" })
+            action.handler()
+            let alert = try await presentedAlert(in: window)
+            XCTAssertTrue(fixture.deletions.isEmpty)
+            let generation = LocalSnapshot.generation
+
+            if change == "remap" {
+                try SwiftDataManager.shared.upsertBackupRecord(assetID: UUID().uuidString,
+                    checksum: "", localIdentifier: localID)
+            } else if change == "unlink" {
+                try SwiftDataManager.shared.unlinkDeviceAsset(localIdentifier: localID)
+            } else if change == "server" {
+                try session.setServer("https://delete-after.example")
+            }
+            XCTAssertEqual(LocalSnapshot.generation, generation)
+            let command = try XCTUnwrap(alert.keyCommands?.first { $0.input == "\r" },
+                "The native confirmation must provide its public Return command")
+            XCTAssertTrue(UIApplication.shared.sendAction(try XCTUnwrap(command.action), to: alert, from: command, for: nil))
+            try await waitUntil("The native confirmation finishes before checking its deletion") {
+                !self.searchPresentedControllers(in: window.rootViewController).contains { $0 === alert }
+            }
+            if change == "unchanged" {
+                try await waitUntil("The unchanged confirmation invokes the actual collection deletion") {
+                    fixture.deletions == [[displayID]]
+                }
+            } else {
+                XCTAssertTrue(fixture.deletions.isEmpty, change)
+            }
+            mounted.last?.content = nil
+            try await waitUntil("Each collection unmounts before the next confirmation fixture") {
+                self.find(PhotoGridController.self, in: window.rootViewController) == nil
+            }
+        }
     }
 
     func testCancellingTheActualSelectionRejectsALateCopyExport() async throws {
