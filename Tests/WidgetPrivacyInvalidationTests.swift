@@ -1,3 +1,5 @@
+import CryptoKit
+import UIKit
 import XCTest
 @testable import ImmichApp
 
@@ -121,6 +123,70 @@ final class WidgetPrivacyInvalidationTests: XCTestCase {
         XCTAssertEqual(names.count, 1)
         let file = directory.appendingPathComponent("Widgets").appendingPathComponent(try XCTUnwrap(names.first))
         XCTAssertEqual(try Data(contentsOf: file), Data([1, 2, 3]))
+    }
+
+    func testLateUneditedThumbnailCannotReplaceAWidgetPublishedAfterALocalEdit() async throws {
+        let directory = try temporaryDirectory()
+        let owner = BackupQueueOwner(server: "https://widget-edit.example.invalid/api", userID: "synthetic-\(UUID())")
+        let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
+        let ownerKey = SHA256.hash(data: try encoder.encode(owner)).map { String(format: "%02x", $0) }.joined()
+        let editDirectory = URL.applicationSupportDirectory.appendingPathComponent("media-edits")
+            .appendingPathComponent(ownerKey)
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: directory)
+            try? FileManager.default.removeItem(at: editDirectory)
+        }
+        let session = WidgetEditedSession(owner: owner)
+        try session.setServer("https://widget-edit.example.invalid")
+        session.isLoggedIn = true
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1; format.opaque = true
+        let source = UIGraphicsImageRenderer(size: CGSize(width: 32, height: 32), format: format).image { context in
+            UIColor(white: 90 / 255, alpha: 1).setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 32, height: 32))
+        }
+        let bytes = try XCTUnwrap(source.pngData())
+        let id = "widget-edit-\(UUID())"
+        let started = expectation(description: "The old widget's unedited thumbnail is held")
+        let gate = WidgetPrivacyGate(started: started)
+        let oldAPI = WidgetPrivacyAPI(session: session, imageGate: gate, metadataGate: nil,
+            assetIDs: [id], includesCollections: false, imageBytes: bytes)
+        let export = Task { await WidgetSnapshotExporter.refresh(api: oldAPI, imageAPI: oldAPI,
+            container: directory, selectedAlbumIDs: []) }
+        addTeardownBlock { await gate.close(); await export.value }
+        await fulfillment(of: [started], timeout: 2)
+        let store = MediaEditStore.shared
+        store.configure(session: session)
+        var document = MediaEditDocument(); document.photo[.exposure] = 0.8
+        let record = try MediaEditRecord(type: MediaEditingPipeline.recordType,
+            schemaVersion: MediaEditingPipeline.schemaVersion, sourceFingerprint: "synthetic-source", value: document)
+        try store.save(record, using: store.capture(assetID: id, sourceFingerprint: record.sourceFingerprint))
+        let currentAPI = WidgetPrivacyAPI(session: session, imageGate: nil, metadataGate: nil,
+            assetIDs: [id], includesCollections: false, imageBytes: bytes)
+        await WidgetSnapshotExporter.refresh(api: currentAPI, imageAPI: currentAPI,
+            container: directory, selectedAlbumIDs: [])
+        let snapshot = directory.appendingPathComponent("Widgets/snapshot.json")
+        let currentSnapshot = try Data(contentsOf: snapshot)
+        let names = try imageNames(in: directory)
+        XCTAssertEqual(names.count, 1)
+        let image = directory.appendingPathComponent("Widgets").appendingPathComponent(try XCTUnwrap(names.first))
+        let rendered = try Data(contentsOf: image)
+        XCTAssertNotEqual(rendered, bytes, "The current snapshot must contain the actually edited rendition")
+        let pixels = try XCTUnwrap(UIImage(data: rendered)?.cgImage)
+        var rgba = [UInt8](repeating: 0, count: 4)
+        try rgba.withUnsafeMutableBytes { buffer in
+            let context = try XCTUnwrap(CGContext(data: buffer.baseAddress, width: 1, height: 1,
+                bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.draw(pixels, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        }
+        XCTAssertGreaterThan(rgba[0], 140)
+        await gate.release()
+        await export.value
+        XCTAssertEqual(try Data(contentsOf: snapshot), currentSnapshot)
+        XCTAssertEqual(try Data(contentsOf: image), rendered)
+        let generations = try FileManager.default.contentsOfDirectory(at: directory.appendingPathComponent("Widgets"),
+            includingPropertiesForKeys: nil).filter(\.hasDirectoryPath)
+        XCTAssertEqual(generations.count, 1, "The invalidated export must remove its staged directory")
     }
 
     func testExportedMemoryIncludesRawDateAndAgeForWidgetLocalization() async throws {
@@ -482,13 +548,15 @@ private final class WidgetPrivacyAPI: APIClient {
     private let metadataGate: WidgetPrivacyGate?
     private let assetIDs: [String]
     private let includesCollections: Bool
+    private let imageBytes: Data
     @MainActor
     init(session: SessionManager, imageGate: WidgetPrivacyGate?, metadataGate: WidgetPrivacyGate?,
-         assetIDs: [String], includesCollections: Bool) {
+         assetIDs: [String], includesCollections: Bool, imageBytes: Data = Data([1, 2, 3])) {
         self.imageGate = imageGate
         self.metadataGate = metadataGate
         self.assetIDs = assetIDs
         self.includesCollections = includesCollections
+        self.imageBytes = imageBytes
         super.init(session: session)
     }
     override func send<T: Decodable>(_ endpoint: Endpoint) async throws -> T {
@@ -524,6 +592,13 @@ private final class WidgetPrivacyAPI: APIClient {
         XCTAssertTrue(assetIDs.contains(assetID))
         await thumbnailCount.record(assetID)
         await imageGate?.wait()
-        return Data([1, 2, 3])
+        return imageBytes
     }
+}
+
+@MainActor
+private final class WidgetEditedSession: MockSessionManager {
+    private let owner: BackupQueueOwner
+    init(owner: BackupQueueOwner) { self.owner = owner; super.init() }
+    override var backupQueueOwner: BackupQueueOwner? { owner }
 }

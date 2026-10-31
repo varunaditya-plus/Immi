@@ -54,6 +54,8 @@ enum WidgetSnapshotExporter {
                 && !DeletedServerAssetRegistry.shared.isTrashed(id)
                 && !DeletedServerAssetRegistry.shared.isPermanentlyDeleted(id)
         }
+        MediaEditStore.shared.configure(session: imageAPI.session)
+        let expectedEditRevision = MediaEditStore.shared.revision
         let expectedRevision = visibilityRevision
         let context = api.session.snapshot
         async let fetchedAlbums = try? AlbumRepository(api: api, recordsVisibility: false).all()
@@ -66,7 +68,7 @@ enum WidgetSnapshotExporter {
                 visibility: "timeline"))
         let (allAlbums, allMemories, favoritesResponse) = await (
             fetchedAlbums, fetchedMemories, fetchedFavorites)
-        guard expectedRevision == visibilityRevision,
+        guard expectedRevision == visibilityRevision, expectedEditRevision == MediaEditStore.shared.revision,
               (try? api.checkCurrent(context)) != nil else { return }
 
         let albums = (allAlbums ?? LocalSnapshot.load(
@@ -88,11 +90,12 @@ enum WidgetSnapshotExporter {
         let albumAssetIDs = await albumAssetIDs(
             for: selectedAlbumIDs, repository: albumRepo,
             isCurrent: {
-                expectedRevision == visibilityRevision && (try? api.checkCurrent(context)) != nil
+                expectedRevision == visibilityRevision && expectedEditRevision == MediaEditStore.shared.revision
+                    && (try? api.checkCurrent(context)) != nil
             })
             .mapValues { $0.filter(isEligible) }
 
-        guard expectedRevision == visibilityRevision,
+        guard expectedRevision == visibilityRevision, expectedEditRevision == MediaEditStore.shared.revision,
               (try? api.checkCurrent(context)) != nil else { return }
         let favoriteAssetIDs = favoritesResponse?.assets.items.filter {
             $0.isTimelineVisible && isEligible($0.id)
@@ -108,7 +111,9 @@ enum WidgetSnapshotExporter {
             imageAPI: imageAPI,
             container: container,
             expectedRevision: expectedRevision,
-            isCurrentAccount: { (try? api.checkCurrent(context)) != nil })
+            isCurrentAccount: {
+                expectedEditRevision == MediaEditStore.shared.revision && (try? api.checkCurrent(context)) != nil
+            })
     }
 
     static func albumAssetIDs(
@@ -176,7 +181,7 @@ enum WidgetSnapshotExporter {
                     let endpoint = Endpoint(
                         path: "/assets/\(assetID)/thumbnail",
                         query: [.init(name: "size", value: "thumbnail")])
-                    return (name, try? await imageAPI.rawData(endpoint))
+                    return (name, try? await MediaEditingPipeline.shared.imageData(endpoint, api: imageAPI))
                 }
             }
 
