@@ -77,6 +77,9 @@ struct SearchView: View {
                 .onChange(of: resultKind) { _, kind in
                     if kind == .collections { isSearchFocused = false }
                 }
+                .onChange(of: vm?.hasCriteria ?? false) { _, hasCriteria in
+                    if !hasCriteria { resultKind = .photos }
+                }
                 .onChange(of: searchText) { _, text in
                     guard let vm, vm.searchText != text else { return }
                     querySubmitted = false

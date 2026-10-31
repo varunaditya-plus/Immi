@@ -168,6 +168,43 @@ final class SearchPresentationTests: SimulatorHostedTestCase {
         XCTAssertTrue(control.titleForSegment(at: control.selectedSegmentIndex)?.hasPrefix("Collections") == true)
     }
 
+    func testClearingACollectionsQueryStartsTheNextDiscoverySearchInPhotos() async throws {
+        let fixture = try makeFixture()
+        let window = try await show(fixture)
+        try await activateAccessibilityButton(named: "Paris", in: window)
+        try await waitUntil("The native place token is present before the collection query") {
+            self.searchField(in: window)?.tokens.count == 1
+        }
+        try await replaceQuery("Holiday", in: window)
+        try await waitUntil("The initial query loads its matching album") {
+            fixture.model.matchingAlbums.map(\.id) == [fixture.album.id]
+                && self.grid(in: window.rootViewController)?.revealCell(for: fixture.photo.id) != nil
+                && fixture.search.requests.last?.request.query == "Holiday"
+        }
+        searchField(in: window)?.resignFirstResponder()
+        try await chooseSegment("Collections", in: window)
+        try await waitUntil("The Collections result screen is visible") { self.collectionResults(in: window) != nil }
+
+        let field = try XCTUnwrap(searchField(in: window))
+        XCTAssertTrue(field.becomeFirstResponder())
+        field.selectedTextRange = field.textRange(from: field.positionOfToken(at: 0), to: field.endOfDocument)
+        field.deleteBackward()
+        try await waitUntil("Clearing the full native query and tokens restores discovery") {
+            !fixture.model.hasCriteria && self.segment(in: window) == nil && field.tokens.isEmpty && field.text?.isEmpty == true
+        }
+        try await activateAccessibilityButton(named: "Paris", in: window)
+
+        try await waitUntil("The new place search displays its photo results") {
+            self.grid(in: window.rootViewController)?.revealCell(for: fixture.photo.id) != nil
+                && fixture.search.requests.last?.request.city == "Paris"
+        }
+        let control = try XCTUnwrap(segment(in: window))
+        XCTAssertTrue(control.titleForSegment(at: control.selectedSegmentIndex)?.hasPrefix("Photos") == true)
+        XCTAssertEqual(searchField(in: window)?.tokens.count, 1)
+        XCTAssertNil(fixture.search.requests.last?.request.query)
+        XCTAssertTrue(fixture.model.matchingAlbums.isEmpty)
+    }
+
     func testActualSortAndFilterMenusChangeRequestsAndSelectionCanReturnToTheSameSearch() async throws {
         let fixture = try makeFixture()
         let window = try await show(fixture)
