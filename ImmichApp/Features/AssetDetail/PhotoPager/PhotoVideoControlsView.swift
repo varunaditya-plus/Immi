@@ -11,9 +11,13 @@ struct PhotoPlaybackState: Equatable {
     var duration: Double = 0
     /// Bagian file yang sudah tersedia untuk diputar, 0…1.
     var bufferedFraction: Float = 0
+    var rate: Float = 1
+    var isLooping = false
+    var availableRates: [Float] = [1]
+    var hasAudio: Bool? = nil
 
     var fraction: Float {
-        guard duration > 0 else { return 0 }
+        guard duration.isFinite, duration > 0, time.isFinite else { return 0 }
         return Float(min(max(time / duration, 0), 1))
     }
 }
@@ -46,6 +50,8 @@ struct PhotoVideoControlsView: UIViewRepresentable {
     func updateUIView(_ bar: PhotoVideoControlsBar, context: Context) {
         bar.attach(to: pager)
     }
+
+    static func dismantleUIView(_ bar: PhotoVideoControlsBar, coordinator: ()) { bar.detach() }
 }
 
 final class PhotoVideoControlsBar: UIView {
@@ -54,6 +60,9 @@ final class PhotoVideoControlsBar: UIView {
     private let muteButton = UIButton(type: .system)
     private let slider = UISlider()
     private let bufferProgress = UIProgressView(progressViewStyle: .default)
+    private let elapsedLabel = UILabel()
+    private let remainingLabel = UILabel()
+    private let optionsButton = UIButton(type: .system)
 
     private weak var pager: PhotoPagerController?
     private var state = PhotoPlaybackState()
@@ -70,12 +79,20 @@ final class PhotoVideoControlsBar: UIView {
 
         playButton.setImage(UIImage(systemName: "play.fill"), for: .normal)
         playButton.addTarget(self, action: #selector(togglePlay), for: .touchUpInside)
+        playButton.accessibilityIdentifier = "video.playPause"
 
         muteButton.setImage(UIImage(systemName: "speaker.wave.2.fill"), for: .normal)
         muteButton.addTarget(self, action: #selector(toggleMute), for: .touchUpInside)
+        muteButton.accessibilityIdentifier = "video.mute"
+        optionsButton.setImage(UIImage(systemName: "ellipsis.circle"), for: .normal)
+        optionsButton.showsMenuAsPrimaryAction = true
+        optionsButton.accessibilityLabel = String(localized: "Playback Options")
+        optionsButton.accessibilityIdentifier = "video.options"
 
         slider.minimumValue = 0
         slider.maximumValue = 1
+        slider.accessibilityLabel = String(localized: "Playback Position")
+        slider.accessibilityIdentifier = "video.position"
         // Track kosong transparan supaya progres unduhan di belakang slider
         // tetap terlihat. Bagian yang sudah ditonton digambar oleh minimumTrack.
         slider.maximumTrackTintColor = .clear
@@ -101,8 +118,15 @@ final class PhotoVideoControlsBar: UIView {
             slider.topAnchor.constraint(equalTo: timeline.topAnchor),
             slider.bottomAnchor.constraint(equalTo: timeline.bottomAnchor),
         ])
-
-        let stack = UIStackView(arrangedSubviews: [playButton, timeline, muteButton])
+        for label in [elapsedLabel, remainingLabel] {
+            label.font = .monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+            label.textColor = .secondaryLabel
+            label.isAccessibilityElement = false
+        }
+        let times = UIStackView(arrangedSubviews: [elapsedLabel, UIView(), remainingLabel])
+        let transport = UIStackView(arrangedSubviews: [timeline, times])
+        transport.axis = .vertical
+        let stack = UIStackView(arrangedSubviews: [playButton, transport, muteButton, optionsButton])
         stack.axis = .horizontal
         stack.alignment = .center
         stack.spacing = 14
@@ -113,6 +137,7 @@ final class PhotoVideoControlsBar: UIView {
         // slider-nya.
         playButton.setContentHuggingPriority(.required, for: .horizontal)
         muteButton.setContentHuggingPriority(.required, for: .horizontal)
+        optionsButton.setContentHuggingPriority(.required, for: .horizontal)
 
         NSLayoutConstraint.activate([
             background.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -138,9 +163,17 @@ final class PhotoVideoControlsBar: UIView {
 
     func attach(to pager: PhotoPagerController) {
         guard self.pager !== pager else { return }
+        detach()
         self.pager = pager
         pager.playbackObserver = self
         pager.reportPlaybackState()
+    }
+
+    func detach() {
+        if pager?.playbackObserver === self { pager?.playbackObserver = nil }
+        if isScrubbing { pager?.endScrubbing() }
+        pager = nil
+        isScrubbing = false
     }
 
     // MARK: - Aksi
@@ -155,6 +188,7 @@ final class PhotoVideoControlsBar: UIView {
 
     @objc private func scrubbingBegan() {
         isScrubbing = true
+        pager?.beginScrubbing()
     }
 
     @objc private func scrubbed() {
@@ -164,6 +198,24 @@ final class PhotoVideoControlsBar: UIView {
 
     @objc private func scrubbingEnded() {
         isScrubbing = false
+        pager?.endScrubbing()
+    }
+
+    private func updateOptions() {
+        let speeds = state.availableRates.map { rate in
+            UIAction(title: String(format: "%g×", rate), state: state.rate == rate ? .on : .off) { [weak self] _ in
+                self?.pager?.setPlaybackRate(rate)
+            }
+        }
+        let loop = UIAction(title: String(localized: "Loop Video"), image: UIImage(systemName: "repeat"),
+            state: state.isLooping ? .on : .off) { [weak self] _ in self?.pager?.toggleLooping() }
+        optionsButton.menu = UIMenu(children: [UIMenu(title: String(localized: "Playback Speed"), children: speeds), loop])
+    }
+
+    private func timeText(_ value: Double) -> String {
+        let seconds = value.isFinite ? Int(min(max(value, 0), 35_999_999)) : 0
+        if seconds >= 3600 { return String(format: "%d:%02d:%02d", seconds / 3600, (seconds / 60) % 60, seconds % 60) }
+        return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 }
 
@@ -171,13 +223,24 @@ final class PhotoVideoControlsBar: UIView {
 
 extension PhotoVideoControlsBar: PhotoPlaybackObserver {
     func playbackDidUpdate(_ state: PhotoPlaybackState) {
+        let optionsChanged = self.state.rate != state.rate || self.state.isLooping != state.isLooping
+            || self.state.availableRates != state.availableRates || optionsButton.menu == nil
         self.state = state
 
         let playSymbol = state.isPlaying ? "pause.fill" : "play.fill"
         playButton.setImage(UIImage(systemName: playSymbol), for: .normal)
+        playButton.accessibilityLabel = state.isPlaying ? String(localized: "Pause") : String(localized: "Play")
 
-        let muteSymbol = state.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill"
+        let hasNoAudio = state.hasAudio == false
+        let muteSymbol = state.isMuted || hasNoAudio ? "speaker.slash.fill" : "speaker.wave.2.fill"
         muteButton.setImage(UIImage(systemName: muteSymbol), for: .normal)
+        muteButton.isEnabled = !hasNoAudio
+        muteButton.accessibilityLabel = hasNoAudio ? String(localized: "No Audio")
+            : state.isMuted ? String(localized: "Unmute") : String(localized: "Mute")
+        elapsedLabel.text = timeText(state.time)
+        remainingLabel.text = "−" + timeText(state.duration - state.time)
+        slider.accessibilityValue = String(localized: "\(timeText(state.time)) of \(timeText(state.duration))")
+        if optionsChanged { updateOptions() }
 
         slider.isEnabled = state.duration > 0
         bufferProgress.setProgress(state.bufferedFraction, animated: false)

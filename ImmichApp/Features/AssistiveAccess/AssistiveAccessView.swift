@@ -292,13 +292,13 @@ private struct AssistiveAccessPhotoDetail: View {
             // lokal/server siap. Thumbnail di atas tetap menjadi poster selama
             // sumber itu disiapkan.
             if asset.isVideo,
-               let playbackAsset = await loader.playbackAsset(for: asset.id) {
+               let playbackItem = await loader.playbackItem(for: asset.id) {
                 guard !Task.isCancelled else {
-                    playbackAsset.cancelLoading()
+                    playbackItem.asset.cancelLoading()
                     return
                 }
                 let autoplayPlayer = AVPlayer(
-                    playerItem: AVPlayerItem(asset: playbackAsset))
+                    playerItem: playbackItem)
                 player = autoplayPlayer
                 isLoading = false
                 // Beri VideoPlayer satu giliran untuk masuk hierarchy sebelum

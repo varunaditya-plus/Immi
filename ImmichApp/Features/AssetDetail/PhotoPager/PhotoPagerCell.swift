@@ -1,4 +1,5 @@
 import AVFoundation
+import Observation
 import PhotosUI
 import UIKit
 
@@ -89,6 +90,17 @@ final class PhotoPagerCell: UICollectionViewCell {
     /// Intent pengguna, terpisah dari `timeControlStatus`. Status AVPlayer dapat
     /// menjadi paused/waiting ketika buffer habis tanpa berarti pengguna pause.
     private var wantsVideoPlayback = false
+    private var videoSourceContext: RenderedImageContext?
+    private var liveSourceContext: RenderedImageContext?
+    private var playbackSourceObservation = UUID()
+    private var isScrubbingVideo = false
+    private var pendingSeekFraction: Double?
+    private var activeSeekFraction: Double?
+    private var seekRequest = UUID()
+    private var playbackRate: Float = 1
+    private var loopsVideo = false
+    private var audioAvailability: Bool?
+    private var audioLoadTask: Task<Void, Never>?
 
     /// Id video pasangan Live Photo; nil untuk foto biasa.
     private var livePhotoVideoID: String?
@@ -101,6 +113,8 @@ final class PhotoPagerCell: UICollectionViewCell {
     private var livePlayer: AVPlayer?
     private var liveLayer: AVPlayerLayer?
     private var livePhotoView: PHLivePhotoView?
+    private var liveOwnedURLs: [URL] = []
+    private var loopsLivePlayback = false
     private var liveLoadTask: Task<Void, Never>?
     private var livePhotoDetectionTask: Task<Void, Never>?
     private var livePhotoHint: LocalLivePhotoMatchHint?
@@ -116,6 +130,8 @@ final class PhotoPagerCell: UICollectionViewCell {
     /// Jalur ini tetap bekerja walau cache/server belum punya video ID.
     private var localLivePhotoAssetID: String?
     private let liveBadge = UIView()
+    private let liveBadgeIcon = UIImageView()
+    private let liveBadgeLabel = UILabel()
     /// Tinggi lencana LIVE; dipakai bersama oleh constraint dan radiusnya.
     private let liveBadgeHeight: CGFloat = 28
     /// Durasi dari metadata, dipakai sebelum pemutar dibuat — supaya bar
@@ -297,12 +313,13 @@ final class PhotoPagerCell: UICollectionViewCell {
         effect.translatesAutoresizingMaskIntoConstraints = false
         effect.isUserInteractionEnabled = false
 
-        let icon = UIImageView(image: UIImage(systemName: "livephoto"))
+        let icon = liveBadgeIcon
+        icon.image = UIImage(systemName: "livephoto")
         icon.tintColor = .label
         icon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(
             pointSize: 13, weight: .semibold)
 
-        let label = UILabel()
+        let label = liveBadgeLabel
         label.text = "LIVE"
         label.font = .systemFont(ofSize: 12, weight: .semibold)
         label.textColor = .label
@@ -374,6 +391,8 @@ final class PhotoPagerCell: UICollectionViewCell {
         livePhotoDetectionTask = nil
         livePhotoHint = nil
         stopPlayback()
+        playbackRate = 1
+        loopsVideo = false
         livePhotoVideoID = nil
         localLivePhotoAssetID = nil
         liveBadge.isHidden = true
@@ -459,7 +478,9 @@ final class PhotoPagerCell: UICollectionViewCell {
            currentAssetID != asset.id || self.loader !== loader
             || accountGeneration != LocalSnapshot.generation || isVideo != asset.isVideo
             || livePhotoVideoID != asset.livePhotoVideoID
-            || localLivePhotoAssetID != newLocalLivePhotoAssetID {
+            || localLivePhotoAssetID != newLocalLivePhotoAssetID
+            || videoSourceContext.map({ !imageContextIsCurrent($0, loader: loader) }) == true
+            || liveSourceContext.map({ !imageContextIsCurrent($0, loader: loader) }) == true {
             // Pertahanan tambahan di luar prepareForReuse: UICollectionView dapat
             // mengonfigurasi ulang sel terlihat tanpa reuse saat datanya ditambal.
             // Tidak satu pun konteks Live Photo lama boleh ikut ke aset baru.
@@ -467,18 +488,21 @@ final class PhotoPagerCell: UICollectionViewCell {
             livePhotoDetectionTask = nil
             livePhotoHint = nil
             stopPlayback()
+            playbackRate = 1
+            loopsVideo = false
             imageAnalysis?.clear()
         }
         currentAssetID = asset.id
         accountGeneration = LocalSnapshot.generation
-        imageAspect = asset.ratio > 0 ? CGFloat(asset.ratio) : 1
+        let displayed = loader.displayAsset(asset)
+        imageAspect = displayed.ratio > 0 ? CGFloat(displayed.ratio) : 1
         isVideo = asset.isVideo
         livePhotoVideoID = asset.livePhotoVideoID
         localLivePhotoAssetID = newLocalLivePhotoAssetID
-        updateLiveBadgeVisibility(animated: false)
-        metadataDuration = asset.duration ?? 0
-        playButton.isHidden = !asset.isVideo || !playbackFailureView.isHidden || wantsVideoPlayback
         self.loader = loader
+        updateLiveBadgeVisibility(animated: false)
+        metadataDuration = displayed.duration ?? 0
+        playButton.isHidden = !asset.isVideo || !playbackFailureView.isHidden || wantsVideoPlayback
         reportPlayback()
 
         // Yang sudah ada di memori dipasang seketika — termasuk thumbnail
@@ -547,6 +571,17 @@ final class PhotoPagerCell: UICollectionViewCell {
 
     private func updateLiveBadgeVisibility(animated: Bool) {
         let visible = shouldShowLiveBadge
+        let mode = currentAssetID.map { loader?.livePhotoMode(for: $0) ?? .live } ?? .live
+        liveBadgeLabel.text = mode == .live ? "LIVE" : mode.title.uppercased()
+        let symbol: String
+        switch mode {
+        case .off: symbol = "livephoto.slash"
+        case .loop: symbol = "repeat"
+        case .bounce: symbol = "arrow.left.and.right"
+        case .live, .longExposure: symbol = "livephoto"
+        }
+        liveBadgeIcon.image = UIImage(systemName: symbol)
+        liveBadge.accessibilityLabel = mode.title
         liveBadge.layer.removeAllAnimations()
 
         guard animated else {
@@ -853,6 +888,38 @@ final class PhotoPagerCell: UICollectionViewCell {
         return loader.visibilityPolicy.allows(id: currentAssetID)
     }
 
+    private var isVideoSourceCurrent: Bool {
+        guard isPlaybackContextCurrent, let context = videoSourceContext, let loader,
+              context.assetID == currentAssetID else { return false }
+        return imageContextIsCurrent(context, loader: loader)
+    }
+
+    private var isLiveSourceCurrent: Bool {
+        guard isPlaybackContextCurrent, let context = liveSourceContext, let loader,
+              context.assetID == currentAssetID else { return false }
+        return imageContextIsCurrent(context, loader: loader)
+    }
+
+    private func observePlaybackSource() {
+        let token = UUID()
+        playbackSourceObservation = token
+        guard videoSourceContext != nil || liveSourceContext != nil else { return }
+        withObservationTracking {
+            _ = isVideoSourceCurrent
+            _ = isLiveSourceCurrent
+            _ = LocalSnapshot.invalidationRevision(for: LocalSnapshot.Key.assetDetail(currentAssetID ?? ""))
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, self.playbackSourceObservation == token else { return }
+                if self.videoSourceContext != nil && !self.isVideoSourceCurrent { self.stopPlayback() }
+                else if self.liveSourceContext != nil && !self.isLiveSourceCurrent {
+                    self.isLivePhotoPressed = false
+                    self.stopLivePhoto()
+                } else { self.observePlaybackSource() }
+            }
+        }
+    }
+
     private func hidePlaybackFailure() {
         playbackFailureView.isHidden = true
     }
@@ -876,9 +943,10 @@ final class PhotoPagerCell: UICollectionViewCell {
 
     @objc private func togglePlayback() {
         guard isVideo, isPlaybackContextCurrent else { return }
+        if videoSourceContext != nil && !isVideoSourceCurrent { stopPlayback() }
+        wantsVideoPlayback = true
         if player?.currentItem?.status == .failed { failVideoPlayback() }
         if let player {
-            wantsVideoPlayback = true
             player.play()
             playButton.isHidden = true
             updateLoadingIndicator(for: player)
@@ -886,7 +954,11 @@ final class PhotoPagerCell: UICollectionViewCell {
             return
         }
 
-        guard videoLoadTask == nil,
+        loadVideoIfNeeded()
+    }
+
+    private func loadVideoIfNeeded() {
+        guard isVideo, isPlaybackContextCurrent, videoLoadTask == nil, player == nil,
               let id = currentAssetID,
               let loader
         else { return }
@@ -895,35 +967,36 @@ final class PhotoPagerCell: UICollectionViewCell {
         playButton.isHidden = true
         loadingIndicator.accessibilityLabel = String(localized: "Loading video")
         loadingIndicator.startAnimating()
+        videoSourceContext = imageContext(for: id, loader: loader)
+        observePlaybackSource()
         videoLoadTask = Task { [weak self] in
-            let asset = await loader.playbackAsset(for: id)
+            let item = await loader.playbackItem(for: id)
             guard !Task.isCancelled, let self else {
-                asset?.cancelLoading()
+                item?.asset.cancelLoading()
                 return
             }
             self.videoLoadTask = nil
             guard self.currentAssetID == id,
                   self.loader === loader,
-                  self.isPlaybackContextCurrent
+                  self.isVideoSourceCurrent
             else {
-                asset?.cancelLoading()
+                item?.asset.cancelLoading()
                 return
             }
-            guard let asset else {
+            guard let item else {
                 self.failVideoPlayback()
                 return
             }
-            self.startPlayback(with: asset)
+            self.startPlayback(with: item)
         }
     }
 
-    private func startPlayback(with asset: AVAsset) {
+    private func startPlayback(with item: AVPlayerItem) {
         // Suara tetap terdengar walau sakelar senyap aktif — sama seperti Photos
         // saat video diputar dengan sengaja.
         try? AVAudioSession.sharedInstance().setCategory(.playback)
         try? AVAudioSession.sharedInstance().setActive(true)
 
-        let item = AVPlayerItem(asset: asset)
         // Buffer pendek menjaga start tetap cepat, tetapi cukup panjang agar
         // video tidak berhenti setiap satu detik pada koneksi lambat.
         item.preferredForwardBufferDuration = 2
@@ -947,8 +1020,13 @@ final class PhotoPagerCell: UICollectionViewCell {
         ) { [weak self, weak player] _ in
             MainActor.assumeIsolated {
                 guard let self, let player, self.player === player,
-                      self.isPlaybackContextCurrent
+                      self.isVideoSourceCurrent, !self.isScrubbingVideo,
+                      self.pendingSeekFraction == nil, self.activeSeekFraction == nil
                 else { return }
+                if self.loopsVideo, self.wantsVideoPlayback {
+                    self.seek(toFraction: 0)
+                    return
+                }
                 self.wantsVideoPlayback = false
                 player.seek(to: .zero)
                 self.playButton.isHidden = false
@@ -968,7 +1046,18 @@ final class PhotoPagerCell: UICollectionViewCell {
 
         self.player = player
         self.videoView = surface
-        wantsVideoPlayback = true
+        audioLoadTask?.cancel()
+        audioAvailability = nil
+        audioLoadTask = Task { [weak self, weak player, weak item] in
+            guard let item else { return }
+            let tracks = try? await item.asset.loadTracks(withMediaType: .audio)
+            guard !Task.isCancelled, let self, let player, self.player === player,
+                  player.currentItem === item, self.isVideoSourceCurrent else { return }
+            self.audioLoadTask = nil
+            self.audioAvailability = tracks.map { !$0.isEmpty }
+            self.reportPlayback()
+        }
+        player.defaultRate = playbackRate
         playbackItemStatusObserver = item.observe(
             \.status,
             options: [.initial, .new]
@@ -976,10 +1065,13 @@ final class PhotoPagerCell: UICollectionViewCell {
             DispatchQueue.main.async { [weak self, weak item] in
                 guard let self, let item,
                       self.player?.currentItem === item,
-                      self.isPlaybackContextCurrent
+                      self.isVideoSourceCurrent
                 else { return }
                 if item.status == .failed {
                     self.failVideoPlayback()
+                } else if item.status == .readyToPlay {
+                    self.performPendingSeek()
+                    self.reportPlayback()
                 }
             }
         }
@@ -991,7 +1083,7 @@ final class PhotoPagerCell: UICollectionViewCell {
             MainActor.assumeIsolated {
                 guard let self, let item,
                       self.player?.currentItem === item,
-                      self.isPlaybackContextCurrent
+                      self.isVideoSourceCurrent
                 else { return }
                 self.failVideoPlayback()
             }
@@ -1003,7 +1095,7 @@ final class PhotoPagerCell: UICollectionViewCell {
             DispatchQueue.main.async { [weak self, weak observedPlayer] in
                 guard let self, let observedPlayer,
                       self.player === observedPlayer,
-                      self.isPlaybackContextCurrent
+                      self.isVideoSourceCurrent
                 else { return }
                 self.updateLoadingIndicator(for: observedPlayer)
                 self.reportPlayback()
@@ -1017,7 +1109,7 @@ final class PhotoPagerCell: UICollectionViewCell {
                 guard let self, let item,
                       observedItem === item,
                       self.player?.currentItem === item,
-                      self.isPlaybackContextCurrent,
+                      self.isVideoSourceCurrent,
                       item.isPlaybackLikelyToKeepUp
                 else { return }
                 self.resumeVideoPlaybackIfPossible()
@@ -1031,7 +1123,7 @@ final class PhotoPagerCell: UICollectionViewCell {
                 guard let self, let item,
                       observedItem === item,
                       self.player?.currentItem === item,
-                      self.isPlaybackContextCurrent
+                      self.isVideoSourceCurrent
                 else { return }
                 self.resumeVideoPlaybackIfPossible()
                 self.reportPlayback()
@@ -1045,7 +1137,7 @@ final class PhotoPagerCell: UICollectionViewCell {
             MainActor.assumeIsolated {
                 guard let self, let item,
                       self.player?.currentItem === item,
-                      self.isPlaybackContextCurrent,
+                      self.isVideoSourceCurrent,
                       self.wantsVideoPlayback
                 else { return }
                 self.loadingIndicator.startAnimating()
@@ -1057,13 +1149,15 @@ final class PhotoPagerCell: UICollectionViewCell {
             }
         }
         playButton.isHidden = true
-        player.play()
+        if wantsVideoPlayback && !isScrubbingVideo { player.play() }
+        else { player.pause() }
+        playButton.isHidden = wantsVideoPlayback || isScrubbingVideo
         reportPlayback()
     }
 
     private func resumeVideoPlaybackIfPossible() {
-        guard isPlaybackContextCurrent,
-              wantsVideoPlayback,
+        guard isVideoSourceCurrent,
+              wantsVideoPlayback, !isScrubbingVideo, pendingSeekFraction == nil, activeSeekFraction == nil,
               let player,
               let item = player.currentItem,
               item.status == .readyToPlay
@@ -1109,9 +1203,18 @@ final class PhotoPagerCell: UICollectionViewCell {
     /// terus berjalan di halaman yang sudah lewat tetap memakan jaringan dan
     /// menahan sesi audio.
     func stopPlayback() {
+        audioLoadTask?.cancel()
+        audioLoadTask = nil
+        audioAvailability = nil
+        playbackSourceObservation = UUID()
+        videoSourceContext = nil
+        isScrubbingVideo = false
+        pendingSeekFraction = nil
+        activeSeekFraction = nil
+        seekRequest = UUID()
         isLivePhotoPressed = false
         wantsVideoPlayback = false
-        stopLivePhoto()
+        stopLivePhoto(animated: false)
         videoLoadTask?.cancel()
         videoLoadTask = nil
         playbackKeepUpObserver?.invalidate()
@@ -1154,11 +1257,14 @@ final class PhotoPagerCell: UICollectionViewCell {
     /// Memutar kalau berhenti, menjeda kalau sedang berjalan.
     func togglePlayPause() {
         guard isPlaybackContextCurrent else { return }
+        if videoSourceContext != nil && !isVideoSourceCurrent { stopPlayback() }
         if player?.currentItem?.status == .failed {
             failVideoPlayback()
         }
         guard let player else {
-            togglePlayback()
+            wantsVideoPlayback.toggle()
+            loadVideoIfNeeded()
+            reportPlayback()
             return
         }
         if wantsVideoPlayback {
@@ -1175,14 +1281,42 @@ final class PhotoPagerCell: UICollectionViewCell {
         reportPlayback()
     }
 
+    func beginScrubbing() {
+        guard isVideo, isPlaybackContextCurrent else { return }
+        isScrubbingVideo = true
+        player?.pause()
+        loadVideoIfNeeded()
+    }
+
+    func endScrubbing() {
+        isScrubbingVideo = false
+        performPendingSeek()
+        resumeVideoPlaybackIfPossible()
+        playButton.isHidden = !isVideo || wantsVideoPlayback
+        reportPlayback()
+    }
+
+    func setPlaybackRate(_ rate: Float) {
+        guard rate.isFinite, playbackState.availableRates.contains(rate) else { return }
+        playbackRate = rate
+        player?.defaultRate = rate
+        if wantsVideoPlayback && !isScrubbingVideo { player?.rate = rate }
+        reportPlayback()
+    }
+
+    func toggleLooping() { loopsVideo.toggle(); reportPlayback() }
+
     /// Bisa ditekan SEBELUM videonya diputar.
     ///
     /// Dulu ini menunggu pemutarnya ada, jadi menekan tombol bisu di video yang
     /// belum dijalankan tidak melakukan apa pun. Pilihannya sekarang disimpan
     /// terpisah dari pemutar, lalu diterapkan begitu pemutarnya dibuat.
     func toggleMute() {
-        Self.prefersMuted.toggle()
+        guard !isVideo || playbackState.hasAudio != false else { return }
+        Self.prefersMuted = !(livePhotoView?.isMuted ?? livePlayer?.isMuted ?? Self.prefersMuted)
         player?.isMuted = Self.prefersMuted
+        livePhotoView?.isMuted = Self.prefersMuted
+        livePlayer?.isMuted = Self.prefersMuted
         reportPlayback()
     }
 
@@ -1215,16 +1349,41 @@ final class PhotoPagerCell: UICollectionViewCell {
         hidePlaybackFailure()
         loadingIndicator.accessibilityLabel = String(localized: "Loading Live Photo")
         loadingIndicator.startAnimating()
+        liveSourceContext = imageContext(for: assetID, loader: loader)
+        observePlaybackSource()
+
+        let scale = max(1, traitCollection.displayScale)
+        let points = imageView.bounds.size
+        let targetSize = CGSize(width: max(1, points.width * scale), height: max(1, points.height * scale))
+        liveLoadTask = Task { [weak self] in
+            let edited = await loader.editedLivePhoto(for: assetID, targetSize: targetSize)
+            guard !Task.isCancelled, let self, self.isLivePhotoPressed, self.currentAssetID == assetID,
+                  self.loader === loader, self.isLiveSourceCurrent else {
+                if case .movie(let item, _, _, _) = edited { item.asset.cancelLoading() }
+                TemporaryMediaStore.remove(edited.ownedURLs)
+                return
+            }
+            self.liveLoadTask = nil
+            switch edited {
+            case .original: self.startOriginalLivePhoto(for: assetID, targetSize: targetSize, loader: loader)
+            case .off: self.stopLivePhoto()
+            case .unavailable: self.failLivePhotoPlayback()
+            case .native(let photo, let muted, let urls):
+                self.liveOwnedURLs = urls
+                self.startLocalLivePlayback(photo, isMuted: muted)
+            case .movie(let item, let muted, let loops, let urls):
+                self.liveOwnedURLs = urls
+                self.startLivePlayback(with: item, isMuted: muted, loops: loops)
+            }
+        }
+    }
+
+    private func startOriginalLivePhoto(for assetID: String, targetSize: CGSize, loader: PhotoPreviewLoader) {
 
         // PhotoKit adalah jalur utama bila salinan perangkat masih ada. Ia
         // merakit pasangan foto + motion dengan timing asli dan juga menangani
         // resource yang sementara berada di iCloud.
         if let localLivePhotoAssetID {
-            let scale = max(1, traitCollection.displayScale)
-            let points = imageView.bounds.size
-            let targetSize = CGSize(
-                width: max(1, points.width * scale),
-                height: max(1, points.height * scale))
             liveLoadTask = Task { [weak self] in
                 let livePhoto = await loader.localLivePhoto(
                     forLocalAssetID: localLivePhotoAssetID,
@@ -1234,7 +1393,7 @@ final class PhotoPagerCell: UICollectionViewCell {
                 guard self.isLivePhotoPressed,
                       self.currentAssetID == assetID,
                       self.loader === loader,
-                      self.isPlaybackContextCurrent
+                      self.isLiveSourceCurrent
                 else {
                     return
                 }
@@ -1267,7 +1426,7 @@ final class PhotoPagerCell: UICollectionViewCell {
             guard self.isLivePhotoPressed,
                   self.currentAssetID == assetID,
                   self.loader === loader,
-                  self.isPlaybackContextCurrent,
+                  self.isLiveSourceCurrent,
                   self.livePhotoVideoID == videoID
             else {
                 asset?.cancelLoading()
@@ -1277,15 +1436,15 @@ final class PhotoPagerCell: UICollectionViewCell {
                 self.failLivePhotoPlayback()
                 return
             }
-            self.startLivePlayback(with: asset)
+            self.startLivePlayback(with: AVPlayerItem(asset: asset))
         }
     }
 
-    private func startLocalLivePlayback(_ livePhoto: PHLivePhoto) {
+    private func startLocalLivePlayback(_ livePhoto: PHLivePhoto, isMuted: Bool? = nil) {
         let view = PHLivePhotoView(frame: imageView.bounds)
         view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         view.isUserInteractionEnabled = false
-        view.isMuted = true
+        view.isMuted = isMuted ?? Self.prefersMuted
         view.livePhoto = livePhoto
         view.alpha = 0
         imageView.addSubview(view)
@@ -1302,16 +1461,14 @@ final class PhotoPagerCell: UICollectionViewCell {
         }
     }
 
-    private func startLivePlayback(with asset: AVAsset) {
-        let item = AVPlayerItem(asset: asset)
+    private func startLivePlayback(with item: AVPlayerItem, isMuted: Bool? = nil, loops: Bool = false) {
+        loopsLivePlayback = loops
         // Klip Live Photo pendek; menunggu buffer besar membuat hold terasa
         // seperti tidak bekerja pada koneksi lambat.
         item.preferredForwardBufferDuration = 0.5
         let player = AVPlayer(playerItem: item)
         player.automaticallyWaitsToMinimizeStalling = false
-        // Live Photo selalu senyap — bagian bergeraknya cuma sekejap, dan
-        // suaranya justru mengagetkan.
-        player.isMuted = true
+        player.isMuted = isMuted ?? Self.prefersMuted
 
         let layer = AVPlayerLayer(player: player)
         layer.videoGravity = .resizeAspect
@@ -1328,8 +1485,19 @@ final class PhotoPagerCell: UICollectionViewCell {
         ) { [weak self, weak player] _ in
             MainActor.assumeIsolated {
                 guard let self, let player, self.livePlayer === player,
-                      self.isPlaybackContextCurrent
+                      self.isLiveSourceCurrent
                 else { return }
+                if self.loopsLivePlayback, self.isLivePhotoPressed, let item = player.currentItem {
+                    player.seek(to: .zero) { [weak self, weak player, weak item] finished in
+                        Task { @MainActor [weak self, weak player, weak item] in
+                            guard finished, let self, let player, let item, self.livePlayer === player,
+                                  player.currentItem === item, self.isLiveSourceCurrent,
+                                  self.isLivePhotoPressed, self.loopsLivePlayback else { return }
+                            player.play()
+                        }
+                    }
+                    return
+                }
                 self.stopLivePhoto()
             }
         }
@@ -1343,7 +1511,7 @@ final class PhotoPagerCell: UICollectionViewCell {
             DispatchQueue.main.async { [weak self, weak item] in
                 guard let self, let item,
                       self.livePlayer?.currentItem === item,
-                      self.isPlaybackContextCurrent
+                      self.isLiveSourceCurrent
                 else { return }
                 if item.status == .failed {
                     self.failLivePhotoPlayback()
@@ -1358,7 +1526,7 @@ final class PhotoPagerCell: UICollectionViewCell {
             MainActor.assumeIsolated {
                 guard let self, let item,
                       self.livePlayer?.currentItem === item,
-                      self.isPlaybackContextCurrent
+                      self.isLiveSourceCurrent
                 else { return }
                 self.failLivePhotoPlayback()
             }
@@ -1371,7 +1539,7 @@ final class PhotoPagerCell: UICollectionViewCell {
                 guard let self, let player,
                       observedPlayer === player,
                       self.livePlayer === player,
-                      self.isPlaybackContextCurrent
+                      self.isLiveSourceCurrent
                 else { return }
                 self.updateLivePhotoLoading(for: player)
             }
@@ -1385,7 +1553,7 @@ final class PhotoPagerCell: UICollectionViewCell {
                       observedItem === item,
                       self.isLivePhotoPressed,
                       self.livePlayer?.currentItem === item,
-                      self.isPlaybackContextCurrent,
+                      self.isLiveSourceCurrent,
                       item.isPlaybackLikelyToKeepUp,
                       self.livePlayer?.timeControlStatus == .waitingToPlayAtSpecifiedRate
                 else { return }
@@ -1431,7 +1599,14 @@ final class PhotoPagerCell: UICollectionViewCell {
         showPlaybackFailure(isLivePhoto: true)
     }
 
-    private func stopLivePhoto(keepingFailure: Bool = false) {
+    private func stopLivePhoto(keepingFailure: Bool = false, animated: Bool = true) {
+        let mayAnimate = animated && isLiveSourceCurrent
+        let hadNativePhoto = livePhotoView != nil
+        let owned = liveOwnedURLs
+        liveOwnedURLs = []
+        liveSourceContext = nil
+        if videoSourceContext != nil { observePlaybackSource() }
+        else { playbackSourceObservation = UUID() }
         liveLoadTask?.cancel()
         liveLoadTask = nil
         livePlaybackKeepUpObserver?.invalidate()
@@ -1449,17 +1624,24 @@ final class PhotoPagerCell: UICollectionViewCell {
         if let oldView = livePhotoView {
             oldView.stopPlayback()
             livePhotoView = nil
-            UIView.animate(
+            if mayAnimate { UIView.animate(
                 withDuration: 0.12,
                 delay: 0,
                 options: [.beginFromCurrentState, .curveEaseOut]
             ) {
                 oldView.alpha = 0
             } completion: { _ in
+                oldView.livePhoto = nil
                 oldView.removeFromSuperview()
+                TemporaryMediaStore.remove(owned)
+            } } else {
+                oldView.livePhoto = nil
+                oldView.removeFromSuperview()
+                TemporaryMediaStore.remove(owned)
             }
         }
         VideoPlaybackLifecycle.stop(livePlayer)
+        if !hadNativePhoto { TemporaryMediaStore.remove(owned) }
         if let oldLayer = liveLayer {
             oldLayer.removeAllAnimations()
             let fade = CABasicAnimation(keyPath: "opacity")
@@ -1468,13 +1650,14 @@ final class PhotoPagerCell: UICollectionViewCell {
             fade.duration = 0.12
             fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
             oldLayer.opacity = 0
-            oldLayer.add(fade, forKey: "livePhotoFadeOut")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                oldLayer.removeFromSuperlayer()
-            }
+            if mayAnimate {
+                oldLayer.add(fade, forKey: "livePhotoFadeOut")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { oldLayer.removeFromSuperlayer() }
+            } else { oldLayer.removeFromSuperlayer() }
         }
         liveLayer = nil
         livePlayer = nil
+        loopsLivePlayback = false
         if let liveEndObserver {
             playbackNotifications.removeObserver(liveEndObserver)
             self.liveEndObserver = nil
@@ -1483,17 +1666,34 @@ final class PhotoPagerCell: UICollectionViewCell {
 
     /// Melompat ke bagian tertentu, 0…1.
     func seek(toFraction fraction: Double) {
-        guard let player, let item = player.currentItem else { return }
+        guard fraction.isFinite, isVideo, isPlaybackContextCurrent else { return }
+        if videoSourceContext != nil && !isVideoSourceCurrent { stopPlayback() }
+        pendingSeekFraction = min(max(fraction, 0), 1)
+        loadVideoIfNeeded()
+        performPendingSeek()
+        reportPlayback()
+    }
+
+    private func performPendingSeek() {
+        guard isVideoSourceCurrent, activeSeekFraction == nil, let fraction = pendingSeekFraction,
+              let player, let item = player.currentItem, item.status == .readyToPlay else { return }
         let duration = item.duration.seconds
         guard duration.isFinite, duration > 0 else { return }
-        let target = CMTime(seconds: duration * min(max(fraction, 0), 1), preferredTimescale: 600)
+        pendingSeekFraction = nil
+        activeSeekFraction = fraction
+        let token = UUID()
+        seekRequest = token
+        let target = CMTime(seconds: duration * fraction, preferredTimescale: 600)
         player.seek(
             to: target,
             toleranceBefore: .zero,
             toleranceAfter: .zero
-        ) { [weak self, weak player] _ in
-            DispatchQueue.main.async { [weak self, weak player] in
-                guard let self, let player, self.player === player else { return }
+        ) { [weak self, weak player, weak item] _ in
+            DispatchQueue.main.async { [weak self, weak player, weak item] in
+                guard let self, let player, let item, self.player === player, player.currentItem === item,
+                      self.seekRequest == token, self.isVideoSourceCurrent else { return }
+                self.activeSeekFraction = nil
+                self.performPendingSeek()
                 self.resumeVideoPlaybackIfPossible()
                 self.reportPlayback()
             }
@@ -1504,13 +1704,21 @@ final class PhotoPagerCell: UICollectionViewCell {
     var playbackState: PhotoPlaybackState {
         var state = PhotoPlaybackState()
         state.isVideo = isVideo
-        state.isMuted = Self.prefersMuted
+        let removedByEdit = currentAssetID.map { loader?.isAudioRemovedByEdit(for: $0) == true } ?? false
+        state.hasAudio = removedByEdit ? false : audioAvailability
+        state.isMuted = Self.prefersMuted || state.hasAudio == false
         // Tombol tetap menunjukkan pause selama rebuffering karena intent user
         // masih play; status waiting bukan permintaan pause.
         state.isPlaying = wantsVideoPlayback
         let itemDuration = player?.currentItem?.duration.seconds ?? .nan
         state.duration = itemDuration.isFinite && itemDuration > 0 ? itemDuration : metadataDuration
         state.time = player?.currentTime().seconds ?? 0
+        if let fraction = pendingSeekFraction ?? activeSeekFraction, state.duration > 0 { state.time = fraction * state.duration }
+        state.rate = playbackRate
+        state.isLooping = loopsVideo
+        if player?.currentItem?.status == .readyToPlay {
+            state.availableRates = (player?.currentItem?.canPlaySlowForward == true ? [0.25, 0.5, 0.75] : []) + [1, 1.25, 1.5, 2]
+        }
         if let item = player?.currentItem, state.duration > 0 {
             let bufferedEnd = item.loadedTimeRanges.reduce(0.0) { result, value in
                 let end = CMTimeRangeGetEnd(value.timeRangeValue).seconds

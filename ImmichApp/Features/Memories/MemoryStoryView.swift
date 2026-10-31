@@ -112,8 +112,9 @@ struct MemoryStoryView: View {
     /// Video ditampilkan SELAMA durasinya, bukan lima detik seperti foto —
     /// kalau tidak, klip 20 detik akan terpotong di detik kelima.
     private var currentDuration: Double {
-        guard let asset = currentAsset, asset.isVideo,
-              let duration = asset.duration, duration > 0
+        guard let original = currentAsset else { return storyPhotoDuration }
+        let asset = MediaEditingPipeline.shared.displayAsset(original, session: session)
+        guard asset.isVideo, let duration = asset.duration, duration.isFinite, duration > 0
         else { return storyPhotoDuration }
         return duration
     }
@@ -622,21 +623,22 @@ final class MemoryStoryVideoView: UIView {
     @MainActor
     private func makePlayer(assetID: String, session: SessionManager, localLoader: PhotoPreviewLoader?,
                             visibilityPolicy: AssetVisibilityPolicy) {
-        if LocalPhotoLibrary.isLocal(assetID) {
+        let editKey = MediaEditingPipeline.shared.cacheKey("memory-playback", assetID: assetID, session: session)
+        if LocalPhotoLibrary.isLocal(assetID) || editKey != "memory-playback" {
             let loader = localLoader ?? PhotoPreviewLoader(session: session)
             let generation = LocalSnapshot.generation, request = UUID()
             let sourceID = loader.sourceID(for: assetID), context = loader.requestContext
             localLoadRequest = request
             localLoadTask = Task { [weak self] in
-                let asset = await loader.playbackAsset(for: assetID)
+                let item = await loader.playbackItem(for: assetID)
                 guard let self, !Task.isCancelled, self.localLoadRequest == request,
                       self.loadedAssetID == assetID, self.isPlaybackActive,
                       generation == LocalSnapshot.generation else { return }
                 self.localLoadTask = nil
                 guard sourceID == loader.sourceID(for: assetID), context == loader.requestContext,
                       visibilityPolicy.allows(id: assetID) else { self.onMediaStateChanged?(.failed); return }
-                guard let asset else { self.onMediaStateChanged?(.failed); return }
-                self.installPlayer(item: AVPlayerItem(asset: asset), assetID: assetID)
+                guard let item else { self.onMediaStateChanged?(.failed); return }
+                self.installPlayer(item: item, assetID: assetID)
                 self.applyPlaybackIntent()
             }
             return

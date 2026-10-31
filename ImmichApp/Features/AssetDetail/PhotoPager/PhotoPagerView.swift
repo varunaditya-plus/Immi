@@ -251,6 +251,7 @@ final class PhotoPagerController: UIViewController {
             scrollToCurrent(animated: false)
         }
         updateImageAnalysisActivation()
+        reportPlaybackState()
     }
 
     func apply(layout newLayout: PhotoPagerLayout, isPagingEnabled: Bool) {
@@ -417,6 +418,10 @@ final class PhotoPagerController: UIViewController {
     func togglePlayback() { currentCell?.togglePlayPause() }
     func toggleMute() { currentCell?.toggleMute() }
     func seek(toFraction fraction: Double) { currentCell?.seek(toFraction: fraction) }
+    func beginScrubbing() { currentCell?.beginScrubbing() }
+    func endScrubbing() { currentCell?.endScrubbing() }
+    func setPlaybackRate(_ rate: Float) { currentCell?.setPlaybackRate(rate) }
+    func toggleLooping() { currentCell?.toggleLooping() }
 
     /// Hasil edit tetap milik aset asal walau pengguna sudah berganti halaman.
     func reloadImage(for assetID: String) async {
@@ -433,6 +438,7 @@ final class PhotoPagerController: UIViewController {
               assets.indices.contains(currentIndex),
               assets[currentIndex].id == assetID
         else { return }
+        currentCell?.stopPlayback()
         currentCell?.configure(with: assets[currentIndex], loader: loader)
         currentCell?.apply(layoutRules)
     }
@@ -516,6 +522,9 @@ extension PhotoPagerController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell,
                         forItemAt indexPath: IndexPath) {
         (cell as? PhotoPagerCell)?.setImageAnalysisActive(indexPath.item == currentIndex && canAnalyzeCurrentImage)
+        if indexPath.item == currentIndex, let cell = cell as? PhotoPagerCell {
+            playbackObserver?.playbackDidUpdate(cell.playbackState)
+        }
     }
 
     func collectionView(

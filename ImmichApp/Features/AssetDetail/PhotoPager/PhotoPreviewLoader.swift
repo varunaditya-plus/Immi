@@ -22,6 +22,7 @@ class PhotoPreviewLoader {
     private let imageCache: ImageCache
     private let serverIDForLocalAsset: @MainActor (String) -> String?
     private let localPreview: @MainActor (String) async -> UIImage?
+    private let localPlayback: @MainActor (String, Bool) async -> AVAsset?
 
     var requestContext: SessionRequestContext { session.snapshot }
 
@@ -34,16 +35,20 @@ class PhotoPreviewLoader {
         localPreview: @escaping @MainActor (String) async -> UIImage? = {
             await LocalPhotoLibrary.shared.preview(for: $0,
                 size: CGSize(width: PhotoPreviewLoader.maxPixelSize, height: PhotoPreviewLoader.maxPixelSize))
+        },
+        localPlayback: @escaping @MainActor (String, Bool) async -> AVAsset? = { id, allowsNetwork in
+            await LocalPhotoLibrary.shared.videoAsset(for: id, allowsNetworkAccess: allowsNetwork)
         }
     ) {
         self.session = session
         self.imageCache = imageCache
         self.serverIDForLocalAsset = serverIDForLocalAsset
         self.localPreview = localPreview
+        self.localPlayback = localPlayback
     }
 
     private func cacheKey(for assetId: String) -> String {
-        "\(assetId)-preview"
+        MediaEditingPipeline.shared.cacheKey("\(assetId)-preview", assetID: assetId, session: session)
     }
 
     private func serverPreviewID(for assetID: String) -> String? {
@@ -54,6 +59,17 @@ class PhotoPreviewLoader {
     }
 
     func sourceID(for assetID: String) -> String { serverPreviewID(for: assetID) ?? assetID }
+
+    func displayAsset(_ asset: AssetLite) -> AssetLite {
+        MediaEditingPipeline.shared.displayAsset(asset, session: session)
+    }
+
+    func isAudioRemovedByEdit(for assetID: String) -> Bool {
+        guard accountGeneration == LocalSnapshot.generation,
+              let saved = try? MediaEditingPipeline.shared.savedEdit(for: assetID, session: session),
+              saved.document.kind == .video else { return false }
+        return saved.document.video.isMuted
+    }
 
     /// Gambar terbaik yang SUDAH ada di memori, tanpa `await`.
     ///
@@ -69,12 +85,12 @@ class PhotoPreviewLoader {
             return preview
         }
         if let thumbnail = ImageMemoryCache.shared.image(
-            for: ImageCache.memoryKey("\(sourceID)-thumbnail", PhotoThumbnailLoader.maxPixelSize)) {
+            for: ImageCache.memoryKey(MediaEditingPipeline.shared.cacheKey("\(sourceID)-thumbnail", assetID: sourceID, session: session), PhotoThumbnailLoader.maxPixelSize)) {
             return thumbnail
         }
         guard sourceID != assetId else { return nil }
         return ImageMemoryCache.shared.image(
-            for: ImageCache.memoryKey("\(assetId)-thumbnail", PhotoThumbnailLoader.maxPixelSize))
+            for: ImageCache.memoryKey(MediaEditingPipeline.shared.cacheKey("\(assetId)-thumbnail", assetID: assetId, session: session), PhotoThumbnailLoader.maxPixelSize))
     }
 
     /// true kalau yang ada di memori sudah versi tajamnya, jadi tidak perlu
@@ -91,8 +107,8 @@ class PhotoPreviewLoader {
         // Display ID lokal tetap stabil setelah upload, tetapi edit server
         // berada pada preview server. Foto yang belum tertaut tetap lokal.
         guard let sourceID = serverPreviewID(for: assetId) else {
-            let image = await localPreview(assetId)
-            return accountGeneration == LocalSnapshot.generation && !Task.isCancelled ? image : nil
+            guard let image = await localPreview(assetId), accountGeneration == LocalSnapshot.generation, !Task.isCancelled else { return nil }
+            return try? await MediaEditingPipeline.shared.devicePreview(image, id: assetId, session: session, maxPixelSize: Self.maxPixelSize)
         }
 
         let api = session.imageAPI
@@ -109,15 +125,15 @@ class PhotoPreviewLoader {
             let image = try await imageCache.image(
                 key: cacheKey(for: sourceID),
                 maxPixelSize: Self.maxPixelSize,
-                fetch: { try await api.rawData(endpoint) })
+                fetch: { try await MediaEditingPipeline.shared.imageData(endpoint, api: api) })
             guard accountGeneration == LocalSnapshot.generation else { return nil }
             UnreadableAssets.shared.noteSuccess()
             return image
         } catch {
             guard accountGeneration == LocalSnapshot.generation, !Task.isCancelled else { return nil }
             if LocalPhotoLibrary.isLocal(assetId) {
-                let image = await localPreview(assetId)
-                return accountGeneration == LocalSnapshot.generation && !Task.isCancelled ? image : nil
+                guard let image = await localPreview(assetId), accountGeneration == LocalSnapshot.generation, !Task.isCancelled else { return nil }
+                return try? await MediaEditingPipeline.shared.devicePreview(image, id: assetId, session: session, maxPixelSize: Self.maxPixelSize)
             }
             // Aset yang ditolak server dibuang dari linimasa — lihat
             // `UnreadableAssets`.
@@ -179,8 +195,25 @@ class PhotoPreviewLoader {
     /// hanya ada di iCloud, endpoint playback server menjadi fallback.
     func playbackAsset(for assetId: String) async -> AVAsset? {
         guard accountGeneration == LocalSnapshot.generation, !Task.isCancelled else { return nil }
+        let context = requestContext, sourceID = self.sourceID(for: assetId)
+        let saved: MediaEditingPipeline.SavedEdit?
+        do { saved = try MediaEditingPipeline.shared.savedEdit(for: assetId, session: session) }
+        catch { return nil }
+        func isCurrent() -> Bool {
+            guard !Task.isCancelled, accountGeneration == LocalSnapshot.generation, context == requestContext,
+                  sourceID == self.sourceID(for: assetId) else { return false }
+            do { return try MediaEditingPipeline.shared.savedEdit(for: assetId, session: session)?.record == saved?.record }
+            catch { return false }
+        }
+        guard isCurrent() else { return nil }
         let localAssetID: String?
-        if LocalPhotoLibrary.isLocal(assetId) {
+        if let saved {
+            if let deviceID = saved.document.deviceAssetID { localAssetID = deviceID }
+            else {
+                guard !LocalPhotoLibrary.isLocal(saved.assetID) else { return nil }
+                return try? MediaEditingPipeline.shared.remoteOriginal(saved.assetID, context: context)
+            }
+        } else if LocalPhotoLibrary.isLocal(assetId) {
             localAssetID = assetId
         } else if let identifier = SwiftDataManager.shared.localIdentifier(
             forServerAsset: assetId) {
@@ -189,23 +222,41 @@ class PhotoPreviewLoader {
             localAssetID = nil
         }
 
-        if let localAssetID,
-           let localAsset = await LocalPhotoLibrary.shared.videoAsset(for: localAssetID) {
-            guard accountGeneration == LocalSnapshot.generation, !Task.isCancelled else {
+        if let localAssetID, let localAsset = await localPlayback(localAssetID, false) {
+            guard isCurrent() else {
                 localAsset.cancelLoading()
                 return nil
             }
             return localAsset
         }
 
-        // Aset yang hanya ada di perangkat tidak punya fallback server.
-        guard !Task.isCancelled, !LocalPhotoLibrary.isLocal(assetId),
-              let source = videoSource(for: assetId)
-        else { return nil }
+        guard isCurrent() else { return nil }
+        if saved == nil, !LocalPhotoLibrary.isLocal(sourceID), let source = videoSource(for: sourceID) {
+            return AVURLAsset(url: source.url, options: ["AVURLAssetHTTPHeaderFieldsKey": source.headers])
+        }
+        // Only this explicitly selected, device-only video may fetch its iCloud original.
+        guard let localAssetID else { return nil }
+        let cloud = await localPlayback(localAssetID, true)
+        guard isCurrent() else { cloud?.cancelLoading(); return nil }
+        return cloud
+    }
 
-        return AVURLAsset(
-            url: source.url,
-            options: ["AVURLAssetHTTPHeaderFieldsKey": source.headers])
+    func playbackItem(for assetID: String) async -> AVPlayerItem? {
+        let context = requestContext, sourceID = self.sourceID(for: assetID)
+        let recipeKey = cacheKey(for: assetID)
+        guard let asset = await playbackAsset(for: assetID) else { return nil }
+        guard !Task.isCancelled, context == requestContext, sourceID == self.sourceID(for: assetID), recipeKey == cacheKey(for: assetID) else {
+            asset.cancelLoading()
+            return nil
+        }
+        do {
+            let item = try await MediaEditingPipeline.shared.playbackItem(asset: asset, assetID: assetID, session: session)
+            guard !Task.isCancelled, context == requestContext, sourceID == self.sourceID(for: assetID), recipeKey == cacheKey(for: assetID) else {
+                item.asset.cancelLoading()
+                return nil
+            }
+            return item
+        } catch { return nil }
     }
 
     /// Identifier PhotoKit untuk aset perangkat maupun aset server yang masih
@@ -235,8 +286,37 @@ class PhotoPreviewLoader {
 
     func localLivePhoto(forLocalAssetID localID: String, targetSize: CGSize) async -> PHLivePhoto? {
         guard accountGeneration == LocalSnapshot.generation, !Task.isCancelled else { return nil }
+        let context = requestContext, sourceID = self.sourceID(for: localID)
         let image = await LocalPhotoLibrary.shared.livePhoto(for: localID, targetSize: targetSize)
-        return accountGeneration == LocalSnapshot.generation && !Task.isCancelled ? image : nil
+        return accountGeneration == LocalSnapshot.generation && !Task.isCancelled && context == requestContext
+            && sourceID == self.sourceID(for: localID) && visibilityPolicy.allows(id: localID) ? image : nil
+    }
+
+    func editedLivePhoto(for assetID: String, targetSize: CGSize) async -> EditedLivePhotoResult {
+        let context = requestContext, sourceID = self.sourceID(for: assetID)
+        func isAllowed() -> Bool {
+            accountGeneration == LocalSnapshot.generation && !Task.isCancelled && context == requestContext
+                && sourceID == self.sourceID(for: assetID) && visibilityPolicy.allows(id: assetID)
+                && visibilityPolicy.allows(id: sourceID)
+        }
+        guard isAllowed() else { return .unavailable }
+        let result = await MediaEditingPipeline.shared.editedLivePhoto(assetID: assetID, session: session,
+            targetSize: targetSize, isAllowed: isAllowed)
+        guard isAllowed() else {
+            if case .movie(let item, _, _, _) = result { item.asset.cancelLoading() }
+            TemporaryMediaStore.remove(result.ownedURLs)
+            return .unavailable
+        }
+        return result
+    }
+
+    func livePhotoMode(for assetID: String) -> LivePhotoEditRecipe.Mode {
+        guard accountGeneration == LocalSnapshot.generation else { return .off }
+        do {
+            guard let saved = try MediaEditingPipeline.shared.savedEdit(for: assetID, session: session),
+                  saved.document.kind == .livePhoto else { return .live }
+            return saved.document.live.mode
+        } catch { return .off }
     }
 
     /// Menghangatkan halaman tetangga sebelum diusap ke sana.
@@ -246,17 +326,18 @@ class PhotoPreviewLoader {
         guard !serverIDs.isEmpty else { return }
 
         let api = session.imageAPI
+        let sources = Dictionary(serverIDs.map { (cacheKey(for: $0), $0) }, uniquingKeysWith: { first, _ in first })
         imageCache.prefetch(
-            keys: serverIDs.map(cacheKey(for:)),
+            keys: Array(sources.keys),
             maxPixelSize: Self.maxPixelSize,
             fetch: { key in
-                let assetId = String(key.dropLast("-preview".count))
-                return try await api.rawData(.init(
+                guard let assetId = sources[key] else { throw CancellationError() }
+                return try await MediaEditingPipeline.shared.imageData(.init(
                     path: "/assets/\(assetId)/thumbnail",
                     query: [
                         .init(name: "size", value: "preview"),
                         .init(name: "edited", value: "true"),
-                    ]))
+                    ]), api: api)
             })
     }
 
