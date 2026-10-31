@@ -67,3 +67,65 @@ struct SearchResponseDTO: Decodable {
     let assets: AssetsPage
     var incompleteSources: [String]? = nil
 }
+
+struct AlbumSmartSearchRequestDTO: Encodable {
+    struct Equal<Value: Encodable>: Encodable { let eq: Value }
+    struct IDs: Encodable { let all: [String] }
+    struct TextMatch: Encodable { let matches: String }
+    struct DateFilter: Encodable {
+        var gte: String? = nil
+        var lte: String? = nil
+        var lt: String? = nil
+        var isNull = false
+
+        private enum CodingKeys: String, CodingKey { case gte, lte, lt, eq }
+
+        func encode(to encoder: Encoder) throws {
+            var values = encoder.container(keyedBy: CodingKeys.self)
+            try values.encodeIfPresent(gte, forKey: .gte)
+            try values.encodeIfPresent(lte, forKey: .lte)
+            try values.encodeIfPresent(lt, forKey: .lt)
+            if isNull { try values.encodeNil(forKey: .eq) }
+        }
+    }
+    struct Filter: Encodable {
+        let albumIds: IDs
+        let personIds: IDs?
+        let type: Equal<String>?
+        let isMotion: Equal<Bool>?
+        let isFavorite: Equal<Bool>?
+        let visibility: Equal<String>?
+        let city: Equal<String>?
+        let state: Equal<String>?
+        let country: Equal<String>?
+        let ocr: TextMatch?
+        let takenAt: DateFilter?
+        let trashedAt: DateFilter?
+    }
+
+    let query: String?
+    let size: Int?
+    let withExif: Bool?
+    let filter: Filter
+
+    init(_ request: SearchRequestDTO) {
+        query = request.query
+        size = request.size
+        withExif = request.withExif
+        let before = request.exclusiveTakenBefore ?? request.takenBefore
+        let taken = request.takenAfter == nil && before == nil ? nil : DateFilter(
+            gte: request.takenAfter, lte: request.exclusiveTakenBefore == nil ? before : nil,
+            lt: request.exclusiveTakenBefore)
+        let trashed = request.trashedAfter.map { DateFilter(gte: $0) }
+            ?? (request.withDeleted == true ? nil : DateFilter(isNull: true))
+        filter = Filter(albumIds: IDs(all: request.albumIds ?? []),
+            personIds: request.personIds.flatMap { $0.isEmpty ? nil : IDs(all: $0) },
+            type: request.type.map { Equal(eq: $0) }, isMotion: request.isMotion.map { Equal(eq: $0) },
+            isFavorite: request.isFavorite.map { Equal(eq: $0) },
+            visibility: request.visibility.map { Equal(eq: $0) },
+            city: request.city.map { Equal(eq: $0) }, state: request.state.map { Equal(eq: $0) },
+            country: request.country.map { Equal(eq: $0) },
+            ocr: request.ocr.flatMap { $0.isEmpty ? nil : TextMatch(matches: $0) },
+            takenAt: taken, trashedAt: trashed)
+    }
+}

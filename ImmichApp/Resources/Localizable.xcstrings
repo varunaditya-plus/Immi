@@ -211946,6 +211946,245 @@
           }
         }
       }
+    },
+    "Visual search within albums requires a stable Immich Server v3.2 or newer." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "يتطلب البحث المرئي داخل الألبومات إصدارًا مستقرًا من خادم Immich، الإصدار v3.2 أو أحدث."
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Визуалното търсене в албуми изисква стабилна версия v3.2 или по-нова на Immich Server."
+          }
+        },
+        "bn" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "অ্যালবামের মধ্যে দৃশ্যভিত্তিক অনুসন্ধানের জন্য Immich Server-এর স্থিতিশীল v3.2 বা পরবর্তী সংস্করণ প্রয়োজন।"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La cerca visual dins dels àlbums requereix una versió estable d'Immich Server v3.2 o posterior."
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vizuální vyhledávání v albech vyžaduje stabilní verzi Immich Server v3.2 nebo novější."
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visuel søgning i album kræver en stabil version af Immich Server v3.2 eller nyere."
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die visuelle Suche in Alben erfordert eine stabile Version von Immich Server v3.2 oder neuer."
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Η οπτική αναζήτηση μέσα σε άλμπουμ απαιτεί σταθερή έκδοση του Immich Server v3.2 ή νεότερη."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visual search within albums requires a stable Immich Server v3.2 or newer."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La búsqueda visual dentro de los álbumes requiere una versión estable de Immich Server v3.2 o posterior."
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "جستجوی تصویری در آلبوم‌ها به نسخهٔ پایدار v3.2 یا جدیدتر از Immich Server نیاز دارد."
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albumien visuaalinen haku vaatii Immich Serverin vakaan version v3.2 tai uudemman."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La recherche visuelle dans les albums nécessite une version stable d'Immich Server v3.2 ou ultérieure."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "חיפוש חזותי בתוך אלבומים דורש גרסה יציבה של Immich Server v3.2 ומעלה."
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "एल्बम के भीतर दृश्य खोज के लिए Immich Server के स्थिर संस्करण v3.2 या उसके बाद के संस्करण की आवश्यकता है।"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vizualno pretraživanje unutar albuma zahtijeva stabilnu verziju Immich Servera v3.2 ili noviju."
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Az albumokon belüli vizuális kereséshez az Immich Server v3.2-es vagy újabb stabil verziója szükséges."
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pencarian visual di dalam album memerlukan versi stabil Immich Server v3.2 atau yang lebih baru."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La ricerca visiva negli album richiede una versione stabile di Immich Server v3.2 o successiva."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アルバム内のビジュアル検索には、Immich Server v3.2以降の安定版が必要です。"
+          }
+        },
+        "kk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Альбомдардағы көрнекі іздеу үшін Immich Server v3.2 немесе одан кейінгі тұрақты нұсқасы қажет."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "앨범 내 시각적 검색에는 Immich Server v3.2 이상의 안정 버전이 필요합니다."
+          }
+        },
+        "lt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaizdinei paieškai albumuose reikia stabilios „Immich Server“ v3.2 ar naujesnės versijos."
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Carian visual dalam album memerlukan versi stabil Immich Server v3.2 atau lebih baharu."
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visuelt søk i album krever en stabil versjon av Immich Server v3.2 eller nyere."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visueel zoeken binnen albums vereist een stabiele versie van Immich Server v3.2 of nieuwer."
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wyszukiwanie wizualne w albumach wymaga stabilnej wersji Immich Server v3.2 lub nowszej."
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A pesquisa visual nos álbuns requer uma versão estável do Immich Server v3.2 ou posterior."
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Căutarea vizuală în albume necesită o versiune stabilă Immich Server v3.2 sau mai nouă."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Для визуального поиска в альбомах требуется стабильная версия Immich Server v3.2 или новее."
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vizuálne vyhľadávanie v albumoch vyžaduje stabilnú verziu Immich Server v3.2 alebo novšiu."
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vizualno iskanje v albumih zahteva stabilno različico Immich Server v3.2 ali novejšo."
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visuell sökning i album kräver en stabil version av Immich Server v3.2 eller senare."
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "การค้นหาด้วยภาพภายในอัลบั้มต้องใช้ Immich Server รุ่นเสถียร v3.2 ขึ้นไป"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Albümlerde görsel arama için Immich Server v3.2 veya daha yeni bir kararlı sürüm gerekir."
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Для візуального пошуку в альбомах потрібна стабільна версія Immich Server v3.2 або новіша."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tìm kiếm trực quan trong album yêu cầu phiên bản ổn định Immich Server v3.2 trở lên."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在相簿内进行视觉搜索需要 Immich Server v3.2 或更新的稳定版本。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在相簿內進行視覺搜尋需要 Immich Server v3.2 或更新的穩定版本。"
+          }
+        }
+      }
     }
   },
   "version" : "1.1"

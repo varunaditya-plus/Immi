@@ -31,9 +31,34 @@ class SearchRepository {
     /// halaman kedua bisa habis tersaring dan daftarnya berhenti tanpa alasan.
     func smartSearch(_ request: SearchRequestDTO) async throws -> SearchResponseDTO {
         let visibility = recordsVisibility ? await AssetVisibilityRequest(api: api, dataManager: dataManager) : nil
-        let response: SearchResponseDTO = try await api.send(.json("/search/smart", method: .post, body: request))
+        let response: SearchResponseDTO
+        if request.albumIds?.isEmpty == false {
+            let body = try await albumSmartRequest(request)
+            response = try await api.send(.json("/search/smart", method: .post, body: body))
+        } else {
+            response = try await api.send(.json("/search/smart", method: .post, body: request))
+        }
         await visibility?.record(response.assets.items)
         return response
+    }
+
+    @MainActor
+    private func albumSmartRequest(_ request: SearchRequestDTO) async throws -> AlbumSmartSearchRequestDTO {
+        let context = api.session.snapshot
+        try api.checkCurrent(context)
+        guard request.page == nil || request.page == 1 else { throw PhotoSearchError.incompletePage }
+        let version = try await api.session.serverVersion()
+        try Task.checkCancellation()
+        try api.checkCurrent(context)
+        if version.major > ServerCompatibilityPolicy.apiMajor {
+            throw ServerCompatibilityError.appTooOld(found: version)
+        }
+        guard version.major == 3, version.minor >= 2, version.prerelease == nil else {
+            throw PhotoSearchError.unsupportedAlbumVisualSearch
+        }
+        // Legacy smart search restricts owners even inside a shared album.
+        // The structured contract access-checks the album and includes its other contributors.
+        return AlbumSmartSearchRequestDTO(request)
     }
 
     func metadataSearch(_ request: SearchRequestDTO) async throws -> SearchResponseDTO {

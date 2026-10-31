@@ -25,6 +25,7 @@ enum PhotoSearchError: LocalizedError {
     case missingEditInformation
     case incompletePage
     case missingCachedSearch
+    case unsupportedAlbumVisualSearch
 
     var errorDescription: String? {
         switch self {
@@ -32,6 +33,7 @@ enum PhotoSearchError: LocalizedError {
         case .missingEditInformation: String(localized: "The server did not provide edit information for every photo.")
         case .incompletePage: String(localized: "Search returned an incomplete page. Please try again.")
         case .missingCachedSearch: String(localized: "This search changed. Please search again.")
+        case .unsupportedAlbumVisualSearch: String(localized: "Visual search within albums requires a stable Immich Server v3.2 or newer.")
         }
     }
 }

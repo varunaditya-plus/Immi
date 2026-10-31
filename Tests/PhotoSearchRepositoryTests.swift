@@ -24,6 +24,7 @@ final class PhotoSearchRepositoryTests: XCTestCase {
         for gate in gates { gate.finish(.failure(CancellationError())) }
         for task in tasks { _ = try? await task.value }
         PhotoSearchURLProtocol.handler = nil
+        PhotoSearchURLProtocol.statusCode = 200
         gates.removeAll()
         tasks.removeAll()
         RemovedAssets.shared.clear()
@@ -35,7 +36,7 @@ final class PhotoSearchRepositoryTests: XCTestCase {
         try await super.tearDown()
     }
 
-    func testRealTransportUnionsCompleteIndependentTextSourcesAndKeepsEveryFilter() async throws {
+    func testRealTransportUnionsCompleteIndependentTextSourcesAndKeepsEveryUnscopedFilter() async throws {
         let api = try api()
         let log = PhotoSearchRequestLog()
         let oldest = asset("not-favorite", captured: 1, favorite: false, edited: true)
@@ -56,7 +57,7 @@ final class PhotoSearchRepositoryTests: XCTestCase {
             }
         }
         let repository = PhotoSearchRepository(api: api, dataManager: store)
-        var request = SearchRequestDTO(query: "receipt", page: 1, albumIds: ["album"], type: "VIDEO",
+        var request = SearchRequestDTO(query: "receipt", page: 1, type: "VIDEO",
             takenAfter: "2020-01-01T00:00:00Z", takenBefore: "2030-01-01T00:00:00Z",
             city: "Barcelona", state: "Catalonia", country: "Spain", personIds: ["person-a", "person-b"], size: 1)
         request.exclusiveTakenBefore = request.takenBefore
@@ -79,7 +80,7 @@ final class PhotoSearchRepositoryTests: XCTestCase {
         XCTAssertEqual(entries.count, 4, "Local result pages must reuse the complete metadata union and bounded visual matches")
         for entry in entries {
             let body = entry.body
-            XCTAssertEqual(body["albumIds"] as? [String], ["album"])
+            XCTAssertNil(body["albumIds"])
             XCTAssertEqual(body["personIds"] as? [String], ["person-a", "person-b"])
             XCTAssertEqual(body["city"] as? String, "Barcelona")
             XCTAssertEqual(body["state"] as? String, "Catalonia")
@@ -661,7 +662,7 @@ private final class PhotoSearchResponseGate {
     }
 }
 
-private final class PhotoSearchRequestLog {
+final class PhotoSearchRequestLog {
     struct Entry { let path: String; let body: [String: Any] }
     private let lock = NSLock()
     private var recorded: [Entry] = []
@@ -679,8 +680,9 @@ private final class PhotoSearchRequestLog {
     }
 }
 
-private final class PhotoSearchURLProtocol: URLProtocol {
+final class PhotoSearchURLProtocol: URLProtocol {
     static var handler: ((URLRequest, Data) throws -> Data)?
+    static var statusCode = 200
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
@@ -698,7 +700,7 @@ private final class PhotoSearchURLProtocol: URLProtocol {
                 }
             }
             let bytes = try handler(request, body)
-            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            let response = HTTPURLResponse(url: request.url!, statusCode: Self.statusCode, httpVersion: nil, headerFields: nil)!
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: bytes)
             client?.urlProtocolDidFinishLoading(self)
