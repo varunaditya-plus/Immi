@@ -1,3 +1,4 @@
+import SwiftData
 import XCTest
 @testable import ImmichApp
 
@@ -5,6 +6,28 @@ import XCTest
 final class SharePreparationTests: XCTestCase {
     private var files: [URL] = []
     private var directories: [URL] = []
+    private var mappings: [(recordID: String, localID: String)] = []
+
+    func testUnmodifiedOriginalExportUsesFalseWithoutChangingOrdinarySharing() async throws {
+        let repository = try makeRepository()
+        var requests: [(String, String?)] = []
+        MockURLProtocol.responseProvider = { request in
+            let edited = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?
+                .first { $0.name == "edited" }?.value
+            requests.append((request.url!.path, edited))
+            return Self.response(request, status: 200, expectedEdited: request.url!.path.contains("/current/"))
+        }
+
+        let current = try await repository.shareFile("current")
+        files.append(current)
+        let originals = await repository.shareOriginalFiles(["first", "last"])
+        files.append(contentsOf: originals)
+
+        XCTAssertEqual(requests.map(\.0), ["/api/assets/current/original", "/api/assets/first/original", "/api/assets/last/original"])
+        XCTAssertEqual(requests.map(\.1), ["true", "false", "false"])
+        XCTAssertEqual(try Data(contentsOf: current), Data("original-current".utf8))
+        XCTAssertEqual(try originals.map { try Data(contentsOf: $0) }, [Data("original-first".utf8), Data("original-last".utf8)])
+    }
 
     override func setUp() async throws {
         MockURLProtocol.reset()
@@ -18,6 +41,15 @@ final class SharePreparationTests: XCTestCase {
         files.removeAll()
         for directory in directories { try? FileManager.default.removeItem(at: directory) }
         directories.removeAll()
+        for mapping in mappings {
+            let recordID = mapping.recordID
+            let descriptor = FetchDescriptor<BackupRecord>(predicate: #Predicate { $0.id == recordID })
+            for record in try SwiftDataManager.shared.modelContext.fetch(descriptor) {
+                SwiftDataManager.shared.modelContext.delete(record)
+            }
+            try SwiftDataManager.shared.unlinkDeviceAsset(localIdentifier: mapping.localID)
+        }
+        mappings.removeAll()
         RemovedAssets.shared.clear()
         DeletedServerAssetRegistry.shared.clear()
     }
@@ -185,6 +217,119 @@ final class SharePreparationTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: currentFile.path))
     }
 
+    func testAliasRemappingAndUnlinkingDiscardHeldShareFilesEvenWhenLogicalPrivacyStillAllowsThem() async throws {
+        for invalidation in ["remap", "unlink"] {
+            let localID = UUID().uuidString, recordID = UUID().uuidString
+            let originalID = UUID().uuidString
+            let displayID = LocalPhotoLibrary.assetID(for: localID)
+            mappings.append((recordID, localID))
+            try SwiftDataManager.shared.insertBackupRecord(BackupRecord(id: recordID, assetId: originalID,
+                deviceAssetId: "", localIdentifier: localID))
+            let preparation = SharePreparation(), observation = ShareObservation(), gate = SharePreparationGate()
+            let policy = AssetVisibilityPolicy(scope: .timeline)
+            let file = try managedFile(invalidation)
+            let task = try XCTUnwrap(preparation.start(ids: [displayID], prepare: { _ in await gate.wait() },
+                isAllowed: { policy.allows(id: $0) }, onError: observation.failed, onReady: observation.prepared))
+            addTeardownBlock { await gate.finish([]); await task.value }
+            await fulfillment(of: [gate.started], timeout: 2)
+
+            if invalidation == "unlink" { try SwiftDataManager.shared.unlinkDeviceAsset(localIdentifier: localID) }
+            else { try SwiftDataManager.shared.upsertBackupRecord(assetID: UUID().uuidString, checksum: "", localIdentifier: localID) }
+            XCTAssertTrue(policy.allows(id: displayID))
+            gate.finish([file])
+            await task.value
+
+            XCTAssertTrue(observation.files.isEmpty, invalidation)
+            XCTAssertTrue(observation.errors.isEmpty, invalidation)
+            XCTAssertTrue(preparation.preparedSourceIDs.isEmpty, invalidation)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: file.path), invalidation)
+            XCTAssertFalse(preparation.isPreparing, invalidation)
+        }
+    }
+
+    func testPreparedSourceIDsAreAvailableInsideTheCompletionAndStayFrozenUntilTheNextAcceptedRequest() async throws {
+        let localID = UUID().uuidString, recordID = UUID().uuidString
+        let originalID = UUID().uuidString, replacementID = UUID().uuidString
+        let displayID = LocalPhotoLibrary.assetID(for: localID)
+        let otherID = UUID().uuidString, localOnlyID = LocalPhotoLibrary.assetID(for: UUID().uuidString)
+        mappings.append((recordID, localID))
+        try SwiftDataManager.shared.insertBackupRecord(BackupRecord(id: recordID, assetId: originalID,
+            deviceAssetId: "", localIdentifier: localID))
+        let preparation = SharePreparation(), observation = ShareObservation()
+        let urls = try ["mapped", "server", "local-only"].map(managedFile)
+        var captured: [String] = []
+        let task = try XCTUnwrap(preparation.start(ids: [displayID, otherID, localOnlyID], prepare: { _ in urls },
+            isAllowed: { _ in true }, onError: observation.failed) { files in
+            captured = preparation.preparedSourceIDs
+            observation.prepared(files)
+        })
+        await task.value
+        XCTAssertEqual(captured, [originalID, otherID, localOnlyID])
+        XCTAssertEqual(preparation.preparedSourceIDs, captured)
+        try SwiftDataManager.shared.upsertBackupRecord(assetID: replacementID, checksum: "", localIdentifier: localID)
+        XCTAssertEqual(preparation.preparedSourceIDs, captured, "Presentation must retain the source paired with its bytes")
+        let next = try XCTUnwrap(preparation.start(ids: [displayID], prepare: { _ in
+            XCTAssertTrue(preparation.preparedSourceIDs.isEmpty)
+            return [urls[0]]
+        }, isAllowed: { _ in true }, onError: observation.failed, onReady: observation.prepared))
+        await next.value
+        XCTAssertEqual(preparation.preparedSourceIDs, [replacementID])
+        preparation.cancel()
+        XCTAssertTrue(preparation.preparedSourceIDs.isEmpty)
+        XCTAssertEqual(captured, [originalID, otherID, localOnlyID])
+        XCTAssertTrue(observation.errors.isEmpty)
+    }
+
+    func testServerChangeWithoutAccountClearDiscardsAHeldShareAndDoesNotLatchItsContext() async throws {
+        let session = MockSessionManager()
+        try session.setServer("https://share-preparation-a.example")
+        let initialContext = session.snapshot
+        let generation = LocalSnapshot.generation
+        let preparation = SharePreparation(), observation = ShareObservation()
+        let file = try managedFile("prepared-server-a")
+        let gate = SharePreparationGate()
+        let task = try XCTUnwrap(preparation.start(ids: ["same-id-on-both-servers"], session: session,
+            prepare: { _ in await gate.wait() }, isAllowed: { _ in true },
+            onError: observation.failed, onReady: observation.prepared))
+        addTeardownBlock { await gate.finish([file]); _ = await task.value }
+        await fulfillment(of: [gate.started], timeout: 2)
+
+        try session.setServer("https://share-preparation-b.example")
+        XCTAssertEqual(LocalSnapshot.generation, generation)
+        XCTAssertNotEqual(session.snapshot, initialContext)
+        gate.finish([file])
+        await task.value
+
+        XCTAssertTrue(observation.files.isEmpty)
+        XCTAssertTrue(observation.errors.isEmpty)
+        XCTAssertNil(preparation.preparedContext)
+        XCTAssertTrue(preparation.preparedSourceIDs.isEmpty)
+        XCTAssertFalse(preparation.isPreparing)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+    }
+
+    func testPreparedRequestContextIsLatchedInsideReadyAndRemainsBoundToItsBytes() async throws {
+        let session = MockSessionManager()
+        try session.setServer("https://share-preparation-a.example")
+        let initialContext = session.snapshot
+        let preparation = SharePreparation(), observation = ShareObservation()
+        let file = try managedFile("context-bound-file")
+        var captured: SessionRequestContext?
+        let task = try XCTUnwrap(preparation.start(ids: ["photo"], session: session,
+            prepare: { _ in [file] }, isAllowed: { _ in true }, onError: observation.failed) { files in
+            captured = preparation.preparedContext
+            observation.prepared(files)
+        })
+        await task.value
+        XCTAssertEqual(captured, initialContext)
+        XCTAssertEqual(preparation.preparedContext, initialContext)
+        try session.setServer("https://share-preparation-b.example")
+        XCTAssertEqual(preparation.preparedContext, initialContext)
+        XCTAssertNotEqual(preparation.preparedContext, session.snapshot)
+        preparation.cancel()
+        XCTAssertNil(preparation.preparedContext)
+    }
+
     func testEmptyHiddenAndAlreadyCanceledCallsDoNotStartOrReportFailures() async throws {
         let preparation = SharePreparation()
         let observation = ShareObservation()
@@ -223,9 +368,9 @@ final class SharePreparationTests: XCTestCase {
         return AssetDetailRepository(api: APIClient(session: session, urlSession: URLSession(configuration: configuration)))
     }
 
-    private nonisolated static func response(_ request: URLRequest, status: Int) -> (Data?, URLResponse?, Error?) {
+    private nonisolated static func response(_ request: URLRequest, status: Int, expectedEdited: Bool = true) -> (Data?, URLResponse?, Error?) {
         XCTAssertEqual(request.httpMethod, "GET")
-        XCTAssertEqual(request.url?.query, "edited=true", "Normal sharing must use the current rendition")
+        XCTAssertEqual(request.url?.query, "edited=\(expectedEdited)", "Current and unmodified exports must use their respective server renditions")
         let id = request.url!.path.split(separator: "/").dropLast().last.map(String.init)!
         let data = status == 200 ? Data("original-\(id)".utf8) : Data(#"{"message":"Original unavailable"}"#.utf8)
         let headers = ["Content-Type": "image/heic", "Content-Disposition": "attachment; filename=\"\(id).heic\""]

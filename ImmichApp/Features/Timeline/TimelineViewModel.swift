@@ -253,7 +253,7 @@ final class TimelineViewModel {
         libraryMetadataRepository: (any LibraryMetadataProviding)? = nil,
         libraryDeviceMetadata: @escaping @MainActor ([AssetLite]) -> [String: LibraryAssetMetadata] = LibraryPresentation.deviceMetadata,
         localOriginalFile: @escaping @MainActor (String) async -> (url: URL, filename: String)? = {
-            await LocalPhotoLibrary.shared.originalFile(for: $0)
+            await LocalPhotoLibrary.shared.exportFile(for: $0)
         },
         localPhotos: @escaping @MainActor () -> [LocalPhoto] = { LocalPhotoLibrary.shared.photos }
     ) {
@@ -1066,17 +1066,28 @@ final class TimelineViewModel {
     /// Unduh beberapa file asli sekaligus untuk share sheet. Yang gagal dilewati,
     /// bukan membatalkan seluruh operasi.
     func shareURLs(for ids: [String]) async -> [URL] {
-        let policy = AssetVisibilityPolicy(scope: .timeline, dataManager: dataManager)
+        let manager = dataManager ?? .shared
+        let policy = AssetVisibilityPolicy(scope: .timeline, dataManager: manager)
         guard let assetRepo, accountGeneration == LocalSnapshot.generation,
               !Task.isCancelled, ids.allSatisfy({ policy.allows(id: $0) }) else { return [] }
         let selected = Set(ids)
-        let candidates = Dictionary(uniqueKeysWithValues: actionAssets.filter { selected.contains($0.id) }.map { ($0.id, $0) })
+        var candidates = Dictionary(uniqueKeysWithValues: actionAssets.filter { selected.contains($0.id) }.map { ($0.id, $0) })
+        for id in ids where candidates[id] == nil {
+            candidates[id] = AssetLite(id: id, isVideo: false, ratio: 1, thumbhash: nil, createdAt: .distantPast)
+        }
+        let targets = candidates.values.map { asset in
+            (asset: asset, serverID: AssetServerIdentity.resolve(asset, using: manager))
+        }
         let urls = await assetRepo.shareFiles(ids, preparingFile: { id in
-            let asset = candidates[id] ?? AssetLite(id: id, isVideo: false, ratio: 1, thumbhash: nil, createdAt: .distantPast)
+            guard let asset = candidates[id] else { throw CancellationError() }
             return try await self.prepareShareFile(for: asset, using: assetRepo)
         })
         guard accountGeneration == LocalSnapshot.generation, !Task.isCancelled,
-              ids.allSatisfy({ policy.allows(id: $0) }) else {
+              targets.allSatisfy({ target in
+                AssetServerIdentity.resolve(target.asset, using: manager) == target.serverID
+                    && policy.allows(id: target.asset.id)
+                    && (target.serverID.map { policy.allows(id: $0) } ?? true)
+              }) else {
             TemporaryMediaStore.remove(urls)
             return []
         }
@@ -1156,14 +1167,16 @@ final class TimelineViewModel {
     private func prepareShareFile(for asset: AssetLite, using repository: AssetDetailRepository) async throws -> URL {
         let manager = dataManager ?? .shared
         let policy = AssetVisibilityPolicy(scope: .timeline, dataManager: manager)
-        if LocalPhotoLibrary.isLocal(asset.id) || asset.isOnDevice {
+        let serverID = AssetServerIdentity.resolve(asset, using: manager)
+        if serverID == nil, LocalPhotoLibrary.isLocal(asset.id) || asset.isOnDevice {
             let localID = LocalPhotoLibrary.isLocal(asset.id)
                 ? LocalPhotoLibrary.localIdentifier(from: asset.id)
                 : manager.localIdentifier(forServerAsset: asset.id)
             if let localID, let file = await localOriginalFile(LocalPhotoLibrary.assetID(for: localID)) {
                 defer { try? FileManager.default.removeItem(at: file.url) }
                 try Task.checkCancellation()
-                guard accountGeneration == LocalSnapshot.generation, policy.allows(id: asset.id) else {
+                guard accountGeneration == LocalSnapshot.generation, policy.allows(id: asset.id),
+                      AssetServerIdentity.resolve(asset, using: manager) == nil else {
                     throw CancellationError()
                 }
                 return try TemporaryMediaStore.adoptShareFile(at: file.url, suggestedFilename: file.filename)

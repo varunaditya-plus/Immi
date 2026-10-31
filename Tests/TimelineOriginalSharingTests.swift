@@ -9,6 +9,42 @@ final class TimelineOriginalSharingTests: XCTestCase {
     private var transport: URLSession!
     private var files: [URL] = []
 
+    func testEveryServerBackedEditStateUsesTheRemoteCurrentRenditionWithoutReadingTheDeviceCopy() async throws {
+        for edited in [nil, false, true] as [Bool?] {
+            for localDisplay in [false, true] {
+                let id = UUID().uuidString, localID = UUID().uuidString
+                try manager.linkDeviceAsset(localIdentifier: localID, to: id)
+                var detail = makeTestAsset(id: id)
+                detail.isEdited = edited
+                LocalSnapshot.save(detail, for: LocalSnapshot.Key.assetDetail(id))
+                defer { LocalSnapshot.remove(LocalSnapshot.Key.assetDetail(id)) }
+                let source = try localFile("older-device-copy")
+                let capture = LocalSharingCapture()
+                let model = model { localID in
+                    capture.ids.append(localID)
+                    return (source, "older.heic")
+                }
+                var requests: [String] = []
+                MockURLProtocol.responseProvider = { request in
+                    requests.append(request.url!.path)
+                    XCTAssertEqual(request.url?.path, "/api/assets/\(id)/original")
+                    return Self.serverResponse(request)
+                }
+
+                let displayID = localDisplay ? LocalPhotoLibrary.assetID(for: localID) : id
+                let result = await model.shareURL(for: photo(displayID, origin: .both))
+                let shared = try XCTUnwrap(result)
+                files.append(shared)
+
+                XCTAssertTrue(capture.ids.isEmpty, "A cached edit flag does not prove the device copy matches the server's current rendition")
+                XCTAssertEqual(requests, ["/api/assets/\(id)/original"])
+                XCTAssertEqual(try Data(contentsOf: shared), Data("server-current".utf8))
+                XCTAssertTrue(FileManager.default.fileExists(atPath: source.path), "The bypassed device file must remain untouched")
+                XCTAssertNil(model.actionError)
+            }
+        }
+    }
+
     override func setUp() async throws {
         MockURLProtocol.reset()
         RemovedAssets.shared.clear()
@@ -39,32 +75,29 @@ final class TimelineOriginalSharingTests: XCTestCase {
         MockURLProtocol.reset()
     }
 
-    func testSingleDeviceOnlyAndMappedTilesShareTheirLocalOriginalWithoutServerRequests() async throws {
-        for mapped in [false, true] {
-            let localID = "local-\(mapped)"
-            if mapped { try manager.linkDeviceAsset(localIdentifier: localID, to: "server-\(mapped)") }
-            let source = try localFile(localID)
-            let capture = LocalSharingCapture()
-            let model = model { id in
-                capture.ids.append(id)
-                return (source, "\(localID).heic")
-            }
-            MockURLProtocol.responseProvider = { request in
-                XCTFail("A locally available original must not request server media: \(request)")
-                return (nil, nil, URLError(.unsupportedURL))
-            }
-
-            let shared = await model.shareURL(for: photo("device:\(localID)", origin: .device))
-            let file = try XCTUnwrap(shared)
-            files.append(file)
-
-            XCTAssertEqual(capture.ids, ["device:\(localID)"])
-            XCTAssertEqual(try Data(contentsOf: file), Data(localID.utf8))
-            XCTAssertEqual(file.lastPathComponent, "\(localID).heic")
-            XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
-            XCTAssertNil(MockURLProtocol.lastRequest)
-            XCTAssertNil(model.actionError)
+    func testDeviceOnlyTileSharesItsCurrentPhotoKitFileWithoutServerRequests() async throws {
+        let localID = "local-only"
+        let source = try localFile("device-current")
+        let capture = LocalSharingCapture()
+        let model = model { id in
+            capture.ids.append(id)
+            return (source, "device-current.heic")
         }
+        MockURLProtocol.responseProvider = { request in
+            XCTFail("A local-only item must not request server media: \(request)")
+            return (nil, nil, URLError(.unsupportedURL))
+        }
+
+        let shared = await model.shareURL(for: photo("device:\(localID)", origin: .device))
+        let file = try XCTUnwrap(shared)
+        files.append(file)
+
+        XCTAssertEqual(capture.ids, ["device:\(localID)"])
+        XCTAssertEqual(try Data(contentsOf: file), Data("device-current".utf8))
+        XCTAssertEqual(file.lastPathComponent, "device-current.heic")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: source.path))
+        XCTAssertNil(MockURLProtocol.lastRequest)
+        XCTAssertNil(model.actionError)
     }
 
     func testMixedBulkSharingPreservesInputOrderAndNeverSendsDeviceIDsToTheServer() async throws {
@@ -84,16 +117,16 @@ final class TimelineOriginalSharingTests: XCTestCase {
         let result = await model.shareURLs(for: ["device:only", "server-video", "device:mapped"])
         files.append(contentsOf: result)
 
-        XCTAssertEqual(requests, ["/api/assets/server-video/original"])
-        XCTAssertEqual(capture.ids, ["device:only", "device:mapped"])
-        XCTAssertEqual(result.map(\.pathExtension), ["heic", "mp4", "mov"])
+        XCTAssertEqual(requests, ["/api/assets/server-video/original", "/api/assets/mapped-server/original"])
+        XCTAssertEqual(capture.ids, ["device:only"])
+        XCTAssertEqual(result.map(\.pathExtension), ["heic", "mp4", "mp4"])
         XCTAssertEqual(try result.map { try Data(contentsOf: $0) },
-            [Data("only-local".utf8), Data("server-original".utf8), Data("mapped-local".utf8)])
+            [Data("only-local".utf8), Data("server-current".utf8), Data("server-current".utf8)])
         XCTAssertFalse(FileManager.default.fileExists(atPath: onlySource.path))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: mappedSource.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: mappedSource.path))
     }
 
-    func testUnavailableMappedLocalOriginalFallsBackToItsCurrentServerID() async throws {
+    func testMappedTileUsesItsCurrentServerIDWithoutTryingPhotoKit() async throws {
         try manager.linkDeviceAsset(localIdentifier: "mapped", to: "current-server")
         let capture = LocalSharingCapture()
         let model = model { capture.ids.append($0); return nil }
@@ -106,21 +139,98 @@ final class TimelineOriginalSharingTests: XCTestCase {
         let result = try XCTUnwrap(shared)
         files.append(result)
 
-        XCTAssertEqual(capture.ids, ["device:mapped"])
-        XCTAssertEqual(try Data(contentsOf: result), Data("server-original".utf8))
+        XCTAssertTrue(capture.ids.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: result), Data("server-current".utf8))
         XCTAssertEqual(result.pathExtension, "mp4")
         XCTAssertNil(model.actionError)
     }
 
-    func testSingleServerFallbackDiscardsLatePrivateOriginalAfterItsMappingChanges() async throws {
+    func testOfflineMappedCopyFailsWithoutFallingBackToAnOlderLocalFile() async throws {
+        try manager.linkDeviceAsset(localIdentifier: "offline-mapped", to: "offline-server")
+        let source = try localFile("stale-device-current")
+        let capture = LocalSharingCapture()
+        let model = model { id in capture.ids.append(id); return (source, "stale.heic") }
+        var requests: [String] = []
+        MockURLProtocol.responseProvider = { request in
+            requests.append(request.url!.path)
+            XCTAssertEqual(request.url?.query, "edited=true")
+            return (nil, nil, URLError(.notConnectedToInternet))
+        }
+
+        let result = await model.shareURL(for: photo("device:offline-mapped", origin: .both))
+
+        XCTAssertNil(result)
+        XCTAssertTrue(capture.ids.isEmpty)
+        XCTAssertEqual(requests, ["/api/assets/offline-server/original"])
+        XCTAssertNotNil(model.actionError, "The user must receive the current-rendition failure")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
+    }
+
+    func testSingleServerExportDiscardsLatePrivateFileAfterItsMappingChanges() async throws {
         for unlinks in [false, true] {
-            try await assertObsoleteMappedFallbackIsDiscarded(bulk: false, unlinks: unlinks)
+            try await assertObsoleteMappedExportIsDiscarded(bulk: false, unlinks: unlinks)
         }
     }
 
-    func testBulkServerFallbackDiscardsLatePrivateOriginalAndPreparedPrefixAfterItsMappingChanges() async throws {
+    func testBulkServerExportDiscardsLatePrivateFileAndPreparedPrefixAfterItsMappingChanges() async throws {
         for unlinks in [false, true] {
-            try await assertObsoleteMappedFallbackIsDiscarded(bulk: true, unlinks: unlinks)
+            try await assertObsoleteMappedExportIsDiscarded(bulk: true, unlinks: unlinks)
+        }
+    }
+
+    func testBulkSharingRevalidatesTheIdentityAndPrivacyOfAPreparedPrefixWhileTheNextFileIsHeld() async throws {
+        for invalidation in ["remap", "unlink", "lock", "remap-and-lock"] {
+            let token = UUID().uuidString
+            let localID = "prepared-\(token)"
+            let displayID = LocalPhotoLibrary.assetID(for: localID)
+            let originalServerID = "prepared-server-\(token)"
+            let nextID = "held-next-\(token)"
+            try manager.linkDeviceAsset(localIdentifier: localID, to: originalServerID)
+            let model = model { _ in XCTFail("Server-backed selections must not read PhotoKit"); return nil }
+            let started = expectation(description: "The second file is held after the first has been prepared")
+            let release = DispatchSemaphore(value: 0)
+            var requests: [String] = []
+            MockURLProtocol.responseProvider = { request in
+                let path = request.url!.path
+                requests.append(path)
+                XCTAssertEqual(request.url?.query, "edited=true")
+                if path == "/api/assets/\(nextID)/original" {
+                    started.fulfill()
+                    guard release.wait(timeout: .now() + 5) == .success else {
+                        return (nil, nil, URLError(.timedOut))
+                    }
+                } else { XCTAssertEqual(path, "/api/assets/\(originalServerID)/original") }
+                return (Data(path.utf8), HTTPURLResponse(url: request.url!, statusCode: 200,
+                    httpVersion: nil, headerFields: ["Content-Type": "video/mp4",
+                        "Content-Disposition": "attachment; filename=\"\(token)-\(path.contains(nextID) ? "next" : "prepared").mp4\""]), nil)
+            }
+            let task = Task { await model.shareURLs(for: [displayID, nextID]) }
+            addTeardownBlock { release.signal(); _ = await task.value }
+            await fulfillment(of: [started], timeout: 2)
+            let prepared = try managedShareFiles { $0.lastPathComponent.contains(token) }
+            files.append(contentsOf: prepared)
+            XCTAssertEqual(prepared.count, 1, "The first file must exist before its identity or privacy changes")
+            switch invalidation {
+            case "unlink": try manager.unlinkDeviceAsset(localIdentifier: localID)
+            case "lock": try manager.setAssetVisibility([originalServerID], to: "locked")
+            default:
+                try manager.upsertBackupRecord(assetID: "replacement-\(token)", checksum: "replacement", localIdentifier: localID)
+                if invalidation == "remap-and-lock" { try manager.setAssetVisibility([originalServerID], to: "locked") }
+            }
+            if invalidation != "lock" {
+                XCTAssertTrue(AssetVisibilityPolicy(scope: .timeline, dataManager: manager).allows(id: displayID),
+                    "A logical display ID can remain public after its prepared server identity changes")
+            }
+            release.signal()
+            let result = await task.value
+            files.append(contentsOf: result)
+
+            XCTAssertTrue(result.isEmpty, invalidation)
+            XCTAssertNil(model.actionError, invalidation)
+            XCTAssertEqual(requests, ["/api/assets/\(originalServerID)/original", "/api/assets/\(nextID)/original"])
+            let remaining = try managedShareFiles { $0.lastPathComponent.contains(token) }
+            files.append(contentsOf: remaining)
+            XCTAssertTrue(remaining.isEmpty, "Every prepared file must be removed after \(invalidation)")
         }
     }
 
@@ -138,19 +248,18 @@ final class TimelineOriginalSharingTests: XCTestCase {
         XCTAssertNil(MockURLProtocol.lastRequest)
     }
 
-    func testAccountPrivacyAndCancellationChangesRemoveLateLocalExportsWithoutErrors() async throws {
+    func testAccountRemovalAndCancellationChangesRemoveLateLocalOnlyExportsWithoutErrors() async throws {
         for invalidation in ["account", "privacy", "cancel"] {
             let id = "held-\(invalidation)"
-            try manager.linkDeviceAsset(localIdentifier: id, to: "server-\(id)")
             let source = try localFile(id)
             let gate = LocalOriginalSharingGate()
             let model = model { _ in await gate.wait(); return (source, "\(id).heic") }
-            let task = Task { await model.shareURL(for: photo("device:\(id)", origin: .both)) }
+            let task = Task { await model.shareURL(for: photo("device:\(id)", origin: .device)) }
             addTeardownBlock { await gate.release(); _ = await task.value }
             await fulfillment(of: [gate.started], timeout: 2)
             switch invalidation {
             case "account": LocalSnapshot.clearAll()
-            case "privacy": try manager.setAssetVisibility(["server-\(id)"], to: "locked")
+            case "privacy": RemovedAssets.shared.remove(["device:\(id)"])
             default: task.cancel()
             }
             gate.release()
@@ -180,7 +289,7 @@ final class TimelineOriginalSharingTests: XCTestCase {
         XCTAssertNil(model.actionError)
     }
 
-    private func assertObsoleteMappedFallbackIsDiscarded(bulk: Bool, unlinks: Bool) async throws {
+    private func assertObsoleteMappedExportIsDiscarded(bulk: Bool, unlinks: Bool) async throws {
         let token = UUID().uuidString
         let localID = "held-\(token)"
         let displayID = LocalPhotoLibrary.assetID(for: localID)
@@ -236,7 +345,7 @@ final class TimelineOriginalSharingTests: XCTestCase {
 
         XCTAssertTrue(result.isEmpty, "A stale server original must not be returned under a changed display identity")
         XCTAssertNil(model.actionError, "Discarding an obsolete share must remain silent")
-        XCTAssertEqual(capture.ids, [displayID])
+        XCTAssertTrue(capture.ids.isEmpty)
         XCTAssertEqual(requests, (bulk ? ["/api/assets/\(prefixID)/original"] : [])
             + ["/api/assets/\(originalServerID)/original"])
         let remaining = try managedShareFiles { $0.lastPathComponent.contains(token) }
@@ -266,7 +375,7 @@ final class TimelineOriginalSharingTests: XCTestCase {
         XCTAssertEqual(request.httpMethod, "GET")
         XCTAssertEqual(request.url?.query, "edited=true")
         XCTAssertFalse(request.url!.path.contains("device:"))
-        return (Data("server-original".utf8), HTTPURLResponse(url: request.url!, statusCode: 200,
+        return (Data("server-current".utf8), HTTPURLResponse(url: request.url!, statusCode: 200,
             httpVersion: nil, headerFields: ["Content-Type": "video/mp4",
                 "Content-Disposition": "attachment; filename=\"server.mp4\""]), nil)
     }
