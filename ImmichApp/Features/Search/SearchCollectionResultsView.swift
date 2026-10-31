@@ -66,7 +66,10 @@ struct SearchCollectionResultsView: View {
                             ForEach(albums) { album in
                                 Button { onOpen(.album(album)) } label: {
                                     VStack(alignment: .leading, spacing: 6) {
-                                        albumCover(album)
+                                        AlbumCoverImage(album: album, placeholderFont: .largeTitle)
+                                            .aspectRatio(1, contentMode: .fit)
+                                            .clipped()
+                                            .clipShape(.rect(cornerRadius: 16))
                                         Text(album.albumName).font(.subheadline.weight(.medium)).lineLimit(2)
                                         Text(album.assetCount.formatted()).font(.caption).foregroundStyle(.secondary)
                                     }
@@ -104,15 +107,5 @@ struct SearchCollectionResultsView: View {
 
     private func sectionTitle(_ title: LocalizedStringKey) -> some View {
         Text(title).font(.title2.bold()).accessibilityAddTraits(.isHeader)
-    }
-
-    private func albumCover(_ album: AlbumResponseDTO) -> some View {
-        Color(.tertiarySystemFill).aspectRatio(1, contentMode: .fit)
-            .overlay {
-                if let id = album.albumThumbnailAssetId, AssetVisibilityPolicy(scope: .timeline).allows(id: id) {
-                    AuthImage(assetId: id).frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
-                } else { Image(systemName: "rectangle.stack.fill").font(.largeTitle).foregroundStyle(.secondary) }
-            }
-            .clipShape(.rect(cornerRadius: 16))
     }
 }
