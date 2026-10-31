@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import Observation
 
 /// Strip thumbnail di bawah layar detail.
 ///
@@ -42,7 +43,7 @@ struct PhotoFilmstripView: UIViewControllerRepresentable {
     }
 
     static func dismantleUIViewController(_ controller: PhotoFilmstripController, coordinator: ()) {
-        controller.onSelect = nil
+        controller.releaseOwner()
     }
 
     func updateUIViewController(_ controller: PhotoFilmstripController, context: Context) {
@@ -69,6 +70,7 @@ final class PhotoFilmstripController: UIViewController {
     private var assets: [AssetLite] = []
     private var assetIndex: [String: Int] = [:]
     private var currentIndex = 0
+    private var mediaEditObservation = UUID()
     /// Penempatan awal diulang sampai penggunanya sendiri menyentuh strip.
     ///
     /// Sebelumnya penempatan dikunci setelah SATU percobaan berhasil. Masalahnya,
@@ -92,6 +94,31 @@ final class PhotoFilmstripController: UIViewController {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) tidak dipakai") }
+
+    fileprivate func releaseOwner() {
+        onSelect = nil
+        mediaEditObservation = UUID()
+    }
+
+    private func observeMediaEdits() {
+        let token = UUID()
+        mediaEditObservation = token
+        withObservationTracking {
+            _ = MediaEditStore.shared.revision
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, self.mediaEditObservation == token else { return }
+                self.observeMediaEdits()
+                for path in self.collectionView.indexPathsForVisibleItems {
+                    guard self.assets.indices.contains(path.item),
+                          let cell = self.collectionView.cellForItem(at: path) as? PhotoFilmstripCell
+                    else { continue }
+                    cell.configure(with: self.assets[path.item], loader: self.loader)
+                    cell.setCurrent(path.item == self.currentIndex)
+                }
+            }
+        }
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -129,6 +156,7 @@ final class PhotoFilmstripController: UIViewController {
             collectionView.topAnchor.constraint(equalTo: view.topAnchor),
             collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
+        observeMediaEdits()
     }
 
     override func viewDidLayoutSubviews() {
@@ -403,8 +431,9 @@ final class PhotoFilmstripCell: UICollectionViewCell {
         loadTask = nil
         currentAssetID = asset.id
         isAccessibilityElement = true
-        accessibilityLabel = PhotoAssetAccessibility.label(for: asset)
-        accessibilityValue = PhotoAssetAccessibility.value(for: asset)
+        let displayed = loader.displayAsset(asset)
+        accessibilityLabel = PhotoAssetAccessibility.label(for: displayed)
+        accessibilityValue = PhotoAssetAccessibility.value(for: displayed)
         accessibilityHint = String(localized: "Shows this item in the viewer.")
         setCurrent(false)
 

@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import Observation
 
 /// Perbedaan antar layar yang memakai grid ini.
 ///
@@ -428,7 +429,10 @@ final class PhotoGridController: UIViewController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) tidak dipakai") }
 
+    private var mediaEditObservation = UUID()
+
     fileprivate func releaseOwner() {
+        mediaEditObservation = UUID()
         // The owner can keep this controller in SwiftUI State. Its callbacks
         // must stop retaining that same view when the representable unmounts.
         onOpen = nil
@@ -455,6 +459,7 @@ final class PhotoGridController: UIViewController {
         configureDataSource()
         // Data mungkin sudah datang sebelum view ini ada; pasang sekarang.
         flushPendingSnapshot()
+        observeMediaEdits()
     }
 
     override func viewDidLayoutSubviews() {
@@ -668,7 +673,7 @@ final class PhotoGridController: UIViewController {
             cell.contentView.isHidden = true
             return
         }
-        cell.configure(with: asset, loader: loader, facePersonID: configuration.facePersonID)
+        cell.configure(with: loader.displayAsset(asset), loader: loader, facePersonID: configuration.facePersonID)
         guard cell.isAccessibilityElement else { return }
         let isPicked = dataSource.indexPath(for: asset.id).map {
             collectionView.indexPathsForSelectedItems?.contains($0) ?? false
@@ -973,7 +978,7 @@ final class PhotoGridController: UIViewController {
     /// masuk menggeser seluruh baris sesudahnya.
     private func refreshJustifiedLayoutIfNeeded() {
         guard configuration.layoutStyle == .justified else { return }
-        justifiedStore.assets = sections.flatMap(\.assets)
+        justifiedStore.assets = sections.flatMap(\.assets).map { loader.displayAsset($0) }
         collectionView.collectionViewLayout.invalidateLayout()
     }
 
@@ -1384,6 +1389,21 @@ final class PhotoGridController: UIViewController {
         settleScrolling()
     }
 
+    private func observeMediaEdits() {
+        let token = UUID()
+        mediaEditObservation = token
+        withObservationTracking {
+            _ = MediaEditStore.shared.revision
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, self.mediaEditObservation == token else { return }
+                self.observeMediaEdits()
+                self.refreshJustifiedLayoutIfNeeded()
+                self.reloadVisibleThumbnails()
+            }
+        }
+    }
+
     private func reloadVisibleThumbnails() {
         for indexPath in collectionView.indexPathsForVisibleItems {
             guard let itemID = dataSource.itemIdentifier(for: indexPath),
@@ -1423,7 +1443,7 @@ final class PhotoGridController: UIViewController {
         let transition = PhotoZoomTransitioningDelegate(
             source: self,
             assetID: id,
-            aspectRatio: CGFloat(assetsByID[id]?.ratio ?? 1))
+            aspectRatio: CGFloat(assetsByID[id].map { loader.displayAsset($0).ratio } ?? 1))
         detail.transitioningDelegate = transition
         zoomTransition = transition
 
@@ -1471,7 +1491,7 @@ final class PhotoGridController: UIViewController {
         // Rasionya ikut, bukan cuma id-nya: kotak cadangan saat layar detail
         // belum terukur dihitung dari rasio, dan memakai rasio foto lama berarti
         // mendarat di kotak yang salah bentuk.
-        zoomTransition?.aspectRatio = CGFloat(assetsByID[id]?.ratio ?? 1)
+        zoomTransition?.aspectRatio = CGFloat(assetsByID[id].map { loader.displayAsset($0).ratio } ?? 1)
     }
 
     private func lastItemIndexPath() -> IndexPath? {
