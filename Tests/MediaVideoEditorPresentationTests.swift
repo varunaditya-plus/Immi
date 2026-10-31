@@ -25,9 +25,9 @@ final class MediaVideoEditorPresentationTests: SimulatorHostedTestCase {
         let (fixture, window) = try await show(photo: photo)
         try await activateAccessibilityButton(named: "Mute", in: window)
         try await waitUntil("Mute changes the real editor button") { self.searchContainsText("Unmute", in: window) }
-        try await activateAccessibilityButton(named: "Undo", in: window)
+        try await activateMenuAction("Undo", menu: "More", in: window)
         try await waitUntil("Undo restores the original audio choice") { self.searchContainsText("Mute", in: window) }
-        try await activateAccessibilityButton(named: "Redo", in: window)
+        try await activateMenuAction("Redo", menu: "More", in: window)
         try await waitUntil("Redo restores the muted draft") { self.searchContainsText("Unmute", in: window) }
 
         try await activateAccessibilityButton(named: "Done", in: window)
@@ -314,7 +314,11 @@ final class MediaVideoEditorPresentationTests: SimulatorHostedTestCase {
         return count
     }
     private func activateLiveMode(_ title: String, in window: UIWindow) async throws {
-        try await activateAccessibilityButton(named: "Live Photo Effect", in: window)
+        try await activateMenuAction(title, menu: "Live Photo Effect", in: window)
+    }
+
+    private func activateMenuAction(_ title: String, menu: String, in window: UIWindow) async throws {
+        try await activateAccessibilityButton(named: menu, in: window)
         var source: (UIControl, UIAction, UIContextMenuInteraction)?
         func action(in menu: UIMenu) -> UIAction? {
             for child in menu.children {
@@ -323,7 +327,7 @@ final class MediaVideoEditorPresentationTests: SimulatorHostedTestCase {
             }
             return nil
         }
-        try await waitUntil("The actual Live effect menu contains its enabled action") {
+        try await waitUntil("The actual \(menu) menu contains its enabled \(title) action") {
             for view in self.views(window) {
                 for interaction in view.interactions.compactMap({ $0 as? UIContextMenuInteraction }) {
                     interaction.updateVisibleMenu { menu in

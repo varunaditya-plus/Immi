@@ -172,9 +172,12 @@ struct MediaVideoEditor: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.locale) private var locale
+    @ScaledMetric(relativeTo: .body) private var primaryControlPanelHeight = PhotoEditorMetrics.controlPanelHeight
+    @ScaledMetric(relativeTo: .body) private var primaryRowBottomSpacing: CGFloat = 32
     @State private var history: MediaVideoEditHistory
     @State private var preview = MediaVideoEditorPreview()
     @State private var tool: PhotoEditorTool?
+    @State private var aspectDrawer = false
     @State private var isSaving = false
     @State private var loadFailed = false
     @State private var ready = false
@@ -204,66 +207,91 @@ struct MediaVideoEditor: View {
     }
     private var end: Double { history.values.video.trimEnd ?? preview.duration }
     private var stillMode: Bool { isLivePhoto && [.off, .longExposure].contains(history.values.live.mode) }
+    private var isPrimaryVideo: Bool { tool == nil && !isLivePhoto }
+    private var trimColor: Color {
+        dragStart != nil || history.values.video.trimStart > 0 || history.values.video.trimEnd != nil
+            ? .yellow : Color(uiColor: .systemGray3)
+    }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 12) {
-                if !isAllowed() {
-                    Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if loadFailed {
-                    ContentUnavailableView("Video Unavailable", systemImage: "video.slash", description: Text("This video could not be loaded."))
-                } else if ready {
-                    canvas.frame(maxWidth: .infinity, maxHeight: .infinity)
-                    if let tool, let image = preview.poster {
-                        PhotoEditToolControls(image: image, recipe: photo, tool: tool, onEditingChanged: history.editingChanged)
-                    } else {
-                        primaryControls
-                        frameStrip.frame(height: 64).padding(.horizontal, 22)
-                    }
-                    toolPicker
-                } else { ProgressView("Loading video…").frame(maxWidth: .infinity, maxHeight: .infinity) }
+            ZStack(alignment: .bottom) {
+                if isAllowed(), ready, isPrimaryVideo {
+                    canvas.ignoresSafeArea(.container)
+                }
+                VStack(spacing: 0) {
+                    if !isAllowed() {
+                        Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if loadFailed {
+                        ContentUnavailableView("Video Unavailable", systemImage: "video.slash", description: Text("This video could not be loaded."))
+                    } else if ready {
+                        if isPrimaryVideo { Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity) }
+                        else { canvas.frame(maxWidth: .infinity, maxHeight: .infinity) }
+                        if let tool, let image = preview.poster {
+                            PhotoEditToolControls(image: image, recipe: photo, tool: tool, aspectDrawer: $aspectDrawer,
+                                onEditingChanged: history.editingChanged)
+                        } else {
+                            primaryControlPanel
+                        }
+                        toolPicker
+                    } else { ProgressView("Loading video…").frame(maxWidth: .infinity, maxHeight: .infinity) }
+                }
             }
             .disabled(isSaving)
             .allowsHitTesting(!isSaving)
+            .ignoresSafeArea(.container, edges: .bottom)
+            .tint(.primary)
             .background(Color(uiColor: .systemBackground))
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(Color(uiColor: .systemBackground), for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Cancel", systemImage: "xmark") {
+                    PhotoEditorToolbarButton("Cancel", systemImage: "xmark") {
                         history.editingChanged(false)
                         if history.isDirty { discardConfirmation = true } else { dismiss() }
                     }
-                    .labelStyle(.iconOnly).buttonStyle(.glass).buttonBorderShape(.circle)
-                    .accessibilityLabel("Cancel")
                     .disabled(isSaving)
                 }
                 .sharedBackgroundVisibility(.hidden)
                 ToolbarItem(placement: .topBarLeading) {
-                    HStack(spacing: 8) {
-                        Button("Undo", systemImage: "arrow.uturn.backward", action: history.undo)
-                            .frame(width: 44, height: 44).disabled(!history.canUndo || isSaving)
-                        Button("Redo", systemImage: "arrow.uturn.forward", action: history.redo)
-                            .frame(width: 44, height: 44).disabled(!history.canRedo || isSaving)
+                    if tool == nil {
+                        PhotoEditorToolbarButton(history.values.video.isMuted ? "Unmute" : "Mute",
+                            systemImage: history.values.video.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill") {
+                            var value = history.values; value.video.isMuted.toggle(); history.update(value)
+                        }
+                        .disabled(!ready || isSaving || !isAllowed())
+                    } else if tool == .crop {
+                        PhotoCropTransformButtons(recipe: photo, onEditingChanged: history.editingChanged)
+                            .disabled(isSaving)
+                    } else {
+                        HStack(spacing: 8) {
+                            Button("Undo", systemImage: "arrow.uturn.backward", action: history.undo)
+                                .frame(width: 44, height: 44).disabled(!history.canUndo || isSaving)
+                            Button("Redo", systemImage: "arrow.uturn.forward", action: history.redo)
+                                .frame(width: 44, height: 44).disabled(!history.canRedo || isSaving)
+                        }
+                        .labelStyle(.iconOnly).buttonStyle(.plain)
+                        .glassEffect(.regular, in: .capsule)
                     }
-                    .labelStyle(.iconOnly).buttonStyle(.plain)
-                    .glassEffect(.regular, in: .capsule)
                 }
                 .sharedBackgroundVisibility(.hidden)
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button("Revert to Original", role: .destructive) { revertConfirmation = true }
-                    } label: { Image(systemName: "ellipsis") }
-                    .labelStyle(.iconOnly).buttonStyle(.glass).buttonBorderShape(.circle)
-                    .accessibilityLabel("More")
-                    .disabled(isSaving)
+                if tool == .crop {
+                    ToolbarItemGroup(placement: .topBarTrailing) {
+                        Button("Aspect Ratio", systemImage: "aspectratio") { aspectDrawer.toggle() }
+                            .labelStyle(.iconOnly).buttonStyle(.plain)
+                            .accessibilityLabel("Aspect Ratio")
+                            .disabled(isSaving)
+                        moreMenu
+                    }
+                    .sharedBackgroundVisibility(.visible)
+                } else {
+                    ToolbarItem(placement: .topBarTrailing) { moreMenu }
+                        .sharedBackgroundVisibility(.hidden)
                 }
-                .sharedBackgroundVisibility(.hidden)
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done", systemImage: "checkmark") { save(reverting: false) }
-                        .labelStyle(.iconOnly).buttonStyle(.glass).buttonBorderShape(.circle)
-                        .fontWeight(.semibold).tint(.yellow)
-                        .accessibilityLabel("Done")
+                    PhotoEditorToolbarButton("Done", systemImage: "checkmark", tint: history.isDirty ? .yellow : .secondary) {
+                        save(reverting: false)
+                    }
                         .disabled(!ready || isSaving || !isAllowed())
                 }
                 .sharedBackgroundVisibility(.hidden)
@@ -298,6 +326,7 @@ struct MediaVideoEditor: View {
             }
             .onChange(of: tool) { _, _ in
                 preview.pause()
+                aspectDrawer = false
             }
             .onChange(of: stillMode) { _, still in if still { preview.pause() } }
             .onChange(of: scenePhase) { _, phase in if phase != .active { preview.pause() } }
@@ -305,55 +334,120 @@ struct MediaVideoEditor: View {
             .onDisappear { saveTask?.cancel(); preview.teardown(); TemporaryMediaStore.remove(previewFiles) }
         }
         .interactiveDismissDisabled(history.isDirty || isSaving)
+        .persistentSystemOverlays(.hidden)
+        .statusBarHidden()
+    }
+
+    private var moreMenu: some View {
+        Menu {
+            if tool == nil {
+                Button("Undo", systemImage: "arrow.uturn.backward", action: history.undo)
+                    .disabled(!history.canUndo || isSaving)
+                Button("Redo", systemImage: "arrow.uturn.forward", action: history.redo)
+                    .disabled(!history.canRedo || isSaving)
+                if !isLivePhoto {
+                    Menu("Playback Speed", systemImage: "speedometer") {
+                        ForEach([0.25, 0.5, 1, 2], id: \.self) { rate in
+                            Button(String(format: "%g×", rate)) { var value = history.values; value.video.rate = rate; history.update(value) }
+                        }
+                    }
+                    .disabled(!ready)
+                }
+                Divider()
+            }
+            Button("Revert to Original", role: .destructive) { revertConfirmation = true }
+        } label: {
+            if tool == .crop {
+                Image(systemName: "ellipsis").frame(width: 44, height: 44)
+            } else {
+                Image(systemName: "ellipsis").frame(width: 44, height: 44)
+                    .glassEffect(.regular, in: .circle)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("More")
+        .disabled(isSaving)
     }
 
     @ViewBuilder private var canvas: some View {
         if let tool, let image = preview.poster { PhotoEditCanvas(image: image, recipe: photo, tool: tool, comparing: false, onEditingChanged: history.editingChanged) }
         else if stillMode, let image = effectPoster ?? preview.poster {
-            if history.values.live.mode == .longExposure { Image(uiImage: image).resizable().scaledToFit() }
+            if history.values.live.mode == .longExposure {
+                Image(uiImage: image).resizable().scaledToFit()
+                    .padding(.horizontal, 8).padding(.vertical, 8).padding(.top, 16)
+            }
             else { PhotoEditCanvas(image: image, recipe: photo, tool: .adjust, comparing: false) }
         } else {
             ZStack {
-                Color.black
+                Color(uiColor: .systemBackground)
                 if let image = preview.poster { Image(uiImage: image).resizable().scaledToFit() }
                 MediaVideoEditorSurface(player: preview.player)
             }
+            .padding(.horizontal, isPrimaryVideo ? 0 : 8)
+            .padding(.vertical, isPrimaryVideo ? 0 : 8)
+            .padding(.top, isPrimaryVideo ? 0 : 16)
         }
     }
 
-    private var primaryControls: some View {
-        HStack(spacing: 20) {
-            if !stillMode {
-                Button(preview.isPlaying ? "Pause" : "Play", systemImage: preview.isPlaying ? "pause.fill" : "play.fill", action: preview.toggle)
-                    .labelStyle(.iconOnly).accessibilityIdentifier("videoEditor.playPause")
-            }
-            Button(history.values.video.isMuted ? "Unmute" : "Mute", systemImage: history.values.video.isMuted ? "speaker.slash" : "speaker.wave.2") {
-                var value = history.values; value.video.isMuted.toggle(); history.update(value)
-            }.labelStyle(.iconOnly)
-            Spacer()
-            if isLivePhoto {
-                Menu(history.values.live.mode.title) {
-                    ForEach(LivePhotoEditRecipe.Mode.allCases) { mode in
-                        Button(mode.title) { var value = history.values; value.live.mode = mode; history.update(value) }
+    private var primaryControlPanel: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            HStack(spacing: 0) {
+                if !stillMode {
+                    Button(action: preview.toggle) {
+                        Image(systemName: preview.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 18, weight: .medium))
+                            .frame(width: 44, height: 48).contentShape(Rectangle())
                     }
-                }.accessibilityLabel("Live Photo Effect")
-                Button("Make Key Photo") {
-                    var value = history.values
-                    guard let selection = try? value.video.selection(duration: preview.duration) else { return }
-                    value.live.selectKeyPhoto(at: preview.sourceTime, originalPhotoTime: preview.originalPhotoTime,
-                        selection: selection)
-                    history.update(value)
-                }.font(.caption)
-            } else {
-                Menu("Playback Speed", systemImage: "speedometer") {
-                    ForEach([0.25, 0.5, 1, 2], id: \.self) { rate in
-                        Button(String(format: "%g×", rate)) { var value = history.values; value.video.rate = rate; history.update(value) }
-                    }
-                }.labelStyle(.iconOnly)
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(preview.isPlaying ? "Pause" : "Play")
+                    .accessibilityIdentifier("videoEditor.playPause")
+                }
+                frameStrip.frame(height: 48).padding(.horizontal, 22)
             }
-            Text(timeText(preview.sourceTime)).font(.caption.monospacedDigit())
+            .frame(height: 48)
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 10))
+            if isLivePhoto { livePhotoControls }
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 22).disabled(isSaving)
+        .padding(.horizontal, 14)
+        .padding(.bottom, isLivePhoto ? 0 : primaryRowBottomSpacing)
+        .frame(height: primaryControlPanelHeight)
+        .disabled(isSaving)
+    }
+
+    private var livePhotoControls: some View {
+        HStack(spacing: 12) {
+            Menu {
+                ForEach(LivePhotoEditRecipe.Mode.allCases) { mode in
+                    Button(mode.title) { var value = history.values; value.live.mode = mode; history.update(value) }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Text(history.values.live.mode.title)
+                    Image(systemName: "chevron.down").font(.caption2.weight(.semibold))
+                }
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Live Photo Effect")
+            Button {
+                var value = history.values
+                guard let selection = try? value.video.selection(duration: preview.duration) else { return }
+                value.live.selectKeyPhoto(at: preview.sourceTime, originalPhotoTime: preview.originalPhotoTime,
+                    selection: selection)
+                history.update(value)
+            } label: {
+                Text("Make Key Photo")
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+        }
+        .font(.subheadline)
+        .buttonStyle(.plain)
+        .multilineTextAlignment(.center)
+        .fixedSize(horizontal: false, vertical: true)
+        .foregroundStyle(.primary)
     }
 
     private var frameStrip: some View {
@@ -364,31 +458,36 @@ struct MediaVideoEditor: View {
                 HStack(spacing: 0) {
                     ForEach(preview.frames) { frame in
                         Image(uiImage: frame.image).resizable().scaledToFill()
-                            .frame(width: width / CGFloat(max(preview.frames.count, 1)), height: 52).clipped()
+                            .frame(width: width / CGFloat(max(preview.frames.count, 1)), height: 40).clipped()
                     }
                 }.clipShape(RoundedRectangle(cornerRadius: 6))
-                Color.black.opacity(0.65).frame(width: max(0, start), height: 52)
-                Color.black.opacity(0.65).frame(width: max(0, width - finish), height: 52).offset(x: finish)
-                RoundedRectangle(cornerRadius: 6).stroke(.yellow, lineWidth: 3).frame(width: max(1, finish - start), height: 56).offset(x: start)
-                Rectangle().fill(.white).frame(width: 2, height: 50)
+                Color.black.opacity(0.65).frame(width: max(0, start), height: 40)
+                Color.black.opacity(0.65).frame(width: max(0, width - finish), height: 40).offset(x: finish)
+                RoundedRectangle(cornerRadius: 6).stroke(trimColor, lineWidth: 2).frame(width: max(1, finish - start), height: 40).offset(x: start)
+                Rectangle().fill(.white).frame(width: 2, height: 40)
                     .offset(x: preview.sourceTime / max(preview.duration, 0.001) * width)
-                trimHandle(start: true, width: width).offset(x: start - 9)
-                trimHandle(start: false, width: width).offset(x: finish - 9)
+                trimHandle(start: true, width: width).offset(x: start - 22)
+                trimHandle(start: false, width: width).offset(x: finish - 22)
             }
-            .frame(height: 64)
+            .frame(height: 48)
             .contentShape(Rectangle())
             .gesture(DragGesture(minimumDistance: 0).onChanged { value in
                 preview.pause()
                 preview.seek(min(max(value.location.x / width * preview.duration, history.values.video.trimStart), end))
             })
             .accessibilityElement(children: .contain)
+            .accessibilityLabel("Playback Position")
+            .accessibilityValue(Measurement(value: preview.sourceTime, unit: UnitDuration.seconds)
+                .formatted(.measurement(width: .abbreviated, usage: .asProvided,
+                    numberFormatStyle: .number.precision(.fractionLength(2))).locale(locale)))
             .accessibilityIdentifier("videoEditor.frames")
         }
     }
 
     private func trimHandle(start: Bool, width: CGFloat) -> some View {
-        RoundedRectangle(cornerRadius: 5).fill(.yellow).frame(width: 18, height: 60)
-            .overlay(Image(systemName: start ? "chevron.compact.left" : "chevron.compact.right").foregroundStyle(.black))
+        RoundedRectangle(cornerRadius: 3).fill(trimColor).frame(width: 8, height: 40)
+            .overlay(Capsule().fill(.black.opacity(0.65)).frame(width: 2, height: 18))
+            .frame(width: 44, height: 48)
             .contentShape(Rectangle())
             .highPriorityGesture(DragGesture(minimumDistance: 0).onChanged { value in
                 if dragStart == nil { dragStart = start ? history.values.video.trimStart : end; history.editingChanged(true); preview.pause() }
@@ -419,7 +518,8 @@ struct MediaVideoEditor: View {
             history.editingChanged(false)
             tool = selected
         }), primaryTitle: isLivePhoto ? String(localized: "Live") : String(localized: "Video"),
-            primarySymbol: isLivePhoto ? "livephoto" : "video", isEnabled: !isSaving)
+            primarySymbol: isLivePhoto ? "livephoto" : "video.fill", isEnabled: !isSaving)
+        .padding(.bottom, 16)
     }
 
     private func updatePreview() async {
@@ -459,17 +559,19 @@ struct MediaVideoEditor: View {
         }
     }
 
-    private func timeText(_ time: Double) -> String {
-        let value = time.isFinite ? Int(max(0, time)) : 0
-        return String(format: "%d:%02d", value / 60, value % 60)
-    }
     private struct PreviewKey: Equatable { let values: MediaVideoEditValues; let primary: Bool; let ready: Bool }
     private struct PosterKey: Equatable { let keyTime: Double?; let video: VideoEditRecipe; let tool: PhotoEditorTool?; let ready: Bool }
 }
 
 private struct MediaVideoEditorSurface: UIViewRepresentable {
     let player: AVPlayer
-    func makeUIView(context: Context) -> VideoEditorSurfaceView { let view = VideoEditorSurfaceView(); view.playerLayer.player = player; return view }
+    func makeUIView(context: Context) -> VideoEditorSurfaceView {
+        let view = VideoEditorSurfaceView()
+        view.backgroundColor = .clear
+        view.isOpaque = false
+        view.playerLayer.player = player
+        return view
+    }
     func updateUIView(_ view: VideoEditorSurfaceView, context: Context) { view.playerLayer.player = player }
     static func dismantleUIView(_ view: VideoEditorSurfaceView, coordinator: ()) { view.playerLayer.player = nil }
 }
