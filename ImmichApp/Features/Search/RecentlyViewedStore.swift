@@ -57,15 +57,6 @@ final class RecentlyViewedStore {
         }
     }
 
-    func updateFavorites(from assets: [AssetLite]) {
-        let updates = Dictionary(assets.map { ($0.id, $0.isFavorite) }, uniquingKeysWith: { _, latest in latest })
-        change { records in
-            for index in records.indices {
-                if let value = updates[records[index].id] { records[index].isFavorite = value }
-            }
-        }
-    }
-
     func updateFavorite(_ id: String, to value: Bool) {
         update(id) { $0.isFavorite = value }
     }

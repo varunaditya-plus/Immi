@@ -36,6 +36,11 @@ struct RecentlyViewedCollectionView: View {
     @State private var actionMessage: ErrorEvent?
     @State private var showsClearConfirmation = false
 
+    init(store: RecentlyViewedStore, viewModel: AssetGridViewModel? = nil) {
+        self.store = store
+        _model = State(initialValue: viewModel)
+    }
+
     var body: some View {
         PhotoCollectionScreen(
             title: "Recently Viewed", assets: store.assets, phase: .loaded(()),
@@ -43,17 +48,11 @@ struct RecentlyViewedCollectionView: View {
             emptyState: PhotoCollectionEmptyState(title: "No Recently Viewed Photos", systemImage: "clock",
                 description: "Photos you view appear here."),
             onRetry: { Task { await model?.load() } },
-            onToggleFavorite: { asset in
-                await model?.toggleFavorite(asset)
-                store.updateFavorites(from: model?.assets ?? [])
-            },
+            onToggleFavorite: { asset in await setFavorite([asset.id], to: !asset.isFavorite) },
             onDelete: { _ = await model?.delete($0) },
             shareURLs: { await model?.shareURLs(for: $0) ?? [] },
             onAddToAlbum: { albumPicker = $0 },
-            onFavoriteSelection: { ids in
-                _ = await model?.setFavorite(ids, to: true)
-                store.updateFavorites(from: model?.assets ?? [])
-            },
+            onFavoriteSelection: { ids in await setFavorite(ids, to: true) },
             onArchiveSelection: { _ = await model?.setArchived($0, to: true) },
             onMoveToLocked: { _ = await model?.setLocked($0) }, visibilityScope: .timeline,
             options: {
@@ -83,5 +82,12 @@ struct RecentlyViewedCollectionView: View {
             Button("Cancel", role: .cancel) {}
         } message: { Text("Your photos will stay in your library.") }
         .errorToast($actionMessage)
+    }
+
+    private func setFavorite(_ ids: [String], to value: Bool) async {
+        for id in ids {
+            guard await model?.setFavorite([id], to: value) == true else { return }
+            store.updateFavorite(id, to: value)
+        }
     }
 }

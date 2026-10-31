@@ -69,12 +69,9 @@ final class RecentlyViewedStoreTests: XCTestCase {
         let viewed = makeTestAsset(id: "saved")
         old.record(viewed)
         LocalSnapshot.clearAll()
-        var changed = AssetLite(viewed)
-        changed.isFavorite = true
 
         old.record(makeTestAsset(id: "late"))
         old.clear()
-        old.updateFavorites(from: [changed])
         old.updateFavorite(viewed.id, to: true)
         old.updateCaptureDate(viewed.id, to: .distantPast)
 
@@ -131,16 +128,13 @@ final class RecentlyViewedStoreTests: XCTestCase {
         XCTAssertTrue(RecentlyViewedStore(owner: owner("another"), defaults: defaults, dataManager: manager).assets.isEmpty)
     }
 
-    func testAcceptedFavoritesPreserveVisitOrderAndCannotReplaceOtherMetadataOrAddUnviewedPhotos() throws {
+    func testAcceptedFavoriteChangesPreserveVisitOrderAndCannotAddUnviewedPhotos() throws {
         let store = store()
         let first = makeTestAsset(id: "first"), second = makeTestAsset(id: "second")
         store.record(first)
         store.record(second)
-        var updated = AssetLite(first)
-        updated.isFavorite = true
-        updated.createdAt = .distantPast
-
-        store.updateFavorites(from: [updated, AssetLite(makeTestAsset(id: "unviewed"))])
+        store.updateFavorite(first.id, to: true)
+        store.updateFavorite("unviewed", to: true)
 
         XCTAssertEqual(store.assets.map(\.id), ["second", "first"])
         XCTAssertTrue(store.assets.last?.isFavorite == true)
