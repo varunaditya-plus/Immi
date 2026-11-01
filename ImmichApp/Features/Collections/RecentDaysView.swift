@@ -97,7 +97,7 @@ struct CollectionsMapPreview: View {
             .mapStyle(.standard(elevation: .flat, pointsOfInterest: .excludingAll, showsTraffic: false))
             .allowsHitTesting(false)
             .accessibilityHidden(true)
-            .id(marker?.id)
+            .id(marker)
     }
 
     private var position: MapCameraPosition {
