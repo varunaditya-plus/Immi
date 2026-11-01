@@ -33,6 +33,12 @@ final class DuplicateKeeperPresentationTests: SimulatorHostedTestCase {
         fixture.group = DuplicateGroupDTO(duplicateId: fixture.group.id, assets: Array(fixture.photos.dropFirst()),
             suggestedKeepAssetIds: [fixture.photos[1].id])
 
+        try await waitUntil("The rendered group removes its former first member and shows its current membership") {
+            var visited = Set<ObjectIdentifier>()
+            return self.choice(named: "First.jpg", in: window, visited: &visited) == nil
+                && self.searchContainsText("2 items · tap to keep or trash", in: window)
+        }
+        _ = try await screenshot(window)
         try await waitForChoice("Third.jpg", value: "Keep", in: window)
         try await waitForChoice("Second.jpg", value: "Move to Trash", in: window)
         try await activateAccessibilityButton(named: "Trash 1", in: window)
