@@ -132,7 +132,8 @@ final class PhotoEditorCompactLayoutTests: ViewerAdaptiveLayoutTestCase {
                     preview = self.accessibilityObject("Edited Photo", in: window)
                     return preview != nil
                 }
-                let frame = window.convert(try XCTUnwrap(preview).accessibilityFrame, from: nil)
+                _ = try XCTUnwrap(preview)
+                let frame = try renderedGreenPhotoFrame(in: await screenshot(window))
                 XCTAssertGreaterThan(frame.width, size.width * 0.9,
                     "The scrolling fallback cannot collapse a normal editor into its minimum preview")
                 XCTAssertEqual(frame.width / frame.height, 1.5, accuracy: 0.01)
@@ -140,9 +141,34 @@ final class PhotoEditorCompactLayoutTests: ViewerAdaptiveLayoutTestCase {
                 let scroll = try XCTUnwrap(descendants(window).compactMap { $0 as? UIScrollView }
                     .first { $0.bounds.width > size.width * 0.9 })
                 XCTAssertLessThanOrEqual(scroll.contentSize.height, scroll.bounds.height + 1)
-                _ = try await screenshot(window)
             }
         }
+    }
+
+    private func renderedGreenPhotoFrame(in image: UIImage) throws -> CGRect {
+        let source = try XCTUnwrap(image.cgImage)
+        let width = source.width, height = source.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        try pixels.withUnsafeMutableBytes { storage in
+            let context = try XCTUnwrap(CGContext(data: storage.baseAddress, width: width, height: height,
+                bitsPerComponent: 8, bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.draw(source, in: CGRect(x: 0, y: 0, width: width, height: height))
+        }
+        var left = width, right = -1, top = height, bottom = -1
+        for y in 0..<height {
+            for x in 0..<width {
+                let offset = (y * width + x) * 4
+                if pixels[offset + 1] > 220, pixels[offset] < 30, pixels[offset + 2] < 30 {
+                    left = min(left, x); right = max(right, x)
+                    top = min(top, y); bottom = max(bottom, y)
+                }
+            }
+        }
+        XCTAssertGreaterThan(right - left, width / 2, "Only the actually rendered full photo can satisfy the geometry check")
+        guard right >= left, bottom >= top else { throw URLError(.cannotDecodeContentData) }
+        return CGRect(x: CGFloat(left) / image.scale, y: CGFloat(top) / image.scale,
+            width: CGFloat(right - left + 1) / image.scale, height: CGFloat(bottom - top + 1) / image.scale)
     }
 }
 
