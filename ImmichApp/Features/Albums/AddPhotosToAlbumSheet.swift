@@ -20,6 +20,12 @@ struct AddPhotosToAlbumSheet: View {
         repeating: GridItem(.flexible(), spacing: 2),
         count: 3)
 
+    init(existingIDs: Set<String>, viewModel: AlbumPhotoPickerViewModel? = nil, onAdd: @escaping ([String]) -> Void) {
+        self.existingIDs = existingIDs
+        self.onAdd = onAdd
+        _vm = State(initialValue: viewModel)
+    }
+
     var body: some View {
         NavigationStack {
             content
@@ -78,6 +84,8 @@ struct AddPhotosToAlbumSheet: View {
                         cell(for: asset)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(PhotoAssetAccessibility.label(for: asset))
+                    .accessibilityAddTraits(selectedIDs.contains(asset.id) ? .isSelected : [])
                 }
             }
             .padding(.horizontal, 2)

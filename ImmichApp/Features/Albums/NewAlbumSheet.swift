@@ -8,6 +8,7 @@ import SwiftUI
 /// pemilih foto lagi di situ hanya menanyakan hal yang barusan dijawab.
 struct NewAlbumSheet: View {
     var allowsAssetSelection = true
+    var photoRepository: SearchRepository? = nil
     /// Membuat albumnya. Mengembalikan pesan kesalahan; nil berarti berhasil dan
     /// sheet-nya menutup.
     var onCreate: (_ name: String, _ description: String, _ assetIds: [String]) async -> String?
@@ -25,33 +26,44 @@ struct NewAlbumSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    TextField("Album Name", text: $name)
-                        .focused($isNameFocused)
-                    TextField("Add Description", text: $description, axis: .vertical)
-                        .lineLimit(1...4)
-                }
-
-                if allowsAssetSelection {
-                    Section {
-                        Button {
-                            showPhotoPicker = true
-                        } label: {
-                            Label(photoButtonTitle, systemImage: "photo.badge.plus")
+            ScrollView {
+                VStack(spacing: 28) {
+                    VStack(spacing: 8) {
+                        albumCover
+                        if allowsAssetSelection {
+                            Button(photoButtonTitle) { showPhotoPicker = true }
+                                .font(.subheadline.weight(.semibold))
+                                .padding(.horizontal, 14).padding(.vertical, 6)
+                                .background(Color(.tertiarySystemFill), in: .capsule)
+                                .frame(minHeight: 44)
+                                .contentShape(.capsule)
                         }
-                    } footer: {
-                        // Foto boleh nol: album kosong itu sah, dan isinya bisa
-                        // ditambahkan kapan saja dari layar albumnya.
-                        Text("You can add photos later.")
                     }
+                    VStack(spacing: 12) {
+                        TextField("Album Name", text: $name)
+                            .font(.headline)
+                            .focused($isNameFocused)
+                            .padding(.horizontal, 16).padding(.vertical, 14)
+                            .background(Color(.secondarySystemGroupedBackground), in: .capsule)
+                        TextField("Add Description", text: $description, axis: .vertical)
+                            .lineLimit(1...4)
+                            .padding(.horizontal, 16).padding(.vertical, 14)
+                            .background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 20))
+                    }
+                    .textFieldStyle(.plain)
                 }
+                .frame(maxWidth: .infinity)
+                .padding(20)
             }
+            .scrollDismissesKeyboard(.interactively)
+            .background(Color(.systemGroupedBackground))
             .navigationTitle("New Album")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbar }
             .sheet(isPresented: $showPhotoPicker) {
-                AddPhotosToAlbumSheet(existingIDs: Set(assetIDs)) { picked in
+                AddPhotosToAlbumSheet(existingIDs: Set(assetIDs), viewModel: photoRepository.map {
+                    AlbumPhotoPickerViewModel(repo: $0, existingIDs: Set(assetIDs))
+                }) { picked in
                     assetIDs.append(contentsOf: picked)
                 }
             }
@@ -68,17 +80,31 @@ struct NewAlbumSheet: View {
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItem(placement: .cancellationAction) {
-            Button("Cancel") { dismiss() }
+            Button("Close", systemImage: "xmark") { dismiss() }
+                .labelStyle(.iconOnly)
         }
         ToolbarItem(placement: .confirmationAction) {
             Button("Create") { create() }
+                .buttonStyle(.glassProminent)
                 .disabled(trimmedName.isEmpty || isCreating)
         }
     }
 
+    private var albumCover: some View {
+        Color(.tertiarySystemFill)
+            .overlay {
+                if let id = assetIDs.first { AuthImage(assetId: id) }
+                else { Image(systemName: "photo.fill").font(.largeTitle).foregroundStyle(.tertiary) }
+            }
+            .aspectRatio(1, contentMode: .fit)
+            .frame(maxWidth: 200)
+            .clipShape(.rect(cornerRadius: 20))
+            .accessibilityHidden(true)
+    }
+
     private var photoButtonTitle: LocalizedStringKey {
         assetIDs.isEmpty
-            ? "Select Photos"
+            ? "Add Photos"
             : "^[\(assetIDs.count) Photo](inflect: true) Selected"
     }
 
