@@ -237,7 +237,31 @@ final class MediaVideoEditorPresentationTests: SimulatorHostedTestCase {
         XCTAssertTrue(try XCTUnwrap(fixture.saves.first).video.isIdentity)
     }
 
+    func testUnavailableVideoCanRetryItsActualSourceAndSaveAfterTheFileBecomesReadable() async throws {
+        let (fixture, window) = try await show(waitUntilReady: false,
+            makeMovie: { $0.appendingPathComponent("unavailable.mov") })
+        try await waitUntil("The failed source renders its actual recovery state") {
+            self.searchContainsText("Video Unavailable", in: window) && self.searchContainsText("Retry", in: window)
+        }
+        XCTAssertTrue(fixture.saves.isEmpty)
+        let source = try await makeTrimMovie(in: fixture.url.deletingLastPathComponent())
+        try FileManager.default.copyItem(at: source, to: fixture.url)
+
+        try await activateAccessibilityButton(named: "Retry", in: window)
+
+        try await waitUntil("Retry loads the actual newly readable file and its native player") {
+            self.searchContainsText("Start Time", in: window)
+                && self.player(in: window)?.currentItem?.status == .readyToPlay
+        }
+        XCTAssertFalse(searchContainsText("Video Unavailable", in: window))
+        try await activateAccessibilityButton(named: "Mute", in: window)
+        try await activateAccessibilityButton(named: "Done", in: window)
+        try await waitUntil("The recovered editor saves the actual changed draft") { fixture.saves.count == 1 && !fixture.isPresented }
+        XCTAssertTrue(try XCTUnwrap(fixture.saves.first).video.isMuted)
+    }
+
     private func show(isLive: Bool = false, live: LivePhotoEditRecipe = .init(), photo: PhotoEditRecipe = .init(),
+                      waitUntilReady: Bool = true,
                       makeMovie: @MainActor (URL) async throws -> URL = { try await makeVideoEditingFixture(in: $0) }) async throws -> (VideoEditorTestFixture, UIWindow) {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("video-editor-ui-\(UUID())")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -248,9 +272,11 @@ final class MediaVideoEditorPresentationTests: SimulatorHostedTestCase {
         if let scene = window.windowScene { window.frame = scene.effectiveGeometry.coordinateSpace.bounds }
         window.rootViewController?.view.frame = window.bounds
         window.layoutIfNeeded()
-        try await waitUntil("The actual generated media loads and exposes video editor tools") {
-            self.searchContainsText("Adjust", in: window) && self.searchContainsText("Start Time", in: window)
-                && self.player(in: window)?.currentItem?.status == .readyToPlay
+        if waitUntilReady {
+            try await waitUntil("The actual generated media loads and exposes video editor tools") {
+                self.searchContainsText("Adjust", in: window) && self.searchContainsText("Start Time", in: window)
+                    && self.player(in: window)?.currentItem?.status == .readyToPlay
+            }
         }
         return (fixture, window)
     }

@@ -180,6 +180,7 @@ struct MediaVideoEditor: View {
     @State private var aspectDrawer = false
     @State private var isSaving = false
     @State private var loadFailed = false
+    @State private var loadRevision = UUID()
     @State private var ready = false
     @State private var error: ErrorEvent?
     @State private var discardConfirmation = false
@@ -223,7 +224,13 @@ struct MediaVideoEditor: View {
                     if !isAllowed() {
                         Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else if loadFailed {
-                        ContentUnavailableView("Video Unavailable", systemImage: "video.slash", description: Text("This video could not be loaded."))
+                        ContentUnavailableView {
+                            Label("Video Unavailable", systemImage: "video.slash")
+                        } description: {
+                            Text("This video could not be loaded.")
+                        } actions: {
+                            Button("Retry") { loadRevision = UUID() }
+                        }
                     } else if ready {
                         if isPrimaryVideo { Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity) }
                         else { canvas.frame(maxWidth: .infinity, maxHeight: .infinity) }
@@ -306,7 +313,10 @@ struct MediaVideoEditor: View {
                 Button("Cancel", role: .cancel) {}
             } message: { Text("This will remove the edits made on this device.") }
             .errorToast($error)
-            .task {
+            .task(id: loadRevision) {
+                loadFailed = false
+                ready = false
+                preview.teardown()
                 guard isAllowed() else { dismiss(); return }
                 do {
                     try await preview.load(sourceURL, stillURL: stillURL, initial: history.values, isLive: isLivePhoto)
