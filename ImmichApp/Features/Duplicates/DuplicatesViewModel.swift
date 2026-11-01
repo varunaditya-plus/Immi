@@ -71,6 +71,11 @@ final class DuplicatesViewModel {
         guard !workingGroupIDs.contains(group.id) else { return }
 
         let allIDs = Set(group.assets.map(\.id))
+        guard let current = groups.first(where: { $0.id == group.id }) else { return }
+        guard Set(current.assets.map(\.id)) == allIDs else {
+            actionError = String(localized: "This duplicate group changed. Review it again.")
+            return
+        }
         let kept = keepIDs.intersection(allIDs)
         let trashed = allIDs.subtracting(kept)
         guard !kept.isEmpty, !trashed.isEmpty else { return }

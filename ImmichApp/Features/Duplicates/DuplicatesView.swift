@@ -120,7 +120,7 @@ struct DuplicatesView: View {
     }
 }
 
-private struct DuplicateGroupCard: View {
+struct DuplicateGroupCard: View {
     let group: DuplicateGroupDTO
     let isWorking: Bool
     let onResolve: (Set<String>) -> Void
@@ -144,7 +144,11 @@ private struct DuplicateGroupCard: View {
     }
 
     private var trashCount: Int {
-        group.assets.count - keepAssetIDs.intersection(group.assets.map(\.id)).count
+        group.assets.count - currentKeepAssetIDs.count
+    }
+
+    private var currentKeepAssetIDs: Set<String> {
+        keepAssetIDs.intersection(group.assets.map(\.id))
     }
 
     /// `confirmationDialog` meneruskan judulnya ke dialog native sebagai teks
@@ -171,13 +175,19 @@ private struct DuplicateGroupCard: View {
         }
         .opacity(isWorking ? 0.65 : 1)
         .allowsHitTesting(!isWorking)
+        .onChange(of: group.assets.map(\.id)) { _, _ in
+            let retained = currentKeepAssetIDs
+            keepAssetIDs = retained.isEmpty ? group.initialKeepAssetIDs : retained
+            showsResolveConfirmation = false
+            showsKeepAllConfirmation = false
+        }
         .confirmationDialog(
             resolveConfirmationTitle,
             isPresented: $showsResolveConfirmation,
             titleVisibility: .visible
         ) {
             Button("Move to Trash", role: .destructive) {
-                onResolve(keepAssetIDs)
+                onResolve(currentKeepAssetIDs)
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -222,13 +232,13 @@ private struct DuplicateGroupCard: View {
                 ForEach(group.assets) { asset in
                     DuplicateAssetChoice(
                         asset: asset,
-                        isKept: keepAssetIDs.contains(asset.id),
+                        isKept: currentKeepAssetIDs.contains(asset.id),
                         isSuggested: group.suggestedKeepAssetIds.contains(asset.id)) {
-                            if keepAssetIDs.contains(asset.id) {
+                            if currentKeepAssetIDs.contains(asset.id) {
                                 // Setidaknya satu aset harus bertahan. Mencegah
                                 // ketukan terakhir lebih jelas daripada baru
                                 // menolak saat tombol Resolve ditekan.
-                                if keepAssetIDs.count > 1 { keepAssetIDs.remove(asset.id) }
+                                if currentKeepAssetIDs.count > 1 { keepAssetIDs.remove(asset.id) }
                             } else {
                                 keepAssetIDs.insert(asset.id)
                             }
@@ -258,7 +268,7 @@ private struct DuplicateGroupCard: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(.red)
-            .disabled(trashCount == 0 || keepAssetIDs.isEmpty)
+            .disabled(trashCount == 0 || currentKeepAssetIDs.isEmpty)
         }
     }
 }

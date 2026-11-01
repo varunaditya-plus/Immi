@@ -134,6 +134,21 @@ final class DuplicateLoadIsolationTests: XCTestCase {
         XCTAssertEqual(fixture.api.loadCount, 0)
     }
 
+    func testStaleResolutionCannotDeletePhotosAfterGroupMembershipChanges() async throws {
+        let fixture = try fixture()
+        let current = DuplicateGroupDTO(duplicateId: fixture.group.id,
+            assets: fixture.ids.map { makeTestAsset(id: $0) })
+        fixture.model.groups = [current]
+
+        await fixture.model.resolve(fixture.group, keeping: [fixture.ids[0]])
+
+        XCTAssertEqual(fixture.model.groups.first?.assets.map(\.id), fixture.ids)
+        XCTAssertEqual(fixture.model.actionError, "This duplicate group changed. Review it again.")
+        XCTAssertTrue(fixture.model.workingGroupIDs.isEmpty)
+        for id in fixture.ids { XCTAssertNotNil(fixture.manager.getCachedAsset(id: id)) }
+        XCTAssertTrue(fixture.api.dismissedGroupIDs.isEmpty)
+    }
+
     func testRawPrivateDuplicateAssetsAreHiddenBeforeCachingAndFreshArchivesRemainEligible() async throws {
         let fixture = try fixture()
         let visibility = ["timeline", "archive", "locked", "hidden", "future-private"]
