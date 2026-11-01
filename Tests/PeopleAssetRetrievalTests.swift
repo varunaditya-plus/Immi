@@ -368,13 +368,13 @@ final class PeopleAssetRetrievalTests: XCTestCase {
         XCTAssertEqual(writes, 1)
         XCTAssertGreaterThan(reads, 2, "An unknown baseline cannot turn the first old image into a cache hit")
         XCTAssertNil(ImageMemoryCache.shared.image(for: ImageCache.memoryKey(key, 600)))
-        var fetchedAfterInvalidation = false
+        let fetchedAfterInvalidation = expectation(description: "The stale disk entry is invalidated along with memory")
         let fresh = Self.thumbnail(.blue)
         let image = try await ImageCache.shared.image(key: key, maxPixelSize: 600) {
-            fetchedAfterInvalidation = true
+            fetchedAfterInvalidation.fulfill()
             return fresh
         }
-        XCTAssertTrue(fetchedAfterInvalidation, "The stale disk entry must be invalidated along with memory")
+        await fulfillment(of: [fetchedAfterInvalidation], timeout: 1)
         XCTAssertEqual(Self.centerPixel(image), Self.centerPixel(try XCTUnwrap(UIImage(data: fresh))))
     }
 
