@@ -210,8 +210,8 @@ final class PhotoMapSelectionTests: XCTestCase {
 
     func testSelectedDeviceGPSWorksOfflineWithoutFetchingOrAdmittingUnselectedPhotos() async throws {
         let photo = local("selected")
-        var photos = [photo]
-        let model = PhotoMapViewModel(dataManager: store, localPhotos: { photos })
+        let selection = SelectedMapPhotos([photo])
+        let model = PhotoMapViewModel(dataManager: store, localPhotos: { selection.photos })
         await model.load { throw APIError.notConnected }
         let id = LocalPhotoLibrary.assetID(for: photo.id)
         XCTAssertEqual(model.admittedMarkers.map(\.id), [id])
@@ -220,7 +220,7 @@ final class PhotoMapSelectionTests: XCTestCase {
         XCTAssertEqual(selected.map(\.id), [id])
         XCTAssertEqual(selected.first?.origin, .device)
         XCTAssertEqual(queries, 0)
-        photos = []
+        selection.photos = []
         XCTAssertTrue(model.admittedMarkers.isEmpty)
         XCTAssertTrue(model.cachedAssets(for: [id]).isEmpty)
     }
@@ -332,14 +332,14 @@ final class PhotoMapSelectionTests: XCTestCase {
 
     func testCompletedLocalSelectionChangeRejectsHeldMappedAssets() async throws {
         let photo = local("copy")
-        var photos = [photo]
+        let selection = SelectedMapPhotos([photo])
         try store.linkDeviceAsset(localIdentifier: photo.id, to: "server")
-        let model = PhotoMapViewModel(dataManager: store, localPhotos: { photos })
+        let model = PhotoMapViewModel(dataManager: store, localPhotos: { selection.photos })
         let held = MapAssetResponseGate()
         let pending = Task { try await model.assets(for: ["server"]) { try await held.value() } }
         addTeardownBlock { await held.finish(.failure(CancellationError())); _ = try? await pending.value }
         await fulfillment(of: [held.started], timeout: 2)
-        photos = []
+        selection.photos = []
         held.finish(.success([asset("server")]))
         await expectCancellation { try await pending.value }
         XCTAssertTrue(model.admittedMarkers.isEmpty)
@@ -391,4 +391,11 @@ private final class MapAssetResponseGate {
         continuation?.resume(with: result)
         continuation = nil
     }
+}
+
+@MainActor
+private final class SelectedMapPhotos {
+    var photos: [LocalPhoto]
+
+    init(_ photos: [LocalPhoto]) { self.photos = photos }
 }
