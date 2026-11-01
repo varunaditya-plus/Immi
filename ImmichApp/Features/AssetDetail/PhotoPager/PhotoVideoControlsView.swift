@@ -63,6 +63,8 @@ final class PhotoVideoControlsBar: UIView {
     private let elapsedLabel = UILabel()
     private let remainingLabel = UILabel()
     private let times = UIStackView()
+    private let timeSpacer = UIView()
+    private var preferredHeight: CGFloat = 48
 
     private weak var pager: PhotoPagerController?
     private var state = PhotoPlaybackState()
@@ -122,7 +124,7 @@ final class PhotoVideoControlsBar: UIView {
             label.textColor = .secondaryLabel
             label.isAccessibilityElement = false
         }
-        for view in [elapsedLabel, UIView(), remainingLabel] { times.addArrangedSubview(view) }
+        for view in [elapsedLabel, timeSpacer, remainingLabel] { times.addArrangedSubview(view) }
         times.isHidden = true
         let transport = UIStackView(arrangedSubviews: [timeline, times])
         transport.axis = .vertical
@@ -156,6 +158,9 @@ final class PhotoVideoControlsBar: UIView {
             stack.topAnchor.constraint(equalTo: topAnchor),
             stack.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (bar: PhotoVideoControlsBar, _: UITraitCollection) in
+            bar.updateTimestampLayout()
+        }
     }
 
     @available(*, unavailable)
@@ -163,8 +168,28 @@ final class PhotoVideoControlsBar: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        updateTimestampLayout()
         background.layer.cornerRadius = bounds.height / 2
         bufferProgress.progressTintColor = tintColor
+    }
+
+    override var intrinsicContentSize: CGSize {
+        CGSize(width: UIView.noIntrinsicMetric, height: preferredHeight)
+    }
+
+    private func updateTimestampLayout() {
+        let vertical = traitCollection.preferredContentSizeCategory.isAccessibilityCategory
+        let axis: NSLayoutConstraint.Axis = vertical ? .vertical : .horizontal
+        let alignment: UIStackView.Alignment = vertical ? .leading : .fill
+        if times.axis != axis { times.axis = axis }
+        if times.alignment != alignment { times.alignment = alignment }
+        if timeSpacer.isHidden != vertical { timeSpacer.isHidden = vertical }
+        let timestamps = vertical ? elapsedLabel.font.lineHeight + remainingLabel.font.lineHeight
+            : max(elapsedLabel.font.lineHeight, remainingLabel.font.lineHeight)
+        let height = max(48, isScrubbing ? slider.intrinsicContentSize.height + ceil(timestamps) : 48)
+        guard preferredHeight != height else { return }
+        preferredHeight = height
+        invalidateIntrinsicContentSize()
     }
 
     func attach(to pager: PhotoPagerController) {
@@ -181,6 +206,7 @@ final class PhotoVideoControlsBar: UIView {
         pager = nil
         isScrubbing = false
         times.isHidden = true
+        updateTimestampLayout()
     }
 
     // MARK: - Aksi
@@ -196,6 +222,7 @@ final class PhotoVideoControlsBar: UIView {
     @objc private func scrubbingBegan() {
         isScrubbing = true
         times.isHidden = false
+        updateTimestampLayout()
         pager?.beginScrubbing()
     }
 
@@ -207,6 +234,7 @@ final class PhotoVideoControlsBar: UIView {
     @objc private func scrubbingEnded() {
         isScrubbing = false
         times.isHidden = true
+        updateTimestampLayout()
         pager?.endScrubbing()
     }
 

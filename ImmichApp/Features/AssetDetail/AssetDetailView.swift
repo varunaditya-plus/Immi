@@ -644,7 +644,7 @@ struct AssetDetailView: View {
                 // strip tetap dipakai untuk berpindah aset.
                 if currentAsset.isVideo, let pagerController {
                     PhotoVideoControlsView(pager: pagerController)
-                        .frame(height: 48)
+                        .frame(minHeight: 48)
                         .padding(.horizontal, 28)
                 }
 
