@@ -143,20 +143,8 @@ final class MediaEditStore {
         try write(record, using: token, isCurrent: isCurrent)
     }
 
-    func remove(using token: Token, type: String, supportedSchemaVersion: Int,
-                isCurrent: @MainActor () -> Bool = { true }) throws {
-        if let data = try checkedContents(token, isCurrent: isCurrent) {
-            guard let record = try decode(data) else { return }
-            guard record.type == type, record.schemaVersion <= supportedSchemaVersion else {
-                throw MediaEditStoreError.unsupportedRecord
-            }
-        }
-        // Keeping a tombstone prevents an older unsaved editor from resurrecting reverted edits.
-        try write(nil, using: token, isCurrent: isCurrent)
-    }
-
-    private func write(_ record: MediaEditRecord?, using token: Token, isCurrent: @MainActor () -> Bool) throws {
-        let data = try JSONEncoder().encode(Envelope(formatVersion: 1, revision: UUID(), isDeleted: record == nil, record: record))
+    private func write(_ record: MediaEditRecord, using token: Token, isCurrent: @MainActor () -> Bool) throws {
+        let data = try JSONEncoder().encode(Envelope(formatVersion: 1, revision: UUID(), isDeleted: false, record: record))
         let destination = url(assetID: token.assetID, context: token.context)
         try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true,
             attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])

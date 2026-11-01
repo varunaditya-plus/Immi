@@ -73,7 +73,7 @@ final class MediaEditStoreTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: file), data)
     }
 
-    func testLateWritesReadsAndRemovalRejectChangedContextAndSourceGuards() throws {
+    func testLateWritesAndReadsRejectChangedContextAndSourceGuards() throws {
         for change in ["server", "user", "request", "generation", "logout", "source", "privacy"] {
             let initial = try XCTUnwrap(access.value)
             let id = "asset-\(change)"
@@ -92,29 +92,28 @@ final class MediaEditStoreTests: XCTestCase {
             if !["source", "privacy"].contains(change) { XCTAssertThrowsError(try store.read(using: token), change) }
             XCTAssertThrowsError(try store.save(try recipe(0.8, fingerprint: change == "source" ? "changed-source" : "original-v1"),
                 using: token, isCurrent: { change != "privacy" }), change)
-            if change != "source" {
-                XCTAssertThrowsError(try store.remove(using: token, type: "photo", supportedSchemaVersion: 1,
-                    isCurrent: { change != "privacy" }), change)
-            }
             access.value = initial
             XCTAssertEqual(store.revision, before, "Rejected work must not publish a content revision")
             XCTAssertEqual(try store.read(assetID: id), saved)
         }
     }
 
-    func testSeparateEditorsCannotOverwriteOrDeleteAChangedRecord() throws {
+    func testSeparateEditorsCannotOverwriteOrRevertAChangedRecord() throws {
         let other = makeStore()
         let first = try store.capture(assetID: "photo", sourceFingerprint: "original-v1")
         let stale = try other.capture(assetID: "photo", sourceFingerprint: "original-v1")
-        let saved = try recipe(0.4)
+        let saved = try document(0.4)
+        let reverted = try document(0)
         try store.save(saved, using: first)
 
-        XCTAssertThrowsError(try other.save(try recipe(0.9), using: stale)) { XCTAssertEqual($0 as? MediaEditStoreError, .editChanged) }
-        XCTAssertThrowsError(try other.remove(using: stale, type: "photo", supportedSchemaVersion: 1)) { XCTAssertEqual($0 as? MediaEditStoreError, .editChanged) }
+        XCTAssertThrowsError(try other.save(try document(0.9), using: stale)) { XCTAssertEqual($0 as? MediaEditStoreError, .editChanged) }
+        XCTAssertThrowsError(try other.save(reverted, using: stale)) { XCTAssertEqual($0 as? MediaEditStoreError, .editChanged) }
         XCTAssertEqual(try other.read(assetID: "photo"), saved)
-        let removed = try other.capture(assetID: "photo", sourceFingerprint: "original-v1")
-        try other.remove(using: removed, type: "photo", supportedSchemaVersion: 1)
-        XCTAssertNil(try store.read(assetID: "photo"))
+        let reverting = try other.capture(assetID: "photo", sourceFingerprint: "original-v1")
+        try other.save(reverted, using: reverting)
+        let actual = try XCTUnwrap(store.read(assetID: "photo"))
+        XCTAssertEqual(actual, reverted)
+        XCTAssertTrue(try actual.decode(MediaEditDocument.self, supportedSchemaVersion: 1).isIdentity)
         XCTAssertThrowsError(try store.save(saved, using: first)) { XCTAssertEqual($0 as? MediaEditStoreError, .editChanged) }
     }
 
@@ -123,14 +122,32 @@ final class MediaEditStoreTests: XCTestCase {
         let stale = try store.capture(assetID: "photo", sourceFingerprint: "original-v1")
         let reverting = try other.capture(assetID: "photo", sourceFingerprint: "original-v1")
 
-        try other.remove(using: reverting, type: "photo", supportedSchemaVersion: 1)
+        let reverted = try document(0)
+        try other.save(reverted, using: reverting)
 
-        XCTAssertNil(try store.read(assetID: "photo"))
-        let tombstone = try Data(contentsOf: recordFile())
-        XCTAssertThrowsError(try store.save(try recipe(0.7), using: stale)) {
+        XCTAssertEqual(try store.read(assetID: "photo"), reverted)
+        XCTAssertTrue(try reverted.decode(MediaEditDocument.self, supportedSchemaVersion: 1).isIdentity)
+        let bytes = try Data(contentsOf: recordFile())
+        XCTAssertThrowsError(try store.save(try document(0.7), using: stale)) {
             XCTAssertEqual($0 as? MediaEditStoreError, .editChanged)
         }
-        XCTAssertEqual(try Data(contentsOf: recordFile()), tombstone)
+        XCTAssertEqual(try Data(contentsOf: recordFile()), bytes)
+    }
+
+    func testLegacyDeletedEnvelopeRemainsReadableAndRejectsAnOlderEditorAfterReplacement() throws {
+        try store.save(try document(0.4), using: store.capture(assetID: "photo", sourceFingerprint: "original-v1"))
+        let file = try recordFile()
+        let legacy = Data(#"{"formatVersion":1,"revision":"00000000-0000-0000-0000-000000000000","isDeleted":true}"#.utf8)
+        try legacy.write(to: file, options: .atomic)
+        XCTAssertNil(try store.read(assetID: "photo"))
+        let stale = try store.capture(assetID: "photo", sourceFingerprint: "original-v1")
+        let restored = try document(0.6)
+        try store.save(restored, using: store.capture(assetID: "photo", sourceFingerprint: "original-v1"))
+
+        XCTAssertThrowsError(try store.save(try document(0), using: stale)) {
+            XCTAssertEqual($0 as? MediaEditStoreError, .editChanged)
+        }
+        XCTAssertEqual(try store.read(assetID: "photo"), restored)
     }
 
     func testCorruptAndFutureEnvelopeDataRemainUntouchedInsteadOfBecomingDefaultEdits() throws {
@@ -146,7 +163,7 @@ final class MediaEditStoreTests: XCTestCase {
         }
     }
 
-    func testFutureRecipeAndUnrecognizedTypeCannotBeDowngradedOrRemoved() throws {
+    func testFutureRecipeAndUnrecognizedTypeCannotBeDowngradedOrReverted() throws {
         for record in [try recipe(0.4, version: 9), try recipe(0.4, type: "future-media")] {
             try store.save(record, using: store.capture(assetID: "photo", sourceFingerprint: "original-v1"))
             let token = try store.capture(assetID: "photo", sourceFingerprint: "original-v1")
@@ -158,7 +175,7 @@ final class MediaEditStoreTests: XCTestCase {
                 }
             }
             XCTAssertThrowsError(try store.save(try recipe(0.8), using: token)) { XCTAssertEqual($0 as? MediaEditStoreError, .unsupportedRecord) }
-            XCTAssertThrowsError(try store.remove(using: token, type: "photo", supportedSchemaVersion: 1)) { XCTAssertEqual($0 as? MediaEditStoreError, .unsupportedRecord) }
+            XCTAssertThrowsError(try store.save(try recipe(0), using: token)) { XCTAssertEqual($0 as? MediaEditStoreError, .unsupportedRecord) }
             XCTAssertEqual(try Data(contentsOf: file), bytes)
             try FileManager.default.removeItem(at: file)
         }
@@ -211,7 +228,7 @@ final class MediaEditStoreTests: XCTestCase {
         access.value = .init(owner: initial.owner, requestRevision: UUID(), generation: initial.generation)
         XCTAssertNotEqual(store.revision, saved)
         let changed = store.revision
-        try store.remove(using: store.capture(assetID: "photo", sourceFingerprint: "original-v1"), type: "photo", supportedSchemaVersion: 1)
+        try store.save(try recipe(0), using: store.capture(assetID: "photo", sourceFingerprint: "original-v1"))
         XCTAssertNotEqual(store.revision, changed)
     }
 
@@ -244,6 +261,13 @@ final class MediaEditStoreTests: XCTestCase {
                         fingerprint: String = "original-v1") throws -> MediaEditRecord {
         try MediaEditRecord(type: type, schemaVersion: version, sourceFingerprint: fingerprint,
             value: MediaEditTestRecipe(amount: amount, filter: "test-filter"))
+    }
+
+    private func document(_ exposure: Double) throws -> MediaEditRecord {
+        var document = MediaEditDocument()
+        document.photo[.exposure] = exposure
+        return try MediaEditRecord(type: MediaEditingPipeline.recordType,
+            schemaVersion: MediaEditingPipeline.schemaVersion, sourceFingerprint: "original-v1", value: document)
     }
 
     private func recordFile() throws -> URL {
