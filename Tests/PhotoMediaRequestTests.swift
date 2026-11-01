@@ -1,8 +1,53 @@
 import Photos
+import Synchronization
+import UIKit
 import XCTest
 @testable import ImmichApp
 
 final class PhotoMediaRequestTests: XCTestCase {
+    func testImageAdapterWaitsForFinalQualityAndIgnoresDuplicateCompletions() async {
+        let fixture = PhotoMediaRequestFixture()
+        let degraded = UIImage(), final = UIImage()
+        XCTAssertFalse(degraded === final)
+        let result = await PhotoMediaRequest.image(request: { completion in
+            completion(degraded, [PHImageResultIsDegradedKey: true])
+            completion(final, [PHImageResultIsDegradedKey: false])
+            completion(nil, nil)
+            return 42
+        }, cancel: fixture.cancel)
+
+        XCTAssertTrue(result === final)
+        XCTAssertTrue(fixture.cancelled.isEmpty)
+    }
+
+    func testImageCancellationStopsTheRequestWithoutWaitingForItsFinalCallback() async {
+        let fixture = PhotoMediaRequestFixture()
+        let callback = Mutex<((UIImage?, [AnyHashable: Any]?) -> Void)?>(nil)
+        let started = expectation(description: "The image provider has registered its actual request")
+        let finished = expectation(description: "Cancellation finishes without a PhotoKit result")
+        let task = Task {
+            let result = await PhotoMediaRequest.image(request: { completion in
+                callback.withLock { $0 = completion }
+                started.fulfill()
+                return 42
+            }, cancel: fixture.cancel)
+            finished.fulfill()
+            return result
+        }
+        await fulfillment(of: [started], timeout: 2)
+        task.cancel()
+        await fulfillment(of: [finished], timeout: 2)
+        let late = callback.withLock { value in
+            defer { value = nil }
+            return value
+        }
+        late?(UIImage(), nil)
+        let result = await task.value
+
+        XCTAssertNil(result)
+        XCTAssertEqual(fixture.cancelled, [42])
+    }
+
     func testSynchronousFinalResultWinsAndDuplicateCallbacksCannotResumeAgain() async {
         let fixture = PhotoMediaRequestFixture()
         let result: String? = await PhotoMediaRequest.load(request: { completion in

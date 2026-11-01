@@ -697,18 +697,7 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
     /// perangkat ke cache disk aplikasi hanya menggandakan penyimpanan untuk
     /// sesuatu yang tidak pernah perlu diunduh.
     func thumbnail(for id: String, size: CGSize) async -> UIImage? {
-        guard let asset = Self.fetchAsset(id) else { return nil }
-
-        return await withCheckedContinuation { continuation in
-            imageManager.requestImage(
-                for: asset,
-                targetSize: size,
-                contentMode: .aspectFill,
-                options: thumbnailOptions
-            ) { image, _ in
-                continuation.resume(returning: image)
-            }
-        }
+        await image(for: id, size: size, contentMode: .aspectFill)
     }
 
     /// Versi untuk layar detail: UTUH, bukan dipenuhi.
@@ -717,18 +706,16 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
     /// detail ia memotong sisi panjang foto — yang terlihat bukan fotonya,
     /// melainkan bagian tengahnya.
     func preview(for id: String, size: CGSize) async -> UIImage? {
-        guard let asset = Self.fetchAsset(id) else { return nil }
+        await image(for: id, size: size, contentMode: .aspectFit)
+    }
 
-        return await withCheckedContinuation { continuation in
-            imageManager.requestImage(
-                for: asset,
-                targetSize: size,
-                contentMode: .aspectFit,
-                options: thumbnailOptions
-            ) { image, _ in
-                continuation.resume(returning: image)
-            }
-        }
+    private func image(for id: String, size: CGSize, contentMode: PHImageContentMode) async -> UIImage? {
+        guard let asset = Self.fetchAsset(id) else { return nil }
+        let manager = imageManager
+        return await PhotoMediaRequest.image(request: { completion in
+            manager.requestImage(for: asset, targetSize: size, contentMode: contentMode,
+                options: thumbnailOptions, resultHandler: completion)
+        }, cancel: { manager.cancelImageRequest($0) })
     }
 
     /// Aset video yang masih tersedia di perangkat, tanpa membaca seluruh

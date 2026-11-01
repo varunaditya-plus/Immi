@@ -1,8 +1,21 @@
 import Foundation
 import Photos
+import UIKit
 
 /// PhotoKit may finish synchronously, report more than once, or return its ID after cancellation.
 enum PhotoMediaRequest {
+    static func image(
+        request: (@escaping (UIImage?, [AnyHashable: Any]?) -> Void) -> PHImageRequestID,
+        cancel: @escaping @Sendable (PHImageRequestID) -> Void
+    ) async -> UIImage? {
+        await load(request: { completion in
+            request { image, info in
+                guard info?[PHImageResultIsDegradedKey] as? Bool != true else { return }
+                completion(image)
+            }
+        }, cancel: cancel)
+    }
+
     static func load<Value>(
         request: (@escaping (Value?) -> Void) -> PHImageRequestID,
         cancel: @escaping @Sendable (PHImageRequestID) -> Void
