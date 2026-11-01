@@ -19,7 +19,7 @@ struct AssistiveAccessRouter: View {
     var body: some View {
         Group {
             if session.isLoggedIn {
-                if let viewModel {
+                if let viewModel, viewModel.isCurrent {
                     AssistiveAccessContentView(
                         viewModel: viewModel,
                         showsHome: showsHome,
@@ -38,7 +38,12 @@ struct AssistiveAccessRouter: View {
         }
         .task(id: loadID) {
             guard session.isLoggedIn else { return }
-            let model = viewModel ?? AssistiveAccessViewModel(session: session)
+            let model: AssistiveAccessViewModel
+            if let viewModel, viewModel.isCurrent {
+                model = viewModel
+            } else {
+                model = AssistiveAccessViewModel(api: APIClient(session: session))
+            }
             viewModel = model
             await model.load(
                 showsFavorites: showsFavorites,
@@ -46,8 +51,17 @@ struct AssistiveAccessRouter: View {
         }
     }
 
-    private var loadID: String {
-        "\(session.isLoggedIn)-\(showsFavorites)-\(albumID)"
+    private var loadID: LoadID {
+        LoadID(isLoggedIn: session.isLoggedIn, generation: session.accountGeneration,
+            revision: session.snapshot.revision, showsFavorites: showsFavorites, albumID: albumID)
+    }
+
+    private struct LoadID: Equatable {
+        let isLoggedIn: Bool
+        let generation: UUID
+        let revision: UUID
+        let showsFavorites: Bool
+        let albumID: String
     }
 }
 

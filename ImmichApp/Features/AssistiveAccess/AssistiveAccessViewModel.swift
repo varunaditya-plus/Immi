@@ -6,27 +6,41 @@ import Observation
 final class AssistiveAccessViewModel {
     private let snapshotGeneration = LocalSnapshot.generation
 
-    private(set) var photos: [AssetLite] = []
-    private(set) var favorites: [AssetLite] = []
-    private(set) var album: [AssetLite] = []
-    private(set) var isLoading = false
+    private var loadedPhotos: [AssetLite] = []
+    private var loadedFavorites: [AssetLite] = []
+    private var loadedAlbum: [AssetLite] = []
+    private var loading = false
+
+    var photos: [AssetLite] { admitted(loadedPhotos, scope: .timeline) }
+    var favorites: [AssetLite] { admitted(loadedFavorites, scope: .timeline) }
+    var album: [AssetLite] { admitted(loadedAlbum, scope: .collection) }
+    var isLoading: Bool { isCurrent && loading }
+    var isCurrent: Bool {
+        snapshotGeneration == LocalSnapshot.generation && session.snapshot == requestContext
+    }
 
     @ObservationIgnored let thumbnails: PhotoThumbnailLoader
     @ObservationIgnored let previews: PhotoPreviewLoader
     @ObservationIgnored private let dataManager: SwiftDataManager
     @ObservationIgnored private let searchRepository: SearchRepository
     @ObservationIgnored private let timelineRepository: TimelineRepository
-    @ObservationIgnored private let syncViewModel: SyncViewModel
+    @ObservationIgnored private let session: SessionManager
+    @ObservationIgnored private let requestContext: SessionRequestContext
+    @ObservationIgnored private let performSync: @MainActor @Sendable () async -> Void
 
-    init(session: SessionManager) {
-        let api = APIClient(session: session)
-        let dataManager = SwiftDataManager.shared
+    init(api: APIClient, dataManager: SwiftDataManager? = nil,
+         performSync: (@MainActor @Sendable () async -> Void)? = nil) {
+        let dataManager = dataManager ?? .shared
+        let session = api.session
+        self.session = session
+        self.requestContext = session.snapshot
         self.dataManager = dataManager
-        self.searchRepository = SearchRepository(api: api)
-        self.timelineRepository = TimelineRepository(api: api)
-        self.syncViewModel = SyncViewModel(
+        self.searchRepository = SearchRepository(api: api, dataManager: dataManager)
+        self.timelineRepository = TimelineRepository(api: api, dataManager: dataManager)
+        let syncViewModel = SyncViewModel(
             repo: SyncRepository(api: api, dataManager: dataManager),
             dataManager: dataManager)
+        self.performSync = performSync ?? { await syncViewModel.performBackgroundSync() }
         self.thumbnails = PhotoThumbnailLoader(session: session)
         self.previews = PhotoPreviewLoader(session: session)
     }
@@ -34,46 +48,46 @@ final class AssistiveAccessViewModel {
     /// Cache lokal dipasang lebih dulu. Network refresh berjalan bersamaan dan
     /// kegagalannya tidak membuang foto yang masih sah untuk dilihat offline.
     func load(showsFavorites: Bool, albumID: String) async {
-        guard snapshotGeneration == LocalSnapshot.generation else { return }
+        guard isCurrent else { return }
         restorePhotos()
         if showsFavorites {
             let cached = LocalSnapshot.load(
                 [AssetLite].self, for: LocalSnapshot.Key.favorites)
                 ?? photos.filter(\.isFavorite)
-            favorites = chronological(cached)
+            loadedFavorites = chronological(cached)
         } else {
-            favorites = []
+            loadedFavorites = []
         }
         if !albumID.isEmpty {
             let cached = LocalSnapshot.load(
                 [AssetLite].self, for: LocalSnapshot.Key.album(albumID)) ?? []
-            album = chronological(cached)
+            loadedAlbum = chronological(cached)
         } else {
-            album = []
+            loadedAlbum = []
         }
 
-        isLoading = photos.isEmpty
+        loading = photos.isEmpty
             || (showsFavorites && favorites.isEmpty)
             || (!albumID.isEmpty && album.isEmpty)
-        defer { isLoading = false }
+        defer { loading = false }
 
-        async let sync: Void = syncViewModel.performBackgroundSync()
+        async let sync: Void = performSync()
         async let refreshedFavorites = fetchFavorites(if: showsFavorites)
         async let refreshedAlbum = fetchAlbum(id: albumID)
 
         let (_, favoriteResult, albumResult) = await (
             sync, refreshedFavorites, refreshedAlbum)
-        guard snapshotGeneration == LocalSnapshot.generation else { return }
+        guard isCurrent else { return }
 
         restorePhotos()
         if let favoriteResult {
             let ordered = chronological(favoriteResult)
-            favorites = ordered
+            loadedFavorites = ordered
             LocalSnapshot.save(ordered, for: LocalSnapshot.Key.favorites, expectedGeneration: snapshotGeneration)
         }
         if let albumResult {
             let ordered = chronological(albumResult)
-            album = ordered
+            loadedAlbum = ordered
             LocalSnapshot.save(ordered, for: LocalSnapshot.Key.album(albumID), expectedGeneration: snapshotGeneration)
         }
     }
@@ -81,11 +95,16 @@ final class AssistiveAccessViewModel {
     private func restorePhotos() {
         // Cache Timeline memang disimpan menaik. Urutan itu dipertahankan agar
         // foto terbaru berada di ujung bawah, sama seperti Photos utama.
-        photos = dataManager.timelineAssets().map(\.asset)
+        loadedPhotos = dataManager.timelineAssets().map(\.asset)
+    }
+
+    private func admitted(_ assets: [AssetLite], scope: AssetVisibilityPolicy.Scope) -> [AssetLite] {
+        guard isCurrent else { return [] }
+        return AssetVisibilityPolicy(scope: scope, dataManager: dataManager).filter(assets)
     }
 
     private func fetchFavorites(if enabled: Bool) async -> [AssetLite]? {
-        guard enabled else { return [] }
+        guard enabled else { return nil }
         var request = SearchRequestDTO(
             page: 1,
             order: "asc",
@@ -99,7 +118,7 @@ final class AssistiveAccessViewModel {
     }
 
     private func fetchAlbum(id: String) async -> [AssetLite]? {
-        guard !id.isEmpty else { return [] }
+        guard !id.isEmpty else { return nil }
         return try? await timelineRepository.albumAssets(id)
     }
 
