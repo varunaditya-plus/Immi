@@ -175,7 +175,7 @@ final class MediaVideoEditorPresentationTests: SimulatorHostedTestCase {
     }
 
     func testActualFramePrecisionTrimAccessibilitySavesTheSelectedRangeWithoutChangingItsSource() async throws {
-        let (fixture, window) = try await show(makeMovie: makeTrimMovie)
+        let (fixture, window) = try await show(makeMovie: { try await self.makeTrimMovie(in: $0) })
         let original = try Data(contentsOf: fixture.url)
         let source = AVURLAsset(url: fixture.url)
         let sourceDuration = try await source.load(.duration).seconds
@@ -211,7 +211,7 @@ final class MediaVideoEditorPresentationTests: SimulatorHostedTestCase {
     }
 
     func testAccessiblePlaybackPositionPausesAndSelectsTheActualLiveKeyFrame() async throws {
-        let (fixture, window) = try await show(isLive: true, makeMovie: makeTrimMovie)
+        let (fixture, window) = try await show(isLive: true, makeMovie: { try await self.makeTrimMovie(in: $0) })
         let source = AVURLAsset(url: fixture.url)
         let originalTime = try await MediaLiveRenderer.shared.photoTime(motionURL: fixture.url)
         let tracks = try await source.loadTracks(withMediaType: .video)

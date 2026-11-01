@@ -1935,7 +1935,7 @@ struct AssetDetailView: View {
         let filename = target.detail?.originalFileName ?? serverID
         let accountGeneration = LocalSnapshot.generation
         let requestContext = session.snapshot
-        let isAllowed = {
+        let isAllowed: @MainActor @Sendable () -> Bool = {
             !Task.isCancelled && accountGeneration == LocalSnapshot.generation
                 && session.snapshot == requestContext
                 && serverAssetID(for: target.asset) == serverID
