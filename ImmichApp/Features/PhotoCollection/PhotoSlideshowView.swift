@@ -210,6 +210,8 @@ struct PhotoSlideshowView: View {
                 .accessibilityIdentifier("photoSlideshow.close")
             Spacer()
             Text("Slideshow").font(.headline)
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(.black.opacity(0.65), in: .capsule)
             Spacer()
             Button("Share", systemImage: "square.and.arrow.up", action: share)
                 .disabled(state.currentAsset == nil || sharePreparation.isPreparing || shareItem != nil)
@@ -222,7 +224,9 @@ struct PhotoSlideshowView: View {
         VStack(spacing: 12) {
             if let asset = state.currentAsset {
                 Text(asset.createdAt, format: .dateTime.month(.wide).day().year())
-                    .font(.subheadline).shadow(radius: 4)
+                    .font(.subheadline)
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .background(.black.opacity(0.65), in: .capsule)
             }
             HStack(spacing: 28) {
                 Button("Previous", systemImage: "backward.end.fill", action: state.previous)
@@ -236,6 +240,8 @@ struct PhotoSlideshowView: View {
             .labelStyle(.iconOnly).buttonStyle(.glass).buttonBorderShape(.circle)
             Text("\(state.currentAsset == nil ? 0 : state.currentIndex + 1) of \(state.assets.count)")
                 .font(.caption).monospacedDigit()
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(.black.opacity(0.65), in: .capsule)
         }
     }
 
