@@ -352,9 +352,11 @@ final class SwiftDataManager {
         }
         publishRemovals(deletedIds, reason: removalReason)
         let context = ModelContext(modelContainer)
+        let deleted = Set(deletedIds)
+        let activeUpserts = upserts.filter { !deleted.contains($0.id) }
 
-        let existing = fetchAssets(ids: upserts.map(\.id) + deletedIds, in: context)
-        for asset in upserts {
+        let existing = fetchAssets(ids: activeUpserts.map(\.id) + deletedIds, in: context)
+        for asset in activeUpserts {
             if let current = existing[asset.id] { apply(asset, to: current) }
             else { context.insert(asset) }
         }
@@ -362,14 +364,13 @@ final class SwiftDataManager {
             if let current = existing[id] { context.delete(current) }
         }
 
-        try saveWithTimelineVisibility(upserts, visibilityByID: visibilityByID, in: context) {
+        try saveWithTimelineVisibility(activeUpserts, visibilityByID: visibilityByID, in: context) {
             try context.save()
         }
 
-        let deleted = Set(deletedIds)
-        publishRestorations(upserts.map(\.id).filter { !deleted.contains($0) })
+        publishRestorations(activeUpserts.map(\.id))
         // Upsert-only deltas must also invalidate older in-flight snapshots.
-        if !upserts.isEmpty, deletedIds.isEmpty {
+        if !activeUpserts.isEmpty, deletedIds.isEmpty {
             assetMutationRevision = UUID()
         }
     }

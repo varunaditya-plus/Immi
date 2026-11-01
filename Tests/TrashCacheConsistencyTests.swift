@@ -252,6 +252,37 @@ final class TrashCacheConsistencyTests: XCTestCase {
         XCTAssertTrue(RemovedAssets.shared.filter([photo], scope: .trash).isEmpty)
     }
 
+    func testSyncBatchDeletesOverlappingUpsertsFromExistingAndEmptyCaches() throws {
+        for existing in [false, true] {
+            for permanently in [false, true] {
+                let fixture = try makeFixture()
+                let id = UUID().uuidString
+                let retainedID = UUID().uuidString
+                if existing {
+                    try fixture.manager.insertOrUpdateCachedAsset(
+                        CachedAsset(id: id, assetId: id, type: "IMAGE"))
+                }
+                DeletedServerAssetRegistry.shared.record([id], permanently: permanently)
+
+                for _ in 0..<2 {
+                    try fixture.manager.applySyncBatch(upserts: [
+                        CachedAsset(id: id, assetId: id, type: "IMAGE", isFavorite: true),
+                        CachedAsset(id: retainedID, assetId: retainedID, type: "IMAGE", isFavorite: true)
+                    ], deletedIds: [id])
+
+                    for store in [fixture.manager, fixture.reopen()] {
+                        XCTAssertEqual(store.cachedAssetCount(), 1,
+                            "A deleted new row must be absent from storage, not just hidden by a registry")
+                        XCTAssertNil(store.getCachedAsset(id: id))
+                        XCTAssertTrue(try XCTUnwrap(store.getCachedAsset(id: retainedID)).isFavorite)
+                    }
+                    XCTAssertTrue(DeletedServerAssetRegistry.shared.suppressedIDs.contains(id))
+                    XCTAssertEqual(DeletedServerAssetRegistry.shared.isTrashed(id), !permanently)
+                }
+            }
+        }
+    }
+
     private func asset(_ id: String) -> AssetLite {
         AssetLite(id: id, isVideo: false, ratio: 1.5, thumbhash: "hash", createdAt: Date(timeIntervalSince1970: 1_760_000_000),
             isFavorite: true, livePhotoVideoID: "live-\(id)")
