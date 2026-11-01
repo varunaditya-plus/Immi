@@ -142,7 +142,9 @@ private final class HeldSyncStreamTransport: @unchecked Sendable {
         lock.unlock()
         XCTAssertNotNil(stream, "The initial stream must remain open")
         guard let stream else { return }
-        stream.client?.urlProtocol(stream, didLoad: Data(Self.assetLine(500).utf8))
+        let body = Self.assetLine(500)
+            + #"{"type":"SyncCompleteV1","ack":"SyncCompleteV1|complete","data":{}}"# + "\n"
+        stream.client?.urlProtocol(stream, didLoad: Data(body.utf8))
         stream.client?.urlProtocolDidFinishLoading(stream)
     }
 

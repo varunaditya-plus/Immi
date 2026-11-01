@@ -230,6 +230,44 @@ final class FullSyncReplacementTests: XCTestCase {
         }
     }
 
+    func testDeltaEOFWithoutCompletionDoesNotAcknowledgeOrAdvanceTheDurableCheckpoint() async throws {
+        for count in [0, 700] {
+            let fixture = try FullSyncFixture()
+            defer { fixture.cleanup() }
+            let rows = FullSyncTransport.assets(count)
+            fixture.transport.responses = [.body(rows)]
+
+            do {
+                try await fixture.repository.deltaSync()
+                XCTFail("An HTTP EOF is not the server's sync completion marker")
+            } catch APIError.server(let status, _) {
+                XCTAssertEqual(status, 502)
+            }
+
+            for store in [fixture.dataManager, fixture.reopen()] {
+                XCTAssertEqual(store.cachedAssetCount(), count + 2,
+                    "Applied delta rows may remain available for a retry")
+                XCTAssertNotNil(store.getCachedAsset(id: "keep"))
+                XCTAssertNotNil(store.getCachedAsset(id: "stale"))
+                XCTAssertEqual(store.getSyncState().lastFullSyncAt, fixture.checkpoint)
+                XCTAssertEqual(store.getSyncState().lastDeltaSyncAt, fixture.checkpoint)
+                XCTAssertEqual(store.getSyncState().totalAssets, 2)
+            }
+            XCTAssertEqual(fixture.transport.acknowledgmentCount, 0)
+
+            fixture.transport.responses = [.body(rows + FullSyncTransport.complete)]
+            try await fixture.repository.deltaSync()
+
+            XCTAssertEqual(fixture.transport.acknowledgmentCount, 1)
+            for store in [fixture.dataManager, fixture.reopen()] {
+                XCTAssertEqual(store.cachedAssetCount(), count + 2)
+                XCTAssertEqual(store.getSyncState().lastFullSyncAt, fixture.checkpoint)
+                XCTAssertGreaterThan(try XCTUnwrap(store.getSyncState().lastDeltaSyncAt), fixture.checkpoint)
+                XCTAssertEqual(store.getSyncState().totalAssets, count + 2)
+            }
+        }
+    }
+
     func testServerVersionFailureDoesNotClearWorkingCacheOrRequestAStream() async throws {
         let fixture = try FullSyncFixture()
         defer { fixture.cleanup() }

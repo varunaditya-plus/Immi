@@ -297,8 +297,10 @@ private final class PrivacySyncTransport: @unchecked Sendable {
         lock.unlock()
         XCTAssertNotNil(stream, "The first chunk must leave the real HTTP stream open")
         guard let stream else { return }
-        stream.client?.urlProtocol(stream, didLoad: Data(Self.assetLine(250, favorite: true,
-            width: 300, ack: 500, entityType: entityType, deleted: deleting).utf8))
+        let body = Self.assetLine(250, favorite: true,
+            width: 300, ack: 500, entityType: entityType, deleted: deleting)
+            + #"{"type":"SyncCompleteV1","ack":"SyncCompleteV1|complete","data":{}}"# + "\n"
+        stream.client?.urlProtocol(stream, didLoad: Data(body.utf8))
         stream.client?.urlProtocolDidFinishLoading(stream)
     }
 

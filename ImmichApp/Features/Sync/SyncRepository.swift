@@ -43,10 +43,10 @@ class SyncRepository {
             return try await sync(reset: true, isRetryAfterReset: true)
         }
 
+        guard outcome.completed else {
+            throw APIError.server(status: 502, message: "Sync berakhir sebelum snapshot lengkap")
+        }
         if let staging {
-            guard outcome.completed else {
-                throw APIError.server(status: 502, message: "Sync berakhir sebelum snapshot lengkap")
-            }
             try dataManager.replaceSyncCache(with: staging,
                 expectedVisibilityRevision: visibilityRevision,
                 expectedAssetRevision: assetRevision)
