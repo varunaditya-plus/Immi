@@ -189,6 +189,8 @@ struct MediaVideoEditor: View {
     @State private var previewFiles: [URL] = []
     @State private var effectPoster: UIImage?
     @State private var dragStart: Double?
+    @GestureState private var isTrimming = false
+    @GestureState private var isScrubbingPreview = false
     @State private var saveTask: Task<Void, Never>?
 
     init(sourceURL: URL, stillURL: URL? = nil, isLivePhoto: Bool,
@@ -221,7 +223,7 @@ struct MediaVideoEditor: View {
                 if isAllowed(), ready, isPrimaryVideo {
                     canvas.ignoresSafeArea(.container)
                 }
-                PhotoEditorContentViewport(isInteracting: history.isEditing) {
+                PhotoEditorContentViewport(isInteracting: history.isEditing || isScrubbingPreview) {
                     VStack(spacing: 0) {
                         if !isAllowed() {
                             Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -345,9 +347,12 @@ struct MediaVideoEditor: View {
                 aspectDrawer = false
             }
             .onChange(of: stillMode) { _, still in if still { preview.pause() } }
-            .onChange(of: scenePhase) { _, phase in if phase != .active { preview.pause() } }
+            .onChange(of: scenePhase) { _, phase in
+                if phase != .active { preview.pause(); finishTrim(); history.editingChanged(false) }
+            }
+            .onChange(of: isTrimming) { _, trimming in if !trimming { finishTrim() } }
             .onChange(of: isAllowed()) { _, allowed in if !allowed { saveTask?.cancel(); effectPoster = nil; preview.teardown(); dismiss() } }
-            .onDisappear { saveTask?.cancel(); preview.teardown(); TemporaryMediaStore.remove(previewFiles) }
+            .onDisappear { saveTask?.cancel(); finishTrim(); history.editingChanged(false); preview.teardown(); TemporaryMediaStore.remove(previewFiles) }
         }
         .interactiveDismissDisabled(history.isDirty || isSaving)
         .persistentSystemOverlays(.hidden)
@@ -501,7 +506,7 @@ struct MediaVideoEditor: View {
             }
             .frame(height: 48)
             .contentShape(Rectangle())
-            .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+            .gesture(DragGesture(minimumDistance: 0).updating($isScrubbingPreview) { _, scrubbing, _ in scrubbing = true }.onChanged { value in
                 preview.pause()
                 preview.seek(min(max(value.location.x / width * preview.duration, history.values.video.trimStart), end))
             })
@@ -514,10 +519,10 @@ struct MediaVideoEditor: View {
             .overlay(Capsule().fill(.black.opacity(0.65)).frame(width: 2, height: 18))
             .frame(width: 44, height: 48)
             .contentShape(Rectangle())
-            .highPriorityGesture(DragGesture(minimumDistance: 0).onChanged { value in
+            .highPriorityGesture(DragGesture(minimumDistance: 0).updating($isTrimming) { _, trimming, _ in trimming = true }.onChanged { value in
                 if dragStart == nil { dragStart = start ? history.values.video.trimStart : end; history.editingChanged(true); preview.pause() }
                 changeTrim(start: start, time: (dragStart ?? 0) + value.translation.width / width * preview.duration)
-            }.onEnded { _ in dragStart = nil; history.editingChanged(false) })
+            }.onEnded { _ in finishTrim() })
             .accessibilityLabel(start ? "Start Time" : "End Time")
             .accessibilityValue(Measurement(value: start ? history.values.video.trimStart : end, unit: UnitDuration.seconds)
                 .formatted(.measurement(width: .abbreviated, usage: .asProvided,
@@ -535,6 +540,12 @@ struct MediaVideoEditor: View {
         value.video.setTrimBoundary(start ? .start : .end, to: time, duration: preview.duration, frameRate: preview.frameRate)
         if let key = value.live.keyPhotoTime { value.live.keyPhotoTime = min(max(key, value.video.trimStart), value.video.trimEnd ?? preview.duration) }
         history.update(value)
+    }
+
+    private func finishTrim() {
+        guard dragStart != nil else { return }
+        dragStart = nil
+        history.editingChanged(false)
     }
 
     private var toolPicker: some View {

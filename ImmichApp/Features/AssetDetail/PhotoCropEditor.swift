@@ -8,6 +8,7 @@ struct PhotoCropEditor: View {
     private let onSave: @MainActor (PhotoEditRecipe) async -> Bool
     private let onRevert: @MainActor () async -> Bool
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @State private var history: PhotoEditHistory
     @State private var image: UIImage?
     @State private var tool = PhotoEditorTool.adjust
@@ -149,7 +150,10 @@ struct PhotoCropEditor: View {
             .onChange(of: isAllowed()) { _, allowed in
                 if !allowed { saveTask?.cancel(); image = nil; dismiss() }
             }
-            .onDisappear { saveTask?.cancel() }
+            .onChange(of: scenePhase) { _, phase in
+                if phase != .active { history.editingChanged(false) }
+            }
+            .onDisappear { saveTask?.cancel(); history.editingChanged(false) }
         }
         .interactiveDismissDisabled(history.isDirty || isSaving)
         .persistentSystemOverlays(.hidden)

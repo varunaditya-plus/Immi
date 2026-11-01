@@ -1,3 +1,4 @@
+import Observation
 import SwiftUI
 import UIKit
 import XCTest
@@ -84,6 +85,78 @@ final class PhotoEditorCompactLayoutTests: ViewerAdaptiveLayoutTestCase {
             try await waitUntil("The reachable Live adjustment saves through its actual editor") { saved.count == 1 }
             XCTAssertEqual(try XCTUnwrap(saved.first)[.exposure], 1, accuracy: 0.001)
         }
+    }
+
+    func testSceneInterruptionReleasesActualEditingScrollLockWithoutATouchEnd() async throws {
+        let scene = EditorSceneProbeState()
+        let window = try await host(EditorSceneProbe(state: scene).dynamicTypeSize(.accessibility5))
+        resize(window, to: CGSize(width: 568, height: 320))
+        try await waitUntil("The interrupted editor has loaded its actual adjustment controls") {
+            self.accessibilityObject("Exposure", in: window) != nil
+        }
+        try scrollVertically(to: try XCTUnwrap(accessibilityObject("Exposure", in: window)), in: window)
+        try await activateAccessibilityButton(named: "Exposure", in: window)
+        let slider = try XCTUnwrap(descendants(window).compactMap { $0 as? UISlider }
+            .first { $0.accessibilityLabel == "Exposure" })
+        try scrollVertically(to: slider, in: window)
+        let scroll = try XCTUnwrap(descendants(window).compactMap { $0 as? UIScrollView }.first {
+            $0.bounds.width > window.bounds.width * 0.9 && $0.contentSize.height > $0.bounds.height + 1
+        })
+        XCTAssertTrue(scroll.isScrollEnabled)
+
+        slider.sendActions(for: .touchDown)
+        try await waitUntil("An actual editing gesture locks its enclosing vertical scrolling") { !scroll.isScrollEnabled }
+        scene.phase = .inactive
+
+        try await waitUntil("Scene interruption releases the lock before the missing touch-end arrives") { scroll.isScrollEnabled }
+        scene.phase = .active
+        try await waitUntil("The editor is scrollable after resuming from the interrupted gesture") { scroll.isScrollEnabled }
+        slider.sendActions(for: .touchCancel)
+    }
+
+    func testNormalTallAndRegularWindowsKeepTheActualPhotoAtFullAvailableWidth() async throws {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 600, height: 400)).image { context in
+            UIColor.green.setFill(); context.fill(CGRect(x: 0, y: 0, width: 600, height: 400))
+        }
+        let layouts: [(CGSize, UserInterfaceSizeClass)] = [
+            (CGSize(width: 390, height: 844), .compact), (CGSize(width: 768, height: 1024), .regular)
+        ]
+        for (size, sizeClass) in layouts {
+            for style in [UIUserInterfaceStyle.light, .dark] {
+                let window = try await host(PhotoCropEditor(initialRecipe: .init(), loadImage: { image },
+                    isAllowed: { true }, onSave: { _ in true }, onRevert: { true })
+                    .dynamicTypeSize(.large).environment(\.horizontalSizeClass, sizeClass), style: style)
+                resize(window, to: size)
+                var preview: NSObject?
+                try await waitUntil("The normal editor renders its actual full-width image") {
+                    preview = self.accessibilityObject("Edited Photo", in: window)
+                    return preview != nil
+                }
+                let frame = window.convert(try XCTUnwrap(preview).accessibilityFrame, from: nil)
+                XCTAssertGreaterThan(frame.width, size.width * 0.9,
+                    "The scrolling fallback cannot collapse a normal editor into its minimum preview")
+                XCTAssertEqual(frame.width / frame.height, 1.5, accuracy: 0.01)
+                XCTAssertTrue(window.bounds.contains(frame))
+                let scroll = try XCTUnwrap(descendants(window).compactMap { $0 as? UIScrollView }
+                    .first { $0.bounds.width > size.width * 0.9 })
+                XCTAssertLessThanOrEqual(scroll.contentSize.height, scroll.bounds.height + 1)
+                _ = try await screenshot(window)
+            }
+        }
+    }
+}
+
+@MainActor @Observable
+private final class EditorSceneProbeState { var phase = ScenePhase.active }
+
+private struct EditorSceneProbe: View {
+    let state: EditorSceneProbeState
+    private let image = UIGraphicsImageRenderer(size: CGSize(width: 600, height: 400)).image { context in
+        UIColor.green.setFill(); context.fill(CGRect(x: 0, y: 0, width: 600, height: 400))
+    }
+    var body: some View {
+        PhotoCropEditor(initialRecipe: .init(), loadImage: { image }, isAllowed: { true },
+            onSave: { _ in true }, onRevert: { true }).environment(\.scenePhase, state.phase)
     }
 }
 

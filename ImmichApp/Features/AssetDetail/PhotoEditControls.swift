@@ -638,7 +638,9 @@ private struct CropOverlay: View {
     var onEditingChanged: (Bool) -> Void = { _ in }
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     @State private var dragStart: CGRect?
+    @GestureState private var isDragging = false
     private let minimum: CGFloat = 0.06
 
     var body: some View {
@@ -664,6 +666,9 @@ private struct CropOverlay: View {
         }
         .coordinateSpace(name: "cropCanvas")
         .animation(reduceMotion ? nil : .smooth(duration: 0.3), value: crop)
+        .onChange(of: isDragging) { _, dragging in if !dragging { finishDrag() } }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { finishDrag() } }
+        .onDisappear { finishDrag() }
     }
 
     private func grid(in frame: CGRect) -> some View {
@@ -685,6 +690,7 @@ private struct CropOverlay: View {
 
     private func moveGesture(size: CGSize) -> some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .named("cropCanvas"))
+            .updating($isDragging) { _, dragging, _ in dragging = true }
             .onChanged { value in
                 let start = dragStart ?? crop
                 if dragStart == nil { onEditingChanged(true); dragStart = start }
@@ -695,11 +701,12 @@ private struct CropOverlay: View {
                 moved.origin.y = min(max(0, start.origin.y + dy), 1 - start.height)
                 updateCropDuringGesture(moved)
             }
-            .onEnded { _ in dragStart = nil; onEditingChanged(false) }
+            .onEnded { _ in finishDrag() }
     }
 
     private func resizeGesture(_ handle: CropHandle, size: CGSize) -> some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .named("cropCanvas"))
+            .updating($isDragging) { _, dragging, _ in dragging = true }
             .onChanged { value in
                 let start = dragStart ?? crop
                 if dragStart == nil { onEditingChanged(true); dragStart = start }
@@ -707,7 +714,13 @@ private struct CropOverlay: View {
                 let dy = value.translation.height / max(1, size.height)
                 updateCropDuringGesture(resized(start, handle: handle, dx: dx, dy: dy))
             }
-            .onEnded { _ in dragStart = nil; onEditingChanged(false) }
+            .onEnded { _ in finishDrag() }
+    }
+
+    private func finishDrag() {
+        guard dragStart != nil else { return }
+        dragStart = nil
+        onEditingChanged(false)
     }
 
     /// Gesture harus mengikuti posisi jari 1:1. Animasi hanya digunakan untuk
