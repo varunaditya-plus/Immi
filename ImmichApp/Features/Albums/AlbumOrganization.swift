@@ -114,10 +114,6 @@ final class AlbumsOrganizationStore {
 
     var isCurrent: Bool { generation == LocalSnapshot.generation }
 
-    func orderedAlbums(_ albums: [AlbumResponseDTO], in folderID: String? = nil) -> [AlbumResponseDTO] {
-        value.orderedAlbums(albums, in: folderID)
-    }
-
     @discardableResult
     func createFolder(name: String, parentID: String?) -> AlbumFolder? {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)

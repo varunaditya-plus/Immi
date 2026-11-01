@@ -26,14 +26,14 @@ final class AlbumOrganizationTests: XCTestCase {
         store.moveAlbum("b", to: child.id)
 
         XCTAssertEqual(parent.name, "Holidays")
-        XCTAssertTrue(store.orderedAlbums(albums).isEmpty)
-        XCTAssertEqual(store.orderedAlbums(albums, in: parent.id).map(\.id), ["a"])
-        XCTAssertEqual(store.orderedAlbums(albums, in: child.id).map(\.id), ["b"])
+        XCTAssertTrue(store.value.orderedAlbums(albums).isEmpty)
+        XCTAssertEqual(store.value.orderedAlbums(albums, in: parent.id).map(\.id), ["a"])
+        XCTAssertEqual(store.value.orderedAlbums(albums, in: child.id).map(\.id), ["b"])
         store.removeFolder(parent.id)
 
-        XCTAssertEqual(store.orderedAlbums(albums).map(\.id), ["a"])
+        XCTAssertEqual(store.value.orderedAlbums(albums).map(\.id), ["a"])
         XCTAssertEqual(store.value.childFolders(of: nil).map(\.id), [child.id])
-        XCTAssertEqual(store.orderedAlbums(albums, in: child.id).map(\.id), ["b"])
+        XCTAssertEqual(store.value.orderedAlbums(albums, in: child.id).map(\.id), ["b"])
         XCTAssertEqual(albums.map(\.assetCount), [3, 3])
     }
 
@@ -46,9 +46,9 @@ final class AlbumOrganizationTests: XCTestCase {
 
         XCTAssertEqual(restored.value.folders, [folder])
         XCTAssertEqual(restored.value.containerOrders["root"], ["album:b", "album:a"])
-        XCTAssertEqual(restored.orderedAlbums([album("new"), album("a"), album("b"), album("inside")]).map(\.id),
+        XCTAssertEqual(restored.value.orderedAlbums([album("new"), album("a"), album("b"), album("inside")]).map(\.id),
                        ["b", "a", "new"])
-        XCTAssertEqual(restored.orderedAlbums([album("inside")], in: folder.id).map(\.id), ["inside"])
+        XCTAssertEqual(restored.value.orderedAlbums([album("inside")], in: folder.id).map(\.id), ["inside"])
     }
 
     func testSharedOrderIncludesNestedAlbumsWithoutChangingPersonalContainers() throws {
@@ -65,8 +65,8 @@ final class AlbumOrganizationTests: XCTestCase {
             ignoringFolders: true).map(\.id), ["shared-root", "shared-inside"])
         XCTAssertEqual(restored.value.containerOrders["root"], rootOrder)
         XCTAssertEqual(restored.value.containerOrders[folder.id], ["album:shared-inside"])
-        XCTAssertEqual(restored.orderedAlbums([album("shared-inside")], in: folder.id).map(\.id), ["shared-inside"])
-        XCTAssertEqual(restored.orderedAlbums([album("personal-a"), album("personal-b")]).map(\.id),
+        XCTAssertEqual(restored.value.orderedAlbums([album("shared-inside")], in: folder.id).map(\.id), ["shared-inside"])
+        XCTAssertEqual(restored.value.orderedAlbums([album("personal-a"), album("personal-b")]).map(\.id),
             ["personal-b", "personal-a"])
 
         let nextFolder = try XCTUnwrap(store.createFolder(name: "Summer", parentID: nil))
@@ -89,8 +89,8 @@ final class AlbumOrganizationTests: XCTestCase {
 
         XCTAssertTrue(otherUser.value.folders.isEmpty)
         XCTAssertTrue(otherServer.value.folders.isEmpty)
-        XCTAssertEqual(otherUser.orderedAlbums([album("same-id")]).map(\.id), ["same-id"])
-        XCTAssertEqual(otherServer.orderedAlbums([album("same-id")]).map(\.id), ["same-id"])
+        XCTAssertEqual(otherUser.value.orderedAlbums([album("same-id")]).map(\.id), ["same-id"])
+        XCTAssertEqual(otherServer.value.orderedAlbums([album("same-id")]).map(\.id), ["same-id"])
         XCTAssertEqual(store().value.folders.map(\.name), ["Private name"])
     }
 
@@ -168,7 +168,7 @@ final class AlbumOrganizationTests: XCTestCase {
         XCTAssertNil(saved.value.albumFolders["album"])
         XCTAssertEqual(saved.value.folders.map(\.id), [child.id])
         XCTAssertNil(saved.value.folders.first?.parentID)
-        XCTAssertEqual(saved.orderedAlbums([album("album")]).map(\.id), ["album"])
+        XCTAssertEqual(saved.value.orderedAlbums([album("album")]).map(\.id), ["album"])
     }
 
     func testCustomPhotoOrderFiltersOnlyAfterOrderingAndReconcilesMembership() {
@@ -214,7 +214,7 @@ final class AlbumOrganizationTests: XCTestCase {
         XCTAssertNil(store.createFolder(name: " \n ", parentID: nil))
         XCTAssertNil(store.createFolder(name: "Invalid parent", parentID: "missing"))
         store.moveAlbum("a", to: "missing")
-        XCTAssertEqual(store.orderedAlbums([album("a")]).map(\.id), ["a"])
+        XCTAssertEqual(store.value.orderedAlbums([album("a")]).map(\.id), ["a"])
         XCTAssertTrue(store.value.folders.isEmpty)
     }
 
