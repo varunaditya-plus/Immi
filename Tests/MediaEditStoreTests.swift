@@ -234,13 +234,14 @@ final class MediaEditStoreTests: XCTestCase {
 
     func testSessionConfigurationIsIdempotentAndDoesNotRetainTheSession() {
         var session: SessionManager? = MockSessionManager()
-        weak var weakSession = session
+        let isSessionReleased = { [weak session] in session == nil }
         store.configure(session: session!)
+        XCTAssertFalse(isSessionReleased())
         let revision = store.revision
         store.configure(session: session!)
         XCTAssertEqual(store.revision, revision)
         session = nil
-        XCTAssertNil(weakSession)
+        XCTAssertTrue(isSessionReleased())
     }
 
     func testCredentialBearingServerAddressesCannotCreateOwnerDirectories() throws {
