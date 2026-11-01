@@ -6,6 +6,7 @@ import XCTest
 @MainActor
 final class PhotoGridLifetimeTests: SimulatorHostedTestCase {
     private weak var owner: GridLifetimeOwner?
+    private weak var controller: PhotoGridController?
 
     func testDismantledMonthlyGridReleasesItsControllerAndCapturedOwner() async throws {
         try await verifyRelease(layout: .monthly, scrollHeroOffscreen: false)
@@ -20,7 +21,7 @@ final class PhotoGridLifetimeTests: SimulatorHostedTestCase {
         try await waitUntil("The production collection has installed its UIKit controller") {
             self.grid(in: window.rootViewController) != nil
         }
-        weak var controller = grid(in: window.rootViewController)
+        controller = grid(in: window.rootViewController)
         XCTAssertNotNil(owner, "The mounted view must retain its real action owner")
         if scrollHeroOffscreen {
             try await waitUntil("The real hero has rendered before being moved into the reuse pool") {
@@ -43,7 +44,7 @@ final class PhotoGridLifetimeTests: SimulatorHostedTestCase {
         window.rootViewController = nil
 
         try await waitUntil("Dismantling the representable releases its controller and all captured owner actions") {
-            controller == nil && self.owner == nil
+            self.controller == nil && self.owner == nil
         }
     }
 
