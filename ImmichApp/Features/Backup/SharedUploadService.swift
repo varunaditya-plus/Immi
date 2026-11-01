@@ -23,8 +23,8 @@ final class SharedUploadService {
 
     private(set) var items: [SharedUploadQueueItem] = []
     private var listingError: String?
-    private var processingError: String?
-    var lastError: String? { processingError ?? listingError }
+    private var processingError: (batchID: UUID?, message: String)?
+    var lastError: String? { processingError?.message ?? listingError }
     private weak var snapshotSession: SessionManager?
     private var currentSnapshot: (context: SessionRequestContext, owner: SharedUploadOwner)?
 
@@ -101,7 +101,7 @@ final class SharedUploadService {
                     } catch {
                         try Task.checkCancellation()
                         try session.checkCurrent(context)
-                        self.processingError = error.localizedDescription
+                        self.processingError = (batch.id, error.localizedDescription)
                     }
                     await self.refreshPending(session: session)
                 }
@@ -109,7 +109,7 @@ final class SharedUploadService {
                 guard !Task.isCancelled, self.workID == id,
                       (try? session.checkCurrent(context)) != nil else { return }
                 if readBatches {
-                    self.processingError = error.localizedDescription
+                    self.processingError = (nil, error.localizedDescription)
                 } else if self.listingID == initialListingID {
                     self.listingError = error.localizedDescription
                 }
@@ -185,6 +185,13 @@ final class SharedUploadService {
             throw error
         }
         try session.checkCurrent(context)
+        if processingError?.batchID == entry.batchID {
+            let directory = try await store.existingBatchDirectory(id: entry.batchID)
+            try session.checkCurrent(context)
+            if directory == nil, processingError?.batchID == entry.batchID {
+                processingError = nil
+            }
+        }
         await refreshPending(session: session)
     }
 

@@ -135,9 +135,7 @@ final class SharedUploadServiceTests: XCTestCase {
         })
         var batch = try await seed(fixture.store, states: [.queued, .queued])
         let original = batch.items[0]
-        batch.items[0] = .init(id: original.id, filename: original.filename, relativePath: "../outside.jpg",
-            contentType: original.contentType, byteCount: original.byteCount, createdAt: original.createdAt,
-            modifiedAt: original.modifiedAt, state: .queued, lastError: nil)
+        batch = rejectedSourceBatch(batch)
         try await fixture.store.save(batch)
         let outside = fixture.root.appendingPathComponent("outside.jpg")
         let outsideBytes = Data("This file is outside the claimed batch".utf8)
@@ -160,8 +158,38 @@ final class SharedUploadServiceTests: XCTestCase {
         try await fixture.service.remove(entry, session: fixture.session)
 
         XCTAssertTrue(fixture.service.items.isEmpty)
+        XCTAssertNil(fixture.service.lastError, "Removing the last bad batch must also resolve its processing error")
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
         XCTAssertEqual(try Data(contentsOf: outside), outsideBytes)
+    }
+
+    func testRemovingOneFailedBatchPreservesAnotherBatchProcessingError() async throws {
+        let fixture = try fixture()
+        let first = rejectedSourceBatch(try await seed(fixture.store, states: [.queued]))
+        let other = rejectedSourceBatch(try await seed(fixture.store, states: [.queued]),
+            createdAt: first.createdAt.addingTimeInterval(1))
+        try await fixture.store.save(first)
+        try await fixture.store.save(other)
+        let work = try XCTUnwrap(fixture.service.processPending(session: fixture.session))
+        await work.value
+        let error = try XCTUnwrap(fixture.service.lastError)
+        let otherManifest = try await manifestBytes(fixture.store, batch: other)
+        let removedEntry = try XCTUnwrap(fixture.service.items.first { $0.batchID == first.id })
+        let retainedEntry = try XCTUnwrap(fixture.service.items.first { $0.batchID == other.id })
+        XCTAssertEqual(removedEntry.item.state, .failed)
+        XCTAssertEqual(retainedEntry.item.state, .failed)
+
+        try await fixture.service.remove(removedEntry, session: fixture.session)
+
+        XCTAssertEqual(fixture.service.lastError, error)
+        XCTAssertEqual(fixture.service.items.map(\.batchID), [other.id])
+        let retainedManifest = try await manifestBytes(fixture.store, batch: other)
+        XCTAssertEqual(retainedManifest, otherManifest)
+
+        try await fixture.service.remove(retainedEntry, session: fixture.session)
+
+        XCTAssertTrue(fixture.service.items.isEmpty)
+        XCTAssertNil(fixture.service.lastError)
     }
 
     func testCanceledCallersCannotClearRowsOrStartARecoveryWorker() async throws {
@@ -377,6 +405,15 @@ final class SharedUploadServiceTests: XCTestCase {
         let batch = SharedUploadBatch(id: id, owner: owner ?? self.owner, createdAt: date, items: items)
         try await store.save(batch)
         return batch
+    }
+
+    private func rejectedSourceBatch(_ batch: SharedUploadBatch, createdAt: Date? = nil) -> SharedUploadBatch {
+        let source = batch.items[0]
+        var items = batch.items
+        items[0] = .init(id: source.id, filename: source.filename, relativePath: "../outside.jpg",
+            contentType: source.contentType, byteCount: source.byteCount, createdAt: source.createdAt,
+            modifiedAt: source.modifiedAt, state: .queued, lastError: nil)
+        return .init(id: batch.id, owner: batch.owner, createdAt: createdAt ?? batch.createdAt, items: items)
     }
 
     private func manifestBytes(_ store: SharedUploadStore, batch: SharedUploadBatch) async throws -> Data {
