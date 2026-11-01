@@ -18,6 +18,7 @@ final class MediaVideoEditHistory {
 
     init(_ values: MediaVideoEditValues) { initial = values; self.values = values }
     var isDirty: Bool { values != initial }
+    var isEditing: Bool { editingStart != nil }
     var canUndo: Bool { !past.isEmpty }
     var canRedo: Bool { !future.isEmpty }
     func update(_ value: MediaVideoEditValues) {
@@ -220,28 +221,33 @@ struct MediaVideoEditor: View {
                 if isAllowed(), ready, isPrimaryVideo {
                     canvas.ignoresSafeArea(.container)
                 }
-                VStack(spacing: 0) {
-                    if !isAllowed() {
-                        Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else if loadFailed {
-                        ContentUnavailableView {
-                            Label("Video Unavailable", systemImage: "video.slash")
-                        } description: {
-                            Text("This video could not be loaded.")
-                        } actions: {
-                            Button("Retry") { loadRevision = UUID() }
-                        }
-                    } else if ready {
-                        if isPrimaryVideo { Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity) }
-                        else { canvas.frame(maxWidth: .infinity, maxHeight: .infinity) }
-                        if let tool, let image = preview.poster {
-                            PhotoEditToolControls(image: image, recipe: photo, tool: tool, aspectDrawer: $aspectDrawer,
-                                onEditingChanged: history.editingChanged)
-                        } else {
-                            primaryControlPanel
-                        }
-                        toolPicker
-                    } else { ProgressView("Loading video…").frame(maxWidth: .infinity, maxHeight: .infinity) }
+                PhotoEditorContentViewport(isInteracting: history.isEditing) {
+                    VStack(spacing: 0) {
+                        if !isAllowed() {
+                            Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
+                        } else if loadFailed {
+                            ContentUnavailableView {
+                                Label("Video Unavailable", systemImage: "video.slash")
+                            } description: {
+                                Text("This video could not be loaded.")
+                            } actions: {
+                                Button("Retry") { loadRevision = UUID() }
+                            }
+                        } else if ready {
+                            if isPrimaryVideo {
+                                Color.clear.frame(maxWidth: .infinity, minHeight: PhotoEditorMetrics.minimumPreviewHeight, maxHeight: .infinity)
+                            } else {
+                                canvas.frame(maxWidth: .infinity, minHeight: PhotoEditorMetrics.minimumPreviewHeight, maxHeight: .infinity)
+                            }
+                            if let tool, let image = preview.poster {
+                                PhotoEditToolControls(image: image, recipe: photo, tool: tool, aspectDrawer: $aspectDrawer,
+                                    onEditingChanged: history.editingChanged)
+                            } else {
+                                primaryControlPanel
+                            }
+                            toolPicker
+                        } else { ProgressView("Loading video…").frame(maxWidth: .infinity, maxHeight: .infinity) }
+                    }
                 }
             }
             .disabled(isSaving)

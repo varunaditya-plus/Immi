@@ -38,24 +38,27 @@ struct PhotoCropEditor: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                if isAllowed(), let image {
-                    PhotoEditCanvas(image: image, recipe: recipe, tool: tool, comparing: false,
-                        onEditingChanged: history.editingChanged)
-                    PhotoEditToolControls(image: image, recipe: recipe, tool: tool, aspectDrawer: $aspectDrawer,
-                        onEditingChanged: history.editingChanged)
-                    toolPicker
-                } else if loadFailed {
-                    ContentUnavailableView {
-                        Label("Photo Unavailable", systemImage: "photo.badge.exclamationmark")
-                    } description: {
-                        Text("The photo could not be loaded for editing.")
-                    } actions: {
-                        Button("Retry") { loadRevision = UUID() }
+            PhotoEditorContentViewport(isInteracting: history.isEditing) {
+                VStack(spacing: 0) {
+                    if isAllowed(), let image {
+                        PhotoEditCanvas(image: image, recipe: recipe, tool: tool, comparing: false,
+                            onEditingChanged: history.editingChanged)
+                            .frame(minHeight: PhotoEditorMetrics.minimumPreviewHeight)
+                        PhotoEditToolControls(image: image, recipe: recipe, tool: tool, aspectDrawer: $aspectDrawer,
+                            onEditingChanged: history.editingChanged)
+                        toolPicker
+                    } else if loadFailed {
+                        ContentUnavailableView {
+                            Label("Photo Unavailable", systemImage: "photo.badge.exclamationmark")
+                        } description: {
+                            Text("The photo could not be loaded for editing.")
+                        } actions: {
+                            Button("Retry") { loadRevision = UUID() }
+                        }
+                        .frame(maxHeight: .infinity)
+                    } else {
+                        ProgressView("Loading photo…").frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
-                    .frame(maxHeight: .infinity)
-                } else {
-                    ProgressView("Loading photo…").frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
             .ignoresSafeArea(.container, edges: .bottom)

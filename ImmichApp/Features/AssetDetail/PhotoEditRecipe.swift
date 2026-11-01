@@ -229,7 +229,7 @@ final class PhotoEditHistory {
     let initialRecipe: PhotoEditRecipe
     private var states: [PhotoEditRecipe]
     private var cursor = 0
-    private var isEditing = false
+    private(set) var isEditing = false
     var canUndo: Bool { cursor > 0 }
     var canRedo: Bool { cursor + 1 < states.count }
     var isDirty: Bool { recipe != initialRecipe }

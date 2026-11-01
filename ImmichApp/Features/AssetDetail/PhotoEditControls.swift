@@ -4,6 +4,28 @@ import UIKit
 enum PhotoEditorMetrics {
     static let controlPanelHeight: CGFloat = 148
     static let toolPickerHeight: CGFloat = 60
+    static let minimumPreviewHeight: CGFloat = 112
+}
+
+struct PhotoEditorContentViewport<Content: View>: View {
+    let isInteracting: Bool
+    private let content: Content
+
+    init(isInteracting: Bool, @ViewBuilder content: () -> Content) {
+        self.isInteracting = isInteracting
+        self.content = content()
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            ScrollView {
+                content
+                    .frame(minHeight: geometry.size.height)
+            }
+            .scrollDisabled(isInteracting)
+            .scrollBounceBehavior(.basedOnSize)
+        }
+    }
 }
 
 struct PhotoEditorToolbarButton: View {
