@@ -1180,11 +1180,12 @@ final class BackupService {
                 deviceAssetId: photo.id,
                 createdAt: photo.createdAt,
                 modifiedAt: photo.modifiedAt)
-            try? FileManager.default.removeItem(at: file.url)
-            if !isCurrentPreparation(photo.id, claim: claim) {
-                try? FileManager.default.removeItem(at: prepared.bodyFile)
-                return
+            var handedOff = false
+            defer {
+                if !handedOff { try? FileManager.default.removeItem(at: prepared.bodyFile) }
             }
+            try? FileManager.default.removeItem(at: file.url)
+            try checkPreparation(photo.id, claim: claim)
 
             // DISERAHKAN, bukan ditunggu.
             //
@@ -1206,10 +1207,10 @@ final class BackupService {
                     checksum: checksum,
                     taskIdentifier: uploadTask.taskIdentifier)
                 uploadTask.resume()
+                handedOff = true
                 applyQueueSnapshot()
             } catch {
                 uploadTask.cancel()
-                try? FileManager.default.removeItem(at: prepared.bodyFile)
                 throw error
             }
         } catch {
