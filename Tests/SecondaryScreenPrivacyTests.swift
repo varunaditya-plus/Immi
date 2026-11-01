@@ -119,7 +119,7 @@ final class SecondaryScreenPrivacyTests: XCTestCase {
         XCTAssertTrue(removalLibrary.favorites.allSatisfy(\.isFavorite))
     }
 
-    func testMapFiltersPrivateAndDeletedMarkersBeforeCoordinateDeduplication() throws {
+    func testMapFiltersPrivateAndDeletedMarkersWithoutDroppingColocatedVisiblePhotos() throws {
         let fixture = try fixture()
         try fixture.manager.setAssetVisibility([fixture.ids[0]], to: "locked")
         try fixture.manager.setAssetVisibility([fixture.ids[2]], to: "archive")
@@ -127,14 +127,15 @@ final class SecondaryScreenPrivacyTests: XCTestCase {
                        marker(fixture.ids[2], latitude: 25), marker(fixture.ids[3], latitude: 38)]
         DeletedServerAssetRegistry.shared.record([fixture.ids[3]], permanently: true)
 
-        let visible = MapMarkerDTO.visible(in: markers,
+        let visible = PhotoMapClustering.admitted(markers,
             policy: AssetVisibilityPolicy(scope: .timeline, dataManager: fixture.manager))
 
         XCTAssertEqual(visible.map(\.id), [fixture.ids[1]],
-                       "A private marker at the same coordinate must not consume the public marker's slot")
+                       "A private marker at the same coordinate must not hide the public photo")
         try fixture.manager.setAssetVisibility([fixture.ids[0]], to: "timeline")
-        XCTAssertEqual(MapMarkerDTO.visible(in: markers,
-            policy: AssetVisibilityPolicy(scope: .timeline, dataManager: fixture.manager)).map(\.id), [fixture.ids[0]])
+        XCTAssertEqual(PhotoMapClustering.admitted(markers,
+            policy: AssetVisibilityPolicy(scope: .timeline, dataManager: fixture.manager)).map(\.id),
+                       [fixture.ids[0], fixture.ids[1]], "Both visible photos belong in their counted map stack")
     }
 
     func testExplicitAndFallbackCoversHideLocksAndDeletionsButAllowArchives() async throws {

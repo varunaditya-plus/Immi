@@ -21,15 +21,6 @@ struct MapMarkerDTO: Codable, Identifiable, Hashable {
     let city: String?
     let state: String?
     let country: String?
-
-    @MainActor
-    static func visible(in markers: [MapMarkerDTO], policy: AssetVisibilityPolicy) -> [MapMarkerDTO] {
-        var seen = Set<String>()
-        return markers.filter { marker in
-            guard policy.allows(id: marker.id) else { return false }
-            return seen.insert(String(format: "%.2f,%.2f", marker.lat, marker.lon)).inserted
-        }
-    }
 }
 
 final class PlacesRepository {
