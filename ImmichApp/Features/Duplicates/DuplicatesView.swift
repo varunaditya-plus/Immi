@@ -129,6 +129,7 @@ struct DuplicateGroupCard: View {
     @State private var keepAssetIDs: Set<String>
     @State private var showsResolveConfirmation = false
     @State private var showsKeepAllConfirmation = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     init(
         group: DuplicateGroupDTO,
@@ -209,7 +210,10 @@ struct DuplicateGroupCard: View {
     }
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline))
+        return layout {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Similar Items")
                     .font(.headline)
@@ -217,11 +221,16 @@ struct DuplicateGroupCard: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Spacer()
+            if !dynamicTypeSize.isAccessibilitySize { Spacer() }
             if !group.suggestedKeepAssetIds.isEmpty {
-                Label("Suggested", systemImage: "sparkles")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tint)
+                Label {
+                    Text("Suggested")
+                } icon: {
+                    Image(systemName: "sparkles")
+                        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tint)
             }
         }
     }
@@ -250,20 +259,33 @@ struct DuplicateGroupCard: View {
     }
 
     private var actions: some View {
-        HStack(spacing: 10) {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: 10))
+            : AnyLayout(HStackLayout(spacing: 10))
+        return layout {
             Button {
                 showsKeepAllConfirmation = true
             } label: {
-                Label("Keep All", systemImage: "checkmark.circle")
-                    .frame(maxWidth: .infinity)
+                Label {
+                    Text("Keep All")
+                } icon: {
+                    Image(systemName: "checkmark.circle")
+                        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                }
+                .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
 
             Button(role: .destructive) {
                 showsResolveConfirmation = true
             } label: {
-                Label("Trash \(trashCount)", systemImage: "trash")
-                    .frame(maxWidth: .infinity)
+                Label {
+                    Text("Trash \(trashCount)")
+                } icon: {
+                    Image(systemName: "trash")
+                        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                }
+                .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .tint(.red)
