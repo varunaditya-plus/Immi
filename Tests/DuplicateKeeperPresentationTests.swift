@@ -18,7 +18,8 @@ final class DuplicateKeeperPresentationTests: SimulatorHostedTestCase {
         try await activateAccessibilityButton(named: "Second.jpg", in: window)
         try await waitForChoice("Second.jpg", value: "Keep", in: window)
         try await activateAccessibilityButton(named: "Trash 1", in: window)
-        try await activateAccessibilityButton(named: "Move to Trash", in: window)
+        try await activateNativeAlertAction(named: "Move to Trash", in: window)
+        try await waitUntil("The confirmed resolution uses the current keeper") { fixture.resolved != nil }
         XCTAssertEqual(fixture.resolved, [fixture.photos[1].id], "The last visible keeper must remain selected")
     }
 
@@ -35,7 +36,8 @@ final class DuplicateKeeperPresentationTests: SimulatorHostedTestCase {
         try await waitForChoice("Third.jpg", value: "Keep", in: window)
         try await waitForChoice("Second.jpg", value: "Move to Trash", in: window)
         try await activateAccessibilityButton(named: "Trash 1", in: window)
-        try await activateAccessibilityButton(named: "Move to Trash", in: window)
+        try await activateNativeAlertAction(named: "Move to Trash", in: window)
+        try await waitUntil("The confirmed resolution preserves the user's surviving keeper") { fixture.resolved != nil }
         XCTAssertEqual(fixture.resolved, [fixture.photos[2].id])
     }
 

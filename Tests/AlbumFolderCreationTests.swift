@@ -54,8 +54,7 @@ final class AlbumFolderCreationTests: SimulatorHostedTestCase {
             AlbumsListView(viewModel: model, initialScope: .shared, organizationStore: organization)
         })
         try await waitUntil("The real shared scope finishes loading") { model.hasLoadedAlbums }
-        try await activateAccessibilityButton(named: "Create", in: window)
-        try await activateAccessibilityButton(named: "New Folder", in: window)
+        try await activateSearchMenuAction(named: "New Folder", in: window, menuButton: "Create")
         var alert: UIAlertController?
         try await waitUntil("The native folder-name alert is presented") {
             alert = self.presentedController(from: window.rootViewController) as? UIAlertController
@@ -64,7 +63,7 @@ final class AlbumFolderCreationTests: SimulatorHostedTestCase {
         let field = try XCTUnwrap(alert?.textFields?.first)
         field.text = "Created folder"
         field.sendActions(for: .editingChanged)
-        try await activateAccessibilityButton(named: "Create", in: window, within: try XCTUnwrap(alert?.view))
+        try await activateNativeAlertAction(named: "Create", in: window)
         try await waitUntil("The newly created folder is saved") { organization.value.folders.count == 1 }
         let text = try await renderedText(in: window, containing: ["Created folder"])
         XCTAssertTrue(text.contains("Created folder"), "Folder creation must leave Shared so the saved folder is reachable: \(text)")
@@ -87,9 +86,7 @@ final class AlbumFolderCreationTests: SimulatorHostedTestCase {
             AlbumsListView(viewModel: model, initialScope: .shared, organizationStore: organization)
         })
         try await waitUntil("The shared scope has loaded") { model.hasLoadedAlbums }
-        try await activateAccessibilityButton(named: "More", in: window)
-        try await activateAccessibilityButton(named: "Sort", in: window)
-        try await activateAccessibilityButton(named: "Reorder Albums", in: window)
+        try await activateSearchMenuAction(named: "Reorder Albums", in: window)
         try await waitUntil("The real reorder sheet is presented") {
             self.presentedController(from: window.rootViewController) != nil
         }

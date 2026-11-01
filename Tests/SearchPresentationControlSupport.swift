@@ -4,10 +4,10 @@ import XCTest
 
 @MainActor
 extension SimulatorHostedTestCase {
-    func activateSearchMenuAction(named title: String, in window: UIWindow) async throws {
-        try await activateAccessibilityButton(named: "More", in: window)
+    func activateSearchMenuAction(named title: String, in window: UIWindow, menuButton: String = "More") async throws {
+        try await activateAccessibilityButton(named: menuButton, in: window)
         var source: (UIControl, UIAction, UIContextMenuInteraction)?
-        try await waitUntil("The actual More menu contains its enabled \(title) action") {
+        try await waitUntil("The actual \(menuButton) menu contains its enabled \(title) action") {
             for view in self.searchPresentationViews(in: window) {
                 for interaction in view.interactions.compactMap({ $0 as? UIContextMenuInteraction }) {
                     interaction.updateVisibleMenu { menu in
@@ -28,6 +28,31 @@ extension SimulatorHostedTestCase {
         XCTAssertFalse(action.attributes.contains(.disabled))
         interaction.dismissMenu()
         control.sendAction(action)
+    }
+
+    func activateNativeAlertAction(named title: String, in window: UIWindow) async throws {
+        var presented: UIAlertController?
+        try await waitUntil("The actual confirmation finishes presenting before its \(title) action") {
+            presented = self.searchPresentedControllers(in: window.rootViewController).compactMap { $0 as? UIAlertController }.first
+            return presented?.view.window === window && presented?.transitionCoordinator == nil && presented?.isBeingPresented == false
+        }
+        let alert = try XCTUnwrap(presented)
+        let action = try XCTUnwrap(alert.actions.first { $0.title == title })
+        XCTAssertTrue(action.isEnabled)
+        if let button = searchPresentationViews(in: alert.view).compactMap({ $0 as? UIButton }).first(where: {
+            $0.currentTitle == title || $0.configuration?.title == title || $0.accessibilityLabel == title
+        }) {
+            XCTAssertTrue(button.isEnabled)
+            button.sendActions(for: .touchUpInside)
+        } else {
+            alert.preferredAction = action
+            let command = try XCTUnwrap(alert.keyCommands?.first { $0.input == "\r" },
+                "The native confirmation must expose its public Return command")
+            XCTAssertTrue(UIApplication.shared.sendAction(try XCTUnwrap(command.action), to: alert, from: command, for: nil))
+        }
+        try await waitUntil("The native \(title) confirmation finishes dismissing") {
+            !self.searchPresentedControllers(in: window.rootViewController).contains { $0 === alert }
+        }
     }
 
     func deactivateNativeSearch(in controller: UIViewController?) {
