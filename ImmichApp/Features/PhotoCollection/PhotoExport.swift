@@ -111,10 +111,9 @@ enum PhotoExportService {
             throw PhotoExportError.locationRemovalFailed
         }
         let metadata = filteredMetadata(CGImageSourceCopyMetadataAtIndex(source, 0, nil))
-        var error: Unmanaged<CFError>?
         // Replacing metadata keeps compressed pixels intact; merging would restore removed source tags.
         guard CGImageDestinationCopyImageSource(destination, source,
-            [kCGImageDestinationMetadata: metadata, kCGImageMetadataShouldExcludeGPS: true] as CFDictionary, &error),
+            [kCGImageDestinationMetadata: metadata, kCGImageMetadataShouldExcludeGPS: true] as CFDictionary, nil),
             let checked = CGImageSourceCreateWithURL(file as CFURL, nil), !imageHasLocation(checked) else {
             throw PhotoExportError.locationRemovalFailed
         }
