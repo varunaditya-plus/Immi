@@ -272,6 +272,7 @@ struct PhotoMapStylePicker: View {
     @Binding var selection: PhotoMapStyle
     let bounds: PhotoMapBounds
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -284,34 +285,38 @@ struct PhotoMapStylePicker: View {
                     .buttonStyle(.plain)
                     .frame(width: 44, height: 44)
             }
-            HStack(spacing: 16) {
-                ForEach(PhotoMapStyle.allCases) { style in
-                    Button { selection = style } label: {
-                        VStack(alignment: .leading, spacing: 0) {
-                            Map(initialPosition: .region(bounds.region), interactionModes: []) {}
-                                .mapStyle(style.style)
-                                .mapControls {}
-                                .frame(height: 100)
-                                .allowsHitTesting(false)
-                                .accessibilityHidden(true)
-                            Text(style.title).font(.body).padding(12)
+            ScrollView {
+                HStack(alignment: .top, spacing: 16) {
+                    ForEach(PhotoMapStyle.allCases) { style in
+                        Button { selection = style } label: {
+                            VStack(alignment: .leading, spacing: 0) {
+                                Map(initialPosition: .region(bounds.region), interactionModes: []) {}
+                                    .mapStyle(style.style)
+                                    .mapControls {}
+                                    .frame(height: 100)
+                                    .allowsHitTesting(false)
+                                    .accessibilityHidden(true)
+                                Text(style.title).font(.body).padding(12)
+                            }
+                            .background(.background)
+                            .clipShape(.rect(cornerRadius: 10))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(selection == style ? Color.accentColor : .clear, lineWidth: 3)
+                            }
                         }
-                        .background(.background)
-                        .clipShape(.rect(cornerRadius: 10))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(selection == style ? Color.accentColor : .clear, lineWidth: 3)
-                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(style.title)
+                        .accessibilityAddTraits(selection == style ? .isSelected : [])
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(style.title)
-                    .accessibilityAddTraits(selection == style ? .isSelected : [])
                 }
+                .padding(3)
             }
-            Spacer(minLength: 0)
+            .scrollBounceBehavior(.basedOnSize)
         }
         .padding(20)
-        .presentationDetents([.medium])
+        .presentationDetents(dynamicTypeSize.isAccessibilitySize ? [.large] : [.medium, .large])
+        .presentationContentInteraction(.scrolls)
         .presentationDragIndicator(.visible)
         .presentationBackground(.regularMaterial)
     }
