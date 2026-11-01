@@ -1,0 +1,202 @@
+import XCTest
+
+@MainActor
+final class NativeConfirmationUITests: XCTestCase {
+    private var app: XCUIApplication!
+    private var server: LoopbackImmichServer!
+    private var serverURL: URL!
+
+    override func setUp() async throws {
+        try await super.setUp()
+        continueAfterFailure = false
+        server = try LoopbackImmichServer()
+        serverURL = try await server.start()
+        app = XCUIApplication(bundleIdentifier: "xyz.0xmwehehe.ImmichApp")
+        app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launch()
+        try signOutIfNeeded()
+        try login()
+    }
+
+    override func tearDown() async throws {
+        continueAfterFailure = true
+        defer {
+            app?.terminate()
+            server?.stop()
+            app = nil
+            server = nil
+        }
+        if let app, let server {
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            app.terminate()
+            app.launch()
+            try signOutIfNeeded()
+            app.terminate()
+            let state = server.snapshot()
+            XCTAssertEqual(state.uploadRequests, 0, "No test may request a device-media upload")
+            XCTAssertTrue(state.unexpectedRequests.isEmpty, "Unimplemented contracts cannot be mistaken for success: \(state.unexpectedRequests)")
+        }
+        try await super.tearDown()
+    }
+
+
+
+    func testNativeAlbumFailureAcknowledgementPreservesInputAndAllowsOneSuccessfulRetry() throws {
+        try openAlbums()
+        try tap(app.buttons["Create"])
+        try tap(menuItem("New Album"))
+        let name = app.textFields["Album Name"]
+        XCTAssertTrue(name.waitForExistence(timeout: 5))
+        try enter("   ", in: name)
+        let create = app.buttons["Create"].firstMatch
+        XCTAssertFalse(create.isEnabled)
+        let draft = "  Recovery Trip  "
+        try enter(draft, in: name)
+        let description = app.textViews["Add Description"].exists ? app.textViews["Add Description"] : app.textFields["Add Description"]
+        try enter("  Server description  ", in: description)
+        server.holdAndFailNextAlbumCreation()
+        try tap(create)
+        try wait("The real Create remains busy while its request is held") { self.server.snapshot().creationIsHeld }
+        XCTAssertFalse(create.isEnabled, "A held request must block duplicate submissions")
+        XCTAssertEqual(server.snapshot().creations.count, 1)
+        server.releaseFailedAlbumCreation()
+        let alert = app.alerts["Failed to Create Album"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        XCTAssertTrue(alert.staticTexts["Synthetic album creation failure"].exists)
+        XCTAssertFalse(server.snapshot().albumNames.contains("Recovery Trip"))
+        try tap(alert.buttons["OK"])
+        try wait("The native OK returns to the unchanged editable form") { !alert.exists && name.isHittable && create.isEnabled }
+        XCTAssertEqual(name.value as? String, draft)
+        try tap(create)
+        try wait("Retry persists one accepted album and closes the actual creation sheet") {
+            self.server.snapshot().albumNames.contains("Recovery Trip") && !name.exists
+        }
+        let expected = LoopbackImmichServer.Creation(name: "Recovery Trip", description: "Server description", assetIDs: [])
+        XCTAssertEqual(server.snapshot().creations, [expected, expected])
+        XCTAssertEqual(server.snapshot().albumNames.filter { $0 == "Recovery Trip" }.count, 1)
+        XCTAssertTrue(card("Recovery Trip").waitForExistence(timeout: 5))
+    }
+
+    private var serverField: XCUIElement { app.textFields["http://your-server-ip:port"] }
+
+    private var collectionsControl: XCUIElement {
+        let compact = app.tabBars.buttons["Collections"]
+        return compact.exists ? compact : app.buttons["Collections"].firstMatch
+    }
+
+    private func card(_ title: String) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", title)).firstMatch
+    }
+
+    private func login() throws {
+        try enter(serverURL.absoluteString, in: serverField)
+        try tap(app.buttons["Continue"])
+        try enter(LoopbackImmichServer.email, in: app.textFields["you@example.com"])
+        try enter(LoopbackImmichServer.password, in: app.secureTextFields["Required"])
+        try tap(app.buttons["Sign In"])
+        try wait("The complete app finishes its authenticated launch", timeout: 30) {
+            self.collectionsControl.exists
+        }
+        try openCollections()
+        XCTAssertTrue(app.buttons["Profile and Settings"].waitForExistence(timeout: 10))
+    }
+
+    private func signOutIfNeeded() throws {
+        if serverField.waitForExistence(timeout: 2) { return }
+        try openCollections()
+        try tap(app.buttons["Profile and Settings"])
+        let signOut = app.buttons["Sign Out"]
+        try reveal(signOut)
+        let loopback = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '127.0.0.1'")).firstMatch.exists
+        let syntheticEmail = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH '.test'")).firstMatch
+        guard syntheticEmail.exists, loopback else {
+            XCTFail("UI tests can sign out only a synthetic localhost account")
+            throw URLError(.userAuthenticationRequired)
+        }
+        try tap(signOut)
+        try confirm("Sign Out")
+        XCTAssertTrue(serverField.waitForExistence(timeout: 15))
+    }
+
+    private func openCollections() throws {
+        try tap(collectionsControl)
+        if app.staticTexts["Keep Your Photos Safe"].exists {
+            let close = app.buttons["Close"].firstMatch
+            if close.exists && close.isHittable { close.tap() }
+        }
+    }
+
+    private func openAlbums() throws {
+        try openCollections()
+        let heading = app.buttons["Albums"].firstMatch
+        try reveal(heading)
+        try tap(heading)
+        XCTAssertTrue(app.segmentedControls.buttons["Shared"].waitForExistence(timeout: 10))
+    }
+
+    private func menuItem(_ title: String) -> XCUIElement {
+        app.menuItems[title].exists ? app.menuItems[title] : app.buttons[title].firstMatch
+    }
+
+    private func confirm(_ title: String) throws {
+        try wait("A real native confirmation is visible") { self.app.alerts.firstMatch.exists || self.app.sheets.firstMatch.exists }
+        let native = app.alerts.firstMatch.exists ? app.alerts.firstMatch : app.sheets.firstMatch
+        if title == "Cancel", !native.buttons[title].exists {
+            try tap(app.otherElements["PopoverDismissRegion"])
+        } else {
+            try tap(native.buttons[title])
+        }
+        try wait("The native confirmation finishes dismissing") { !native.exists }
+    }
+
+    private func enter(_ value: String, in field: XCUIElement) throws {
+        try tap(field)
+        if let previous = field.value as? String, previous != field.placeholderValue, !previous.isEmpty {
+            field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: previous.count))
+        }
+        field.typeText(value)
+    }
+
+    private func tap(_ element: XCUIElement) throws {
+        let processes: [XCUIApplication] = [app, XCUIApplication(bundleIdentifier: "com.apple.springboard")]
+        try wait("The requested native control is enabled and hittable", timeout: 15) {
+            if element.exists && element.isHittable && element.isEnabled { return true }
+            for process in processes {
+                for prompt in [process.alerts["Save Password?"], process.sheets["Save Password?"]] {
+                    if prompt.exists {
+                        let decline = prompt.buttons["Not Now"]
+                        if decline.isHittable && decline.isEnabled { decline.tap() }
+                        return false
+                    }
+                }
+            }
+            return false
+        }
+        element.tap()
+    }
+
+    private func reveal(_ element: XCUIElement) throws {
+        for _ in 0..<10 {
+            if element.exists && element.isHittable { return }
+            app.swipeUp()
+        }
+        try wait("The requested control can be reached by normal scrolling") { element.exists && element.isHittable }
+    }
+
+
+
+    private func wait(_ message: String, timeout: TimeInterval = 10, _ condition: @escaping () -> Bool) throws {
+        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: nil)
+        guard XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed else {
+            let hierarchy = XCTAttachment(string: app.debugDescription)
+            hierarchy.name = message
+            hierarchy.lifetime = .keepAlways
+            add(hierarchy)
+            XCTFail(message)
+            throw URLError(.timedOut)
+        }
+    }
+}
