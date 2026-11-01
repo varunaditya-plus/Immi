@@ -11,6 +11,7 @@ struct AlbumsListView: View {
     private let folderID: String?
 
     @Environment(SessionManager.self) private var session
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var vm: AlbumListViewModel?
     @State private var scope: Scope = .personal
     @State private var searchText = ""
@@ -412,18 +413,18 @@ struct AlbumsListView: View {
     private static let gridSpacing: CGFloat = 12
     private static let gridHorizontalPadding: CGFloat = 16
 
-    /// Dua kolom tetap menjadi batas bawah agar iPhone mempertahankan tampilan
-    /// yang sekarang. Ruang ekstra menambah kolom satu per satu sampai empat;
-    /// perhitungannya memakai lebar container, jadi ikut beradaptasi saat
-    /// sidebar atau multitasking mengubah lebar area detail iPad.
+    /// Accessibility captions need wider cards while ordinary text keeps the
+    /// existing two-column minimum. Use the actual detail width after sidebars.
     private func gridColumns(for containerWidth: CGFloat) -> [GridItem] {
         let availableWidth = max(0, containerWidth - Self.gridHorizontalPadding * 2)
+        let minimumWidth: CGFloat = dynamicTypeSize.isAccessibilitySize ? 300 : Self.minimumAlbumCardWidth
+        let minimumColumns = dynamicTypeSize.isAccessibilitySize ? 1 : Self.minimumGridColumns
         let fittingCount = Int(
             (availableWidth + Self.gridSpacing)
-                / (Self.minimumAlbumCardWidth + Self.gridSpacing))
+                / (minimumWidth + Self.gridSpacing))
         let count = min(
             Self.maximumGridColumns,
-            max(Self.minimumGridColumns, fittingCount))
+            max(minimumColumns, fittingCount))
 
         return Array(
             repeating: GridItem(.flexible(), spacing: Self.gridSpacing),
