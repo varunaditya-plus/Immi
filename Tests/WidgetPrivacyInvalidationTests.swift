@@ -179,6 +179,44 @@ final class WidgetPrivacyInvalidationTests: XCTestCase {
         XCTAssertEqual(generations.count, 1, "The superseded refresh must discard its staged image directory")
     }
 
+    func testOfflineMetadataRefreshPreservesThePublishedSnapshotAndReferencedImages() async throws {
+        let directory = try temporaryDirectory()
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let api = try makeAPI(assetID: "offline-favorite")
+        await WidgetSnapshotExporter.refresh(api: api, imageAPI: api, container: directory, selectedAlbumIDs: [])
+        let url = directory.appendingPathComponent("Widgets/snapshot.json")
+        let published = try Data(contentsOf: url)
+        let image = directory.appendingPathComponent("Widgets").appendingPathComponent(try XCTUnwrap(imageNames(in: directory).first))
+        let offline = try makeAPI(metadataFailure: true)
+
+        await WidgetSnapshotExporter.refresh(api: offline, imageAPI: offline,
+            container: directory, selectedAlbumIDs: [])
+
+        XCTAssertEqual(try Data(contentsOf: url), published)
+        XCTAssertEqual(try Data(contentsOf: image), Data([1, 2, 3]))
+        let downloads = await offline.thumbnailCount.value
+        XCTAssertEqual(downloads, 0)
+    }
+
+    func testConfirmedEmptyWidgetResultsReplaceOldPhotosAndOfflineCannotRestoreClearedWidgets() async throws {
+        let directory = try temporaryDirectory()
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let api = try makeAPI()
+        await WidgetSnapshotExporter.refresh(api: api, imageAPI: api, container: directory, selectedAlbumIDs: [])
+        XCTAssertEqual(try imageNames(in: directory).count, 1)
+        let empty = WidgetPrivacyAPI(session: api.session, imageGate: nil, metadataGate: nil,
+            assetIDs: [], includesCollections: false)
+
+        await WidgetSnapshotExporter.refresh(api: empty, imageAPI: empty, container: directory, selectedAlbumIDs: [])
+
+        XCTAssertTrue(try imageNames(in: directory).isEmpty, "A successful empty response must still clear the old photo selection")
+        WidgetSnapshotExporter.clear(container: directory)
+        let offline = try makeAPI(metadataFailure: true)
+        await WidgetSnapshotExporter.refresh(api: offline, imageAPI: offline, container: directory, selectedAlbumIDs: [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("Widgets").path),
+            "Retaining offline widgets must never resurrect a cleared private snapshot")
+    }
+
     func testLateUneditedThumbnailCannotReplaceAWidgetPublishedAfterALocalEdit() async throws {
         let directory = try temporaryDirectory()
         let owner = BackupQueueOwner(server: "https://widget-edit.example.invalid/api", userID: "synthetic-\(UUID())")
@@ -550,12 +588,13 @@ final class WidgetPrivacyInvalidationTests: XCTestCase {
     private func makeAPI(
         imageGate: WidgetPrivacyGate? = nil, metadataGate: WidgetPrivacyGate? = nil,
         assetID: String = "was-visible", additionalAssetIDs: [String] = [],
-        includesCollections: Bool = false
+        includesCollections: Bool = false, metadataFailure: Bool = false
     ) throws -> WidgetPrivacyAPI {
         let session = MockSessionManager()
         try session.setServer("https://widget-privacy.test")
         return WidgetPrivacyAPI(session: session, imageGate: imageGate, metadataGate: metadataGate,
-            assetIDs: [assetID] + additionalAssetIDs, includesCollections: includesCollections)
+            assetIDs: [assetID] + additionalAssetIDs, includesCollections: includesCollections,
+            metadataFailure: metadataFailure)
     }
 
     private func imageNames(in directory: URL) throws -> [String] {
@@ -603,17 +642,21 @@ private final class WidgetPrivacyAPI: APIClient {
     private let assetIDs: [String]
     private let includesCollections: Bool
     private let imageBytes: Data
+    private let metadataFailure: Bool
     @MainActor
     init(session: SessionManager, imageGate: WidgetPrivacyGate?, metadataGate: WidgetPrivacyGate?,
-         assetIDs: [String], includesCollections: Bool, imageBytes: Data = Data([1, 2, 3])) {
+         assetIDs: [String], includesCollections: Bool, imageBytes: Data = Data([1, 2, 3]),
+         metadataFailure: Bool = false) {
         self.imageGate = imageGate
         self.metadataGate = metadataGate
         self.assetIDs = assetIDs
         self.includesCollections = includesCollections
         self.imageBytes = imageBytes
+        self.metadataFailure = metadataFailure
         super.init(session: session)
     }
     override func send<T: Decodable>(_ endpoint: Endpoint) async throws -> T {
+        if metadataFailure { throw URLError(.notConnectedToInternet) }
         let assets: [[String: Any]] = assetIDs.map { id in [
             "id": id, "type": "IMAGE", "originalFileName": "photo.jpg",
             "fileCreatedAt": "2020-01-01T00:00:00Z", "localDateTime": "2020-01-01T00:00:00Z",

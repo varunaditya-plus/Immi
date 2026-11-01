@@ -71,6 +71,7 @@ enum WidgetSnapshotExporter {
             fetchedAlbums, fetchedMemories, fetchedFavorites)
         guard expectedRevision == visibilityRevision, expectedEditRevision == MediaEditStore.shared.revision,
               (try? api.checkCurrent(context)) != nil else { return }
+        guard allAlbums != nil || allMemories != nil || favoritesResponse != nil else { return }
 
         let albums = (allAlbums ?? LocalSnapshot.load(
             [AlbumResponseDTO].self,
