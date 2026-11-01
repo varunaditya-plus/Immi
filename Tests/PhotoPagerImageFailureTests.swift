@@ -68,6 +68,26 @@ final class PhotoPagerImageFailureTests: SimulatorHostedTestCase {
         XCTAssertEqual(loader.requests, [first.id, first.id, next.id])
     }
 
+    func testARecoveredFullPreviewCacheClearsTheSamePhotosFailureWithoutAnotherRequest() async throws {
+        let photo = AssetLite(makeTestAsset(id: UUID().uuidString))
+        let loader = ImageFailurePreviewLoader()
+        let (cell, _) = try await show(photo, loader: loader)
+        try await waitUntil("The initial missing preview exposes its real failure") {
+            self.searchContainsText("Photo Unavailable", in: cell)
+        }
+        let recovered = image(.green)
+        loader.cached = recovered
+        loader.fullPreview = true
+
+        cell.configure(with: photo, loader: loader)
+
+        try await waitUntil("A full cached recovery replaces the failure with its actual image") {
+            self.images(in: cell).contains { $0 === recovered }
+                && !self.searchContainsText("Photo Unavailable", in: cell)
+        }
+        XCTAssertEqual(loader.requests, [photo.id])
+    }
+
     private func show(_ asset: AssetLite, loader: ImageFailurePreviewLoader,
                       style: UIUserInterfaceStyle = .light) async throws -> (PhotoPagerCell, UIWindow) {
         let cell = PhotoPagerCell(frame: .zero)
@@ -95,12 +115,14 @@ final class PhotoPagerImageFailureTests: SimulatorHostedTestCase {
 @MainActor
 private final class ImageFailurePreviewLoader: PhotoPreviewLoader {
     var load: (String) async -> UIImage? = { _ in nil }
+    var cached: UIImage?
+    var fullPreview = false
     private(set) var requests: [String] = []
     private(set) var returns = 0
 
     init() { super.init(session: MockSessionManager()) }
-    override func cachedImage(for assetId: String) -> UIImage? { nil }
-    override func hasPreview(for assetId: String) -> Bool { false }
+    override func cachedImage(for assetId: String) -> UIImage? { cached }
+    override func hasPreview(for assetId: String) -> Bool { fullPreview }
     override func image(for assetId: String) async -> UIImage? {
         requests.append(assetId)
         defer { returns += 1 }

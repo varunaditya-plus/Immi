@@ -512,7 +512,9 @@ final class PhotoPagerCell: UICollectionViewCell {
         setImage(cached ?? ThumbHash.placeholder(for: asset.thumbhash), isAnalyzable: cached != nil,
             context: imageContext(for: asset.id, loader: loader))
 
-        guard !loader.hasPreview(for: asset.id) else { return }
+        let hasPreview = loader.hasPreview(for: asset.id)
+        if hasPreview, cached != nil, imageLoadFailed { hidePlaybackFailure() }
+        guard !hasPreview else { return }
         startLoad(asset.id, loader: loader)
     }
 
