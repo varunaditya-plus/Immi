@@ -52,7 +52,7 @@ final class NewAlbumPresentationTests: SimulatorHostedTestCase {
                 && self.searchContainsText("Synthetic server rejection", in: window)
         }
         XCTAssertTrue(fixture.isPresented)
-        try await activateAccessibilityButton(named: "OK", in: window)
+        try await activateNativeAlertAction(named: "OK", in: window)
         fixture.save = { nil }
         try await activateAccessibilityButton(named: "Create", in: window)
         try await waitUntil("Retrying the unchanged form succeeds") { !fixture.isPresented }
