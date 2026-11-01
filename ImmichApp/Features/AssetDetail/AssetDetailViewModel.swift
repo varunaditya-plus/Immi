@@ -412,13 +412,14 @@ final class AssetDetailViewModel {
     }
 
     @discardableResult
-    func setProfileImage(_ data: Data, filename: String) async -> Bool {
+    func setProfileImage(_ data: Data, filename: String, isAllowed: @MainActor () -> Bool) async -> Bool {
+        guard snapshotGeneration == LocalSnapshot.generation, !Task.isCancelled, isAllowed() else { return false }
         let selected = selection
         do {
             try await repo.setProfileImage(data, filename: filename)
-            return snapshotGeneration == LocalSnapshot.generation && !Task.isCancelled
+            return snapshotGeneration == LocalSnapshot.generation && !Task.isCancelled && isAllowed()
         } catch {
-            if snapshotGeneration == LocalSnapshot.generation, !Task.isCancelled, selection == selected {
+            if snapshotGeneration == LocalSnapshot.generation, !Task.isCancelled, selection == selected, isAllowed() {
                 actionError = ErrorEvent(Self.describe(error))
             }
             return false

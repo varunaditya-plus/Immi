@@ -25,6 +25,7 @@ struct AssetDetailView: View {
     /// memuat ulang timeline.
     var onFavoriteChanged: ((String, Bool) -> Void)? = nil
     private let saveDeviceFile: DeviceFileSaver
+    private let profileImageData: @MainActor (URL) async -> Data?
 
     @Environment(SessionManager.self) private var session
     @Environment(\.dismiss) private var dismiss
@@ -135,7 +136,8 @@ struct AssetDetailView: View {
         recentlyViewedStore: RecentlyViewedStore? = nil,
         saveDeviceFile: @escaping DeviceFileSaver = { file, isVideo, isAllowed in
             await LocalPhotoLibrary.shared.saveDownloadedFile(file, isVideo: isVideo, isAllowed: isAllowed)
-        }
+        },
+        profileImageData: (@MainActor (URL) async -> Data?)? = nil
     ) {
         _viewer = State(initialValue: AssetViewerState(currentAsset: currentAsset, assets: assets))
         _vm = State(initialValue: viewModel)
@@ -148,6 +150,7 @@ struct AssetDetailView: View {
         self.onFavoriteChanged = onFavoriteChanged
         self.trashActions = trashActions
         self.saveDeviceFile = saveDeviceFile
+        self.profileImageData = profileImageData ?? { await Self.profileJPEG(from: $0) }
     }
 
     private var currentAsset: AssetLite {
@@ -1327,10 +1330,10 @@ struct AssetDetailView: View {
         let generation = LocalSnapshot.generation
         let context = session.snapshot
         viewer.prepare(target, kind: .copy, operation: { () async -> [MediaCopy.Item]? in
-            guard copyIsCurrent(target, generation: generation, context: context) else { return nil }
+            guard fileActionIsCurrent(target, generation: generation, context: context) else { return nil }
             vm?.actionError = nil
             guard let file = await fileURL(for: target) else {
-                if copyIsCurrent(target, generation: generation, context: context), vm?.actionError == nil {
+                if fileActionIsCurrent(target, generation: generation, context: context), vm?.actionError == nil {
                     vm?.actionError = ErrorEvent(MediaCopy.CopyError.unavailable.localizedDescription)
                 }
                 return nil
@@ -1339,18 +1342,18 @@ struct AssetDetailView: View {
             do {
                 return try await MediaCopy.prepare([.init(url: file, isVideo: PhotoExportService.contentType(of: file).conforms(to: .movie))])
             } catch {
-                if copyIsCurrent(target, generation: generation, context: context), !(error is CancellationError) {
+                if fileActionIsCurrent(target, generation: generation, context: context), !(error is CancellationError) {
                     vm?.actionError = ErrorEvent(error.localizedDescription)
                 }
                 return nil
             }
         }) { items in
-            guard copyIsCurrent(target, generation: generation, context: context) else { return }
+            guard fileActionIsCurrent(target, generation: generation, context: context) else { return }
             MediaCopy.write(items)
         }
     }
 
-    private func copyIsCurrent(_ target: AssetViewerState.Target, generation: UUID, context: SessionRequestContext) -> Bool {
+    private func fileActionIsCurrent(_ target: AssetViewerState.Target, generation: UUID, context: SessionRequestContext) -> Bool {
         !Task.isCancelled && generation == LocalSnapshot.generation && viewer.isCurrent(target)
             && (try? APIClient(session: session).checkCurrent(context)) != nil
             && serverAssetID(for: target.asset) == target.serverID
@@ -1966,24 +1969,26 @@ struct AssetDetailView: View {
         let target = currentTarget
         guard !target.asset.isVideo, !isSettingProfilePhoto, let vm else { return }
         let accountGeneration = LocalSnapshot.generation
+        let requestContext = session.snapshot
+        let isAllowed: @MainActor @Sendable () -> Bool = {
+            fileActionIsCurrent(target, generation: accountGeneration, context: requestContext)
+        }
+        guard isAllowed() else { return }
         isSettingProfilePhoto = true
         Task {
             defer { isSettingProfilePhoto = false }
             guard let file = await fileURL(for: target) else {
-                if viewer.isCurrent(target), accountGeneration == LocalSnapshot.generation,
-                   !Task.isCancelled { vm.actionError = ErrorEvent(String(localized: "Could not prepare the profile photo.")) }
+                if isAllowed() { vm.actionError = ErrorEvent(String(localized: "Could not prepare the profile photo.")) }
                 return
             }
             defer { TemporaryMediaStore.remove(file) }
-            guard viewer.isCurrent(target), accountGeneration == LocalSnapshot.generation else { return }
-            guard let jpeg = await Self.profileJPEG(from: file) else {
-                if viewer.isCurrent(target), accountGeneration == LocalSnapshot.generation,
-                   !Task.isCancelled { vm.actionError = ErrorEvent(String(localized: "Could not prepare the profile photo.")) }
+            guard isAllowed() else { return }
+            guard let jpeg = await profileImageData(file) else {
+                if isAllowed() { vm.actionError = ErrorEvent(String(localized: "Could not prepare the profile photo.")) }
                 return
             }
-            guard viewer.isCurrent(target), accountGeneration == LocalSnapshot.generation else { return }
-            guard await vm.setProfileImage(jpeg, filename: "profile.jpg") else { return }
-            guard accountGeneration == LocalSnapshot.generation else { return }
+            guard isAllowed(), await vm.setProfileImage(jpeg, filename: "profile.jpg", isAllowed: isAllowed) else { return }
+            guard isAllowed() else { return }
             await session.refreshUser()
         }
     }
