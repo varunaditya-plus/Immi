@@ -1,3 +1,4 @@
+import Observation
 import SwiftUI
 import UIKit
 import Vision
@@ -51,6 +52,40 @@ final class AlbumPickerRecoveryTests: SimulatorHostedTestCase {
         XCTAssertEqual(repository.reads, 1)
     }
 
+    func testReturningBeforeACancelledRequestFinishesKeepsTheReplacementPickerAfterLateSuccessOrFailure() async throws {
+        for oldRequestFails in [false, true] {
+            let repository = CancelledAlbumPickerRepository(api: makeStubAPIClient())
+            defer { repository.gate.complete(.success([])) }
+            let navigation = AlbumPickerNavigationState()
+            let window = try await host(NavigationStack {
+                AlbumPickerLoader(onSelect: { _ in XCTFail("This test never selects a photo album") }, repository: repository)
+                    .navigationDestination(isPresented: Binding(get: { navigation.isCovered }, set: { navigation.isCovered = $0 })) {
+                        Text("Another screen")
+                    }
+            })
+            await fulfillment(of: [repository.gate.started], timeout: 2)
+            navigation.isCovered = true
+            await fulfillment(of: [repository.cancelled], timeout: 2)
+            XCTAssertFalse(repository.returned, "The old request must stay suspended across the return navigation")
+
+            navigation.isCovered = false
+
+            let recovered = try await renderedText(in: window, containing: "Recovered album")
+            XCTAssertTrue(recovered.contains("Recovered album"), "The returning picker must replace the still-suspended cancelled request: \(recovered)")
+            XCTAssertEqual(repository.reads, 2)
+            XCTAssertFalse(repository.returned)
+            if oldRequestFails { repository.gate.complete(.failure(URLError(.badServerResponse))) }
+            else { repository.gate.complete(.success([])) }
+            try await waitUntil("The obsolete request actually completes after the replacement is visible") { repository.returned }
+
+            let retained = try await renderedText(in: window, containing: "Recovered album")
+            XCTAssertTrue(retained.contains("Recovered album"), retained)
+            XCTAssertFalse(retained.contains("No Albums"), retained)
+            XCTAssertFalse(retained.contains("Failed to Load"), retained)
+            XCTAssertEqual(repository.reads, 2)
+        }
+    }
+
     private func renderedText(in window: UIWindow, containing expected: String) async throws -> String {
         let deadline = Date().addingTimeInterval(4)
         var text = ""
@@ -99,5 +134,38 @@ private final class RecoveringAlbumPickerRepository: AlbumRepository {
     override func all() async throws -> [AlbumResponseDTO] {
         reads += 1
         return try result.get()
+    }
+}
+
+@MainActor
+@Observable
+private final class AlbumPickerNavigationState {
+    var isCovered = false
+}
+
+private final class CancelledAlbumPickerRepository: AlbumRepository {
+    let gate: PeopleStateGate<[AlbumResponseDTO]>
+    let cancelled = XCTestExpectation(description: "Leaving the picker cancels its real view task")
+    private(set) var reads = 0
+    private(set) var returned = false
+
+    @MainActor
+    init(api: APIClient) {
+        gate = PeopleStateGate<[AlbumResponseDTO]>()
+        super.init(api: api)
+    }
+
+    override func all() async throws -> [AlbumResponseDTO] {
+        reads += 1
+        if reads == 1 {
+            defer { returned = true }
+            return try await withTaskCancellationHandler {
+                try await gate.value()
+            } onCancel: { [cancelled] in
+                cancelled.fulfill()
+            }
+        }
+        return [AlbumResponseDTO(id: UUID().uuidString, albumName: "Recovered album", description: nil,
+            assetCount: 0, albumThumbnailAssetId: nil, shared: false, createdAt: .distantPast, assets: nil)]
     }
 }

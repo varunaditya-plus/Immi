@@ -220,6 +220,8 @@ struct AlbumPickerLoader: View {
     @Environment(SessionManager.self) private var session
     @Environment(\.dismiss) private var dismiss
     @State private var phase: LoadingPhase<[AlbumResponseDTO]> = .idle
+    @State private var retryRevision = UUID()
+    @State private var loadRequest = UUID()
 
     var body: some View {
         Group {
@@ -234,7 +236,7 @@ struct AlbumPickerLoader: View {
                             } description: {
                                 Text(message)
                             } actions: {
-                                Button("Retry") { Task { await load() } }
+                                Button("Retry") { retryRevision = UUID() }
                                     .buttonStyle(.borderedProminent)
                             }
                         } else {
@@ -252,19 +254,22 @@ struct AlbumPickerLoader: View {
                 }
             }
         }
-        .task { await load() }
+        .task(id: retryRevision) { await load() }
     }
 
     private func load() async {
-        guard !phase.isLoading else { return }
+        guard !Task.isCancelled else { return }
+        let request = UUID()
+        loadRequest = request
         let generation = LocalSnapshot.generation
         phase = .loading
         do {
             let albums = try await (repository ?? AlbumRepository(api: APIClient(session: session))).all()
-            guard !Task.isCancelled, generation == LocalSnapshot.generation else { return }
+            guard generation == LocalSnapshot.generation, loadRequest == request else { return }
+            try Task.checkCancellation()
             phase = .loaded(albums)
         } catch {
-            guard generation == LocalSnapshot.generation else { return }
+            guard generation == LocalSnapshot.generation, loadRequest == request else { return }
             if Task.isCancelled || error is CancellationError {
                 phase = .idle
             } else {
