@@ -42,6 +42,39 @@ final class NativeConfirmationUITests: XCTestCase {
         try await super.tearDown()
     }
 
+    func testNativeFolderCreationFromSharedRemainsReachableAndKeepsSharedAlbumsAfterMovingThem() throws {
+        try openAlbums()
+        try tap(app.segmentedControls.buttons["Shared"])
+        try tap(app.buttons["Create"])
+        try tap(menuItem("New Folder"))
+        let alert = app.alerts["New Folder"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        let folderName = "Created folder"
+        try enter(folderName, in: alert.textFields.firstMatch)
+        try tap(alert.buttons["Create"])
+        try wait("The native folder confirmation dismisses") { !alert.exists }
+        try wait("Creation reveals Personal, rather than leaving an invisible folder in Shared") {
+            self.app.segmentedControls.buttons["Personal"].isSelected
+                && self.card(folderName).isHittable
+        }
+
+        app.terminate()
+        app.launch()
+        try openAlbums()
+        try wait("The created local folder survives a real app relaunch") { self.card(folderName).isHittable }
+        try tap(app.segmentedControls.buttons["Shared"])
+        let shared = card(LoopbackImmichServer.sharedAlbumName)
+        try reveal(shared)
+        shared.press(forDuration: 0.8)
+        try tap(menuItem("Move to Folder"))
+        try tap(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", folderName)).firstMatch)
+        try wait("A shared album stays visible after moving into a personal folder") { shared.isHittable }
+        try tap(app.segmentedControls.buttons["Personal"])
+        try tap(card(folderName))
+        try wait("The folder contains the moved shared album") { shared.isHittable }
+        XCTAssertTrue(server.snapshot().creations.isEmpty, "Local folder organization must not create a server album")
+        XCTAssertEqual(Set(server.snapshot().albumNames), Set(["Personal Trip", LoopbackImmichServer.sharedAlbumName]))
+    }
 
 
     func testNativeAlbumFailureAcknowledgementPreservesInputAndAllowsOneSuccessfulRetry() throws {
