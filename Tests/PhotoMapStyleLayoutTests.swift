@@ -27,7 +27,7 @@ final class PhotoMapStyleLayoutTests: SimulatorHostedTestCase {
             window.layoutIfNeeded()
             try await activateAccessibilityButton(named: "Satellite", in: window)
             XCTAssertEqual(selection, .satellite)
-            let close = try XCTUnwrap(button(named: "Close", in: window))
+            let close = try XCTUnwrap(accessibilityButton(named: "Close", in: window))
             XCTAssertTrue(window.bounds.contains(window.convert(close.accessibilityFrame, from: nil)),
                 "The pinned Close control must remain on screen while the choices scroll")
             _ = try await screenshot(window)
@@ -41,26 +41,4 @@ final class PhotoMapStyleLayoutTests: SimulatorHostedTestCase {
 
     private func descendants(_ view: UIView) -> [UIView] { [view] + view.subviews.flatMap(descendants) }
 
-    private func button(named name: String, in object: NSObject) -> NSObject? {
-        var seen = Set<ObjectIdentifier>()
-        func find(_ object: NSObject, depth: Int) -> NSObject? {
-            guard depth < 40, seen.insert(ObjectIdentifier(object)).inserted else { return nil }
-            if object.accessibilityLabel == name, object.accessibilityTraits.contains(.button) { return object }
-            if let view = object as? UIView {
-                for child in view.subviews { if let found = find(child, depth: depth + 1) { return found } }
-            }
-            if let elements = object.accessibilityElements {
-                for case let child as NSObject in elements { if let found = find(child, depth: depth + 1) { return found } }
-            }
-            let count = object.accessibilityElementCount()
-            if (1...500).contains(count) {
-                for index in 0..<count {
-                    if let child = object.accessibilityElement(at: index) as? NSObject,
-                       let found = find(child, depth: depth + 1) { return found }
-                }
-            }
-            return nil
-        }
-        return find(object, depth: 0)
-    }
 }

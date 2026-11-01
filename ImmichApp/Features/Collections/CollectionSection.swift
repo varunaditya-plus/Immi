@@ -95,8 +95,6 @@ struct CollectionSection<Destination: View, Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            // Section kosong tetap menjadi pintu ke layar lengkapnya, tetapi
-            // tidak menawarkan aksi lipat untuk isi yang memang tidak ada.
             if isExpanded, showsLoadError {
                 HStack {
                     Label("Failed to Load", systemImage: "exclamationmark.triangle")
