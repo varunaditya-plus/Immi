@@ -75,6 +75,91 @@ final class AssistiveAccessLifecycleTests: XCTestCase {
         XCTAssertFalse(model.isLoading)
     }
 
+    func testAnOlderPreferenceLoadCannotOverwriteTheNewerAlbumOrGlobalFavoritesSnapshot() async throws {
+        let originalFavorite = AssetLite(asset("cached-favorite")), oldFavorite = asset("old-favorite")
+        let oldPhoto = asset("old-album"), newPhoto = asset("new-album")
+        let oldAlbum = albumID(), newAlbum = albumID()
+        LocalSnapshot.save([originalFavorite], for: LocalSnapshot.Key.favorites)
+        let reads = try respond(["favorites": [oldFavorite], oldAlbum: [oldPhoto], newAlbum: [newPhoto]])
+        let firstSync = gate(), secondSync = gate()
+        let sequence = AssistiveSyncSequence([firstSync, secondSync])
+        let model = AssistiveAccessViewModel(api: api, dataManager: manager, performSync: { await sequence.run() })
+        let old = Task { await model.load(showsFavorites: true, albumID: oldAlbum) }
+        addTeardownBlock { await firstSync.complete(.success(())); await old.value }
+        await fulfillment(of: [firstSync.started, try XCTUnwrap(reads["favorites"]), try XCTUnwrap(reads[oldAlbum])], timeout: 2)
+        let current = Task { await model.load(showsFavorites: false, albumID: newAlbum) }
+        addTeardownBlock { await secondSync.complete(.success(())); await current.value }
+        await fulfillment(of: [secondSync.started, try XCTUnwrap(reads[newAlbum])], timeout: 2)
+        XCTAssertTrue(model.favorites.isEmpty)
+
+        secondSync.complete(.success(()))
+        await current.value
+        XCTAssertEqual(model.album.map(\.id), [newPhoto.id])
+        XCTAssertEqual(snapshot(LocalSnapshot.Key.album(newAlbum)), [newPhoto.id])
+        XCTAssertEqual(snapshot(LocalSnapshot.Key.favorites), [originalFavorite.id],
+            "Disabling an Assistive shortcut must not erase the app-wide offline Favorites cache")
+        firstSync.complete(.success(()))
+        await old.value
+
+        XCTAssertTrue(model.favorites.isEmpty)
+        XCTAssertEqual(model.album.map(\.id), [newPhoto.id])
+        XCTAssertEqual(snapshot(LocalSnapshot.Key.album(newAlbum)), [newPhoto.id])
+        XCTAssertNil(LocalSnapshot.load([AssetLite].self, for: LocalSnapshot.Key.album(oldAlbum)))
+        XCTAssertEqual(snapshot(LocalSnapshot.Key.favorites), [originalFavorite.id])
+        XCTAssertFalse(model.isLoading)
+    }
+
+    func testAnOlderLoadFinishingFirstCannotClearTheNewerLoadsBusyState() async throws {
+        let firstAlbum = albumID(), secondAlbum = albumID()
+        let oldPhoto = asset("old"), currentPhoto = asset("current")
+        let reads = try respond([firstAlbum: [oldPhoto], secondAlbum: [currentPhoto]])
+        let firstSync = gate(), secondSync = gate()
+        let sequence = AssistiveSyncSequence([firstSync, secondSync])
+        let model = AssistiveAccessViewModel(api: api, dataManager: manager, performSync: { await sequence.run() })
+        let first = Task { await model.load(showsFavorites: false, albumID: firstAlbum) }
+        addTeardownBlock { await firstSync.complete(.success(())); await first.value }
+        await fulfillment(of: [firstSync.started, try XCTUnwrap(reads[firstAlbum])], timeout: 2)
+        let second = Task { await model.load(showsFavorites: false, albumID: secondAlbum) }
+        addTeardownBlock { await secondSync.complete(.success(())); await second.value }
+        await fulfillment(of: [secondSync.started, try XCTUnwrap(reads[secondAlbum])], timeout: 2)
+        XCTAssertTrue(model.isLoading)
+
+        firstSync.complete(.success(()))
+        await first.value
+
+        XCTAssertTrue(model.isLoading, "The current held request still owns the loading indicator")
+        XCTAssertTrue(model.album.isEmpty)
+        XCTAssertNil(LocalSnapshot.load([AssetLite].self, for: LocalSnapshot.Key.album(firstAlbum)))
+        secondSync.complete(.success(()))
+        await second.value
+        XCTAssertFalse(model.isLoading)
+        XCTAssertEqual(model.album.map(\.id), [currentPhoto.id])
+    }
+
+    func testCancelledLoadDoesNotPublishCompletedHTTPResultsOrAReloadedSyncCache() async throws {
+        let cached = asset("cached"), fresh = asset("fresh"), synced = asset("synced")
+        try manager.restoreToTimeline([AssetLite(cached)])
+        LocalSnapshot.save([AssetLite(cached)], for: LocalSnapshot.Key.favorites)
+        let reads = try respond(["favorites": [fresh]])
+        let held = gate()
+        let model = AssistiveAccessViewModel(api: api, dataManager: manager, performSync: { _ = try? await held.value() })
+        let pending = Task { await model.load(showsFavorites: true, albumID: "") }
+        addTeardownBlock { await held.complete(.success(())); await pending.value }
+        await fulfillment(of: [held.started, try XCTUnwrap(reads["favorites"])], timeout: 2)
+        XCTAssertEqual(model.photos.map(\.id), [cached.id])
+        XCTAssertEqual(model.favorites.map(\.id), [cached.id])
+        try manager.restoreToTimeline([AssetLite(synced)])
+
+        pending.cancel()
+        held.complete(.success(()))
+        await pending.value
+
+        XCTAssertEqual(model.photos.map(\.id), [cached.id], "Cancellation cannot restore a newer sync cache into the abandoned load")
+        XCTAssertEqual(model.favorites.map(\.id), [cached.id])
+        XCTAssertEqual(snapshot(LocalSnapshot.Key.favorites), [cached.id])
+        XCTAssertFalse(model.isLoading)
+    }
+
     func testAccountGenerationImmediatelyHidesAllCachedResultsAndRejectsAHeldCompletion() async throws {
         let cached = asset("cached"), late = asset("late"), album = albumID()
         try manager.restoreToTimeline([AssetLite(cached)])
@@ -215,5 +300,19 @@ final class AssistiveAccessLifecycleTests: XCTestCase {
         }
         guard let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any], body["page"] as? Int == 1 else { return nil }
         return (body["albumIds"] as? [String])?.first ?? (body["isFavorite"] as? Bool == true ? "favorites" : nil)
+    }
+}
+
+@MainActor
+private final class AssistiveSyncSequence {
+    private let gates: [PeopleStateGate<Void>]
+    private var index = 0
+    init(_ gates: [PeopleStateGate<Void>]) { self.gates = gates }
+
+    func run() async {
+        guard gates.indices.contains(index) else { XCTFail("An unexpected sync started"); return }
+        let gate = gates[index]
+        index += 1
+        _ = try? await gate.value()
     }
 }

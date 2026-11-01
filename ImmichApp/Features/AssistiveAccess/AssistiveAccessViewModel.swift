@@ -10,6 +10,7 @@ final class AssistiveAccessViewModel {
     private var loadedFavorites: [AssetLite] = []
     private var loadedAlbum: [AssetLite] = []
     private var loading = false
+    private var loadID = UUID()
 
     var photos: [AssetLite] { admitted(loadedPhotos, scope: .timeline) }
     var favorites: [AssetLite] { admitted(loadedFavorites, scope: .timeline) }
@@ -48,7 +49,9 @@ final class AssistiveAccessViewModel {
     /// Cache lokal dipasang lebih dulu. Network refresh berjalan bersamaan dan
     /// kegagalannya tidak membuang foto yang masih sah untuk dilihat offline.
     func load(showsFavorites: Bool, albumID: String) async {
-        guard isCurrent else { return }
+        guard isCurrent, !Task.isCancelled else { return }
+        let request = UUID()
+        loadID = request
         restorePhotos()
         if showsFavorites {
             let cached = LocalSnapshot.load(
@@ -69,7 +72,7 @@ final class AssistiveAccessViewModel {
         loading = photos.isEmpty
             || (showsFavorites && favorites.isEmpty)
             || (!albumID.isEmpty && album.isEmpty)
-        defer { loading = false }
+        defer { if loadID == request { loading = false } }
 
         async let sync: Void = performSync()
         async let refreshedFavorites = fetchFavorites(if: showsFavorites)
@@ -77,7 +80,7 @@ final class AssistiveAccessViewModel {
 
         let (_, favoriteResult, albumResult) = await (
             sync, refreshedFavorites, refreshedAlbum)
-        guard isCurrent else { return }
+        guard isCurrent, !Task.isCancelled, loadID == request else { return }
 
         restorePhotos()
         if let favoriteResult {
