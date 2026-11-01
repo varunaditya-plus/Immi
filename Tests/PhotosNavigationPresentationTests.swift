@@ -39,14 +39,19 @@ final class PhotosNavigationPresentationTests: SimulatorHostedTestCase {
             let bar = try XCTUnwrap(navigation?.navigationBar)
             let image = try await screenshot(window)
             let region = bar.convert(bar.bounds, to: window).intersection(window.bounds)
-            let crop = try XCTUnwrap(image.cgImage?.cropping(to: CGRect(x: region.minX * image.scale,
-                y: region.minY * image.scale, width: region.width * image.scale, height: region.height * image.scale)))
+            XCTAssertFalse(region.isEmpty, "The actual navigation bar must occupy a visible region")
             let request = VNRecognizeTextRequest()
             request.recognitionLevel = .accurate
             request.recognitionLanguages = ["en-US"]
-            try VNImageRequestHandler(cgImage: crop).perform([request])
-            let text = request.results?.compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ") ?? ""
-            XCTAssertTrue(text.contains("Albums"), "The navigation item alone is not enough; its title must render in \(style): \(text)")
+            try VNImageRequestHandler(cgImage: XCTUnwrap(image.cgImage), orientation: .up).perform([request])
+            let observations = request.results ?? []
+            let titleVisible = observations.contains { observation in
+                let center = CGPoint(x: observation.boundingBox.midX * window.bounds.width,
+                    y: (1 - observation.boundingBox.midY) * window.bounds.height)
+                return observation.topCandidates(1).first?.string.contains("Albums") == true && region.contains(center)
+            }
+            let text = observations.compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ")
+            XCTAssertTrue(titleVisible, "The navigation item alone is not enough; its title must render inside \(region) in \(style): \(text)")
             window.isHidden = true
         }
     }
