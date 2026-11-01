@@ -110,7 +110,7 @@ struct AlbumsListView: View {
             .toolbar { toolbar }
             .sheet(isPresented: $showReorder) {
                 AlbumBrowserReorderSheet(items: unfilteredItems) { ids in
-                    organization?.setContainerOrder(ids, in: folderID)
+                    organization?.setContainerOrder(ids, in: orderContainerID)
                     usesCustomOrder = true
                 }
             }
@@ -473,14 +473,26 @@ struct AlbumsListView: View {
 
     private var unfilteredItems: [AlbumBrowserItem] {
         guard let vm else { return [] }
-        let albums = organization?.value.albums(vm.albums, in: folderID) ?? vm.albums
-        return browserItems(albums: albums, folders: organization?.value.childFolders(of: folderID) ?? [])
+        let scoped: [AlbumResponseDTO]
+        switch scope {
+        case .all: scoped = vm.albums
+        case .personal: scoped = vm.albums.filter { !$0.shared }
+        case .shared: scoped = vm.albums.filter(\.shared)
+        case .activity: return []
+        }
+        let albums = scope == .shared ? scoped : organization?.value.albums(scoped, in: folderID) ?? scoped
+        let folders = scope == .shared ? [] : organization?.value.childFolders(of: folderID) ?? []
+        return browserItems(albums: albums, folders: folders)
+    }
+
+    private var orderContainerID: String? {
+        scope == .shared ? AlbumOrganization.sharedContainer : folderID
     }
 
     private func browserItems(albums: [AlbumResponseDTO], folders: [AlbumFolder]) -> [AlbumBrowserItem] {
         let items = folders.map(AlbumBrowserItem.folder) + albums.map(AlbumBrowserItem.album)
         guard usesCustomOrder else { return items }
-        let order = organization?.value.containerOrders[AlbumOrganization.container(folderID)] ?? []
+        let order = organization?.value.containerOrders[AlbumOrganization.container(orderContainerID)] ?? []
         var positions: [String: Int] = [:]
         for (index, id) in order.enumerated() where positions[id] == nil { positions[id] = index }
         let fallback = Dictionary(items.enumerated().map { ($0.element.id, $0.offset) }, uniquingKeysWith: { first, _ in first })
@@ -498,7 +510,7 @@ struct AlbumsListView: View {
         _ = ids.remove(at: original)
         guard let target = ids.firstIndex(of: destination) else { return }
         ids.insert(source, at: target)
-        organization?.setContainerOrder(ids, in: folderID)
+        organization?.setContainerOrder(ids, in: orderContainerID)
         usesCustomOrder = true
     }
 

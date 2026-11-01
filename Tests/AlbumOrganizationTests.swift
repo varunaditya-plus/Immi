@@ -51,6 +51,25 @@ final class AlbumOrganizationTests: XCTestCase {
         XCTAssertEqual(restored.orderedAlbums([album("inside")], in: folder.id).map(\.id), ["inside"])
     }
 
+    func testSharedOrderIncludesNestedAlbumsWithoutChangingPersonalContainers() throws {
+        let store = store()
+        let folder = try XCTUnwrap(store.createFolder(name: "Trips", parentID: nil))
+        store.moveAlbum("shared-inside", to: folder.id)
+        let rootOrder = ["album:personal-b", "folder:\(folder.id)", "album:personal-a"]
+        store.setContainerOrder(rootOrder, in: nil)
+        store.setContainerOrder(["album:shared-inside"], in: folder.id)
+        store.setContainerOrder(["album:shared-root", "album:shared-inside"], in: AlbumOrganization.sharedContainer)
+
+        let restored = self.store()
+        XCTAssertEqual(restored.value.orderedAlbums([album("shared-inside"), album("shared-root")],
+            ignoringFolders: true).map(\.id), ["shared-root", "shared-inside"])
+        XCTAssertEqual(restored.value.containerOrders["root"], rootOrder)
+        XCTAssertEqual(restored.value.containerOrders[folder.id], ["album:shared-inside"])
+        XCTAssertEqual(restored.orderedAlbums([album("shared-inside")], in: folder.id).map(\.id), ["shared-inside"])
+        XCTAssertEqual(restored.orderedAlbums([album("personal-a"), album("personal-b")]).map(\.id),
+            ["personal-b", "personal-a"])
+    }
+
     func testFolderAndAlbumNamesDoNotCrossServersOrAccounts() throws {
         let original = store()
         let folder = try XCTUnwrap(original.createFolder(name: "Private name", parentID: nil))

@@ -70,6 +70,40 @@ final class AlbumFolderCreationTests: SimulatorHostedTestCase {
         XCTAssertTrue(text.contains("Created folder"), "Folder creation must leave Shared so the saved folder is reachable: \(text)")
     }
 
+    func testSharedReorderSheetUsesSharedAlbumsAcrossFoldersAndPreservesPersonalOrder() async throws {
+        let organization = try makeOrganization()
+        let folder = try XCTUnwrap(organization.createFolder(name: "Private folder", parentID: nil))
+        let shared = AlbumResponseDTO(id: UUID().uuidString, albumName: "Shared mountain", description: nil,
+            assetCount: 0, albumThumbnailAssetId: nil, shared: true, createdAt: .distantPast, assets: nil)
+        let personal = AlbumResponseDTO(id: UUID().uuidString, albumName: "Personal beach", description: nil,
+            assetCount: 0, albumThumbnailAssetId: nil, shared: false, createdAt: .distantPast, assets: nil)
+        organization.moveAlbum(shared.id, to: folder.id)
+        let personalOrder = [AlbumOrganization.albumEntry(personal.id), AlbumOrganization.folderEntry(folder.id)]
+        organization.setContainerOrder(personalOrder, in: nil)
+        let repository = FolderCreationRepository(api: makeStubAPIClient())
+        repository.albums = [personal, shared]
+        let model = AlbumListViewModel(repo: repository)
+        let window = try await host(NavigationStack {
+            AlbumsListView(viewModel: model, initialScope: .shared, organizationStore: organization)
+        })
+        try await waitUntil("The shared scope has loaded") { model.hasLoadedAlbums }
+        try await activateAccessibilityButton(named: "More", in: window)
+        try await activateAccessibilityButton(named: "Sort", in: window)
+        try await activateAccessibilityButton(named: "Reorder Albums", in: window)
+        try await waitUntil("The real reorder sheet is presented") {
+            self.presentedController(from: window.rootViewController) != nil
+        }
+        let text = try await renderedText(in: window, containing: ["Reorder Albums", "Shared mountain"])
+        XCTAssertTrue(text.contains("Shared mountain"), text)
+        XCTAssertFalse(text.contains("Personal beach"), text)
+        XCTAssertFalse(text.contains("Private folder"), text)
+        try await activateAccessibilityButton(named: "Done", in: window)
+        XCTAssertEqual(organization.value.containerOrders[AlbumOrganization.sharedContainer],
+            [AlbumOrganization.albumEntry(shared.id)])
+        XCTAssertEqual(organization.value.containerOrders["root"], personalOrder)
+        XCTAssertEqual(organization.value.albumFolders[shared.id], folder.id)
+    }
+
     private func checkSharedFolderVisibility(customOrder: Bool, style: UIUserInterfaceStyle) async throws {
         UserDefaults.standard.set(customOrder, forKey: "albumsCustomOrder")
         let organization = try makeOrganization()

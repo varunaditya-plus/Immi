@@ -27,6 +27,7 @@ struct AlbumOrganization: Codable, Equatable {
     static func albumEntry(_ id: String) -> String { "album:\(id)" }
     static func folderEntry(_ id: String) -> String { "folder:\(id)" }
     static func container(_ id: String?) -> String { id ?? "root" }
+    static let sharedContainer = "shared"
 
     func childFolders(of parentID: String?) -> [AlbumFolder] {
         let children = folders.filter { $0.parentID == parentID }
@@ -48,7 +49,7 @@ struct AlbumOrganization: Codable, Equatable {
 
     func orderedAlbums(_ albums: [AlbumResponseDTO], in folderID: String? = nil,
                        ignoringFolders: Bool = false) -> [AlbumResponseDTO] {
-        let ranks = ranks(for: containerOrders[Self.container(folderID)] ?? [])
+        let ranks = ranks(for: containerOrders[ignoringFolders ? Self.sharedContainer : Self.container(folderID)] ?? [])
         return (ignoringFolders ? albums : self.albums(albums, in: folderID)).sorted {
             let a = ranks[Self.albumEntry($0.id)] ?? Int.max
             let b = ranks[Self.albumEntry($1.id)] ?? Int.max
