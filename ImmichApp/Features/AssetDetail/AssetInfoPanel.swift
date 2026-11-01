@@ -138,6 +138,7 @@ struct AssetInfoPanel: View {
                 Spacer()
                 Button("Adjust") { onAdjustDate?() }
                     .font(.subheadline)
+                    .dynamicTypeSize(...DynamicTypeSize.large)
                     .buttonStyle(.plain)
                     .foregroundStyle(.tint)
             }
