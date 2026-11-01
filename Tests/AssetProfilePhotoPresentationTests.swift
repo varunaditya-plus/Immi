@@ -40,8 +40,8 @@ final class AssetProfilePhotoPresentationTests: SimulatorHostedTestCase {
         try await waitUntil("The normal profile action uploads and refreshes the current user") { fixture.session.refreshes == 1 }
         XCTAssertEqual(fixture.repository.uploads.count, 1)
         let image = try XCTUnwrap(UIImage(data: try XCTUnwrap(fixture.repository.uploads.first)))
-        XCTAssertGreaterThan(image.size.width, 0)
-        XCTAssertEqual(image.size.width, image.size.height)
+        XCTAssertEqual(image.size.width, 60)
+        XCTAssertEqual(image.size.height, 60)
         XCTAssertEqual(fixture.repository.uploads.first?.prefix(2), Data([0xff, 0xd8]))
         XCTAssertEqual(fixture.repository.filenames, ["profile.jpg"])
         XCTAssertNil(fixture.model.actionError)

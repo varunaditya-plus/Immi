@@ -2004,8 +2004,10 @@ struct AssetDetailView: View {
                 width: side,
                 height: side)
             let outputSide = min(1024, side)
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
             let renderer = UIGraphicsImageRenderer(
-                size: CGSize(width: outputSide, height: outputSide))
+                size: CGSize(width: outputSide, height: outputSide), format: format)
             let result = renderer.image { _ in
                 image.draw(
                     in: CGRect(
