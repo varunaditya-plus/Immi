@@ -30,55 +30,13 @@ extension SimulatorHostedTestCase {
         control.sendAction(action)
     }
 
-    func activateNativeAlertAction(named title: String, in window: UIWindow) async throws {
+    func presentedNativeAlert(in window: UIWindow) async throws -> UIAlertController {
         var presented: UIAlertController?
-        try await waitUntil("The actual confirmation finishes presenting before its \(title) action") {
+        try await waitUntil("The actual native alert finishes presenting") {
             presented = self.searchPresentedControllers(in: window.rootViewController).compactMap { $0 as? UIAlertController }.first
             return presented?.view.window === window && presented?.transitionCoordinator == nil && presented?.isBeingPresented == false
         }
-        let alert = try XCTUnwrap(presented)
-        let action = try XCTUnwrap(alert.actions.first { $0.title == title })
-        XCTAssertTrue(action.isEnabled)
-        alert.preferredAction = action
-        let controls = searchPresentationViews(in: alert.view).compactMap { $0 as? UIControl }
-        if let control = controls.first(where: {
-            let matches = $0.accessibilityLabel == title || searchPresentationViews(in: $0).contains {
-                ($0 as? UILabel)?.text == title
-            }
-            return matches && $0.isEnabled
-                && (!$0.allControlEvents.intersection([.touchUpInside, .primaryActionTriggered]).isEmpty)
-        }) {
-            control.sendActions(for: control.allControlEvents.contains(.touchUpInside) ? .touchUpInside : .primaryActionTriggered)
-        } else if let field = alert.textFields?.first(where: {
-            $0.delegate?.responds(to: #selector(UITextFieldDelegate.textFieldShouldReturn(_:))) == true
-        }), let delegate = field.delegate {
-            XCTAssertTrue(field.isFirstResponder || field.becomeFirstResponder())
-            _ = delegate.textFieldShouldReturn?(field)
-        } else {
-            var returnCommand: UIKeyCommand?
-            try await waitUntil("The native confirmation registers its public Return command") {
-                returnCommand = alert.keyCommands?.first { $0.input == "\r" }
-                return returnCommand != nil
-            }
-            if returnCommand == nil {
-                let fields = (alert.textFields ?? []).map {
-                    "firstResponder=\($0.isFirstResponder) hasText=\($0.hasText) delegate=\(String(describing: $0.delegate)) commands=\(($0.keyCommands ?? []).compactMap(\.input))"
-                }
-                let controlDetails = controls.map {
-                    "\(type(of: $0)) enabled=\($0.isEnabled) events=\($0.allControlEvents.rawValue) labels=\(searchPresentationViews(in: $0).compactMap { ($0 as? UILabel)?.text })"
-                }
-                let diagnostic = XCTAttachment(string: "keyWindow=\(alert.view.window?.isKeyWindow == true) enabled=\(action.isEnabled) fields=\(fields) controls=\(controlDetails)")
-                diagnostic.name = "Native confirmation input readiness"
-                diagnostic.lifetime = .keepAlways
-                add(diagnostic)
-            }
-            let command = try XCTUnwrap(returnCommand,
-                "The native confirmation must expose its public Return command")
-            XCTAssertTrue(UIApplication.shared.sendAction(try XCTUnwrap(command.action), to: alert, from: command, for: nil))
-        }
-        try await waitUntil("The native \(title) confirmation finishes dismissing") {
-            !self.searchPresentedControllers(in: window.rootViewController).contains { $0 === alert }
-        }
+        return try XCTUnwrap(presented)
     }
 
     func deactivateNativeSearch(in controller: UIViewController?) {

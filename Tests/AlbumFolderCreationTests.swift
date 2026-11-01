@@ -46,7 +46,7 @@ final class AlbumFolderCreationTests: SimulatorHostedTestCase {
         try await checkSharedFolderVisibility(customOrder: false, style: .dark)
     }
 
-    func testCreatingFolderFromSharedScopeShowsTheFolderInPersonal() async throws {
+    func testSharedCreateMenuPresentsAnEditableNativeFolderAlertWithoutSavingBeforeConfirmation() async throws {
         let organization = try makeOrganization()
         let repository = FolderCreationRepository(api: makeStubAPIClient())
         let model = AlbumListViewModel(repo: repository)
@@ -55,18 +55,27 @@ final class AlbumFolderCreationTests: SimulatorHostedTestCase {
         })
         try await waitUntil("The real shared scope finishes loading") { model.hasLoadedAlbums }
         try await activateSearchMenuAction(named: "New Folder", in: window, menuButton: "Create")
-        var alert: UIAlertController?
-        try await waitUntil("The native folder-name alert is presented") {
-            alert = self.presentedController(from: window.rootViewController) as? UIAlertController
-            return alert?.textFields?.first != nil && alert?.transitionCoordinator == nil
-        }
-        let field = try XCTUnwrap(alert?.textFields?.first)
+        let alert = try await presentedNativeAlert(in: window)
+        XCTAssertEqual(alert.title, "New Folder")
+        XCTAssertEqual(alert.message, "Folders are saved on this device.")
+        XCTAssertEqual(alert.preferredStyle, .alert)
+        let field = try XCTUnwrap(alert.textFields?.first)
+        XCTAssertEqual(field.placeholder, "Folder Name")
+        XCTAssertTrue(field.text?.isEmpty != false)
+        let create = try XCTUnwrap(alert.actions.first { $0.title == "Create" })
+        XCTAssertFalse(create.isEnabled, "An empty folder name cannot be submitted")
+        let cancel = try XCTUnwrap(alert.actions.first { $0.title == "Cancel" })
+        XCTAssertEqual(cancel.style, .cancel)
+        XCTAssertTrue(cancel.isEnabled)
+        XCTAssertTrue(organization.value.folders.isEmpty)
+
         field.text = "Created folder"
         field.sendActions(for: .editingChanged)
-        try await activateNativeAlertAction(named: "Create", in: window)
-        try await waitUntil("The newly created folder is saved") { organization.value.folders.count == 1 }
-        let text = try await renderedText(in: window, containing: ["Created folder"])
-        XCTAssertTrue(text.contains("Created folder"), "Folder creation must leave Shared so the saved folder is reachable: \(text)")
+        try await waitUntil("The actual folder-name input enables the native Create action") {
+            alert.actions.first { $0.title == "Create" }?.isEnabled == true
+        }
+        XCTAssertEqual(field.text, "Created folder")
+        XCTAssertTrue(organization.value.folders.isEmpty, "Editing a folder name must not save before confirmation")
     }
 
     func testSharedReorderSheetUsesSharedAlbumsAcrossFoldersAndPreservesPersonalOrder() async throws {

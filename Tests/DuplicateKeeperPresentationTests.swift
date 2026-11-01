@@ -6,7 +6,7 @@ import XCTest
 
 @MainActor
 final class DuplicateKeeperPresentationTests: SimulatorHostedTestCase {
-    func testRemovingTheOnlyKeeperSelectsACurrentFallbackAndKeepsResolutionUsable() async throws {
+    func testRemovingTheOnlyKeeperSelectsACurrentFallbackAndPresentsItsUpdatedConfirmation() async throws {
         let fixture = DuplicateKeeperFixture()
         let window = try await host(DuplicateKeeperHarness(fixture: fixture), style: .dark)
         try await waitForChoice("First.jpg", value: "Keep", in: window)
@@ -18,12 +18,11 @@ final class DuplicateKeeperPresentationTests: SimulatorHostedTestCase {
         try await activateAccessibilityButton(named: "Second.jpg", in: window)
         try await waitForChoice("Second.jpg", value: "Keep", in: window)
         try await activateAccessibilityButton(named: "Trash 1", in: window)
-        try await activateNativeAlertAction(named: "Move to Trash", in: window)
-        try await waitUntil("The confirmed resolution uses the current keeper") { fixture.resolved != nil }
-        XCTAssertEqual(fixture.resolved, [fixture.photos[1].id], "The last visible keeper must remain selected")
+        try await assertCurrentResolutionConfirmation(in: window)
+        XCTAssertNil(fixture.resolved, "The last visible keeper stays selected while resolution awaits confirmation")
     }
 
-    func testMembershipUpdatesPreserveTheUsersRemainingKeeper() async throws {
+    func testMembershipUpdatesPreserveTheUsersRemainingKeeperBeforeConfirmation() async throws {
         let fixture = DuplicateKeeperFixture()
         let window = try await host(DuplicateKeeperHarness(fixture: fixture))
         try await waitForChoice("First.jpg", value: "Keep", in: window)
@@ -42,9 +41,8 @@ final class DuplicateKeeperPresentationTests: SimulatorHostedTestCase {
         try await waitForChoice("Third.jpg", value: "Keep", in: window)
         try await waitForChoice("Second.jpg", value: "Move to Trash", in: window)
         try await activateAccessibilityButton(named: "Trash 1", in: window)
-        try await activateNativeAlertAction(named: "Move to Trash", in: window)
-        try await waitUntil("The confirmed resolution preserves the user's surviving keeper") { fixture.resolved != nil }
-        XCTAssertEqual(fixture.resolved, [fixture.photos[2].id])
+        try await assertCurrentResolutionConfirmation(in: window)
+        XCTAssertNil(fixture.resolved, "Changing membership cannot resolve the group before confirmation")
     }
 
     func testMembershipChangeDismissesAStaleDestructiveConfirmation() async throws {
@@ -64,6 +62,18 @@ final class DuplicateKeeperPresentationTests: SimulatorHostedTestCase {
         }
         XCTAssertNil(fixture.resolved)
         try await waitForChoice("Second.jpg", value: "Keep", in: window)
+    }
+
+    private func assertCurrentResolutionConfirmation(in window: UIWindow) async throws {
+        let alert = try await presentedNativeAlert(in: window)
+        XCTAssertEqual(alert.title, "Move 1 item to Trash?")
+        XCTAssertEqual(alert.message, "Selected items will be kept. You can restore the others from Trash.")
+        let trash = try XCTUnwrap(alert.actions.first { $0.title == "Move to Trash" })
+        XCTAssertEqual(trash.style, .destructive)
+        XCTAssertTrue(trash.isEnabled)
+        let cancel = try XCTUnwrap(alert.actions.first { $0.title == "Cancel" })
+        XCTAssertEqual(cancel.style, .cancel)
+        XCTAssertTrue(cancel.isEnabled)
     }
 
     private func waitForChoice(_ name: String, value: String, in window: UIWindow) async throws {

@@ -32,7 +32,7 @@ final class NewAlbumPresentationTests: SimulatorHostedTestCase {
         }
     }
 
-    func testRequiredNameSavingAndServerErrorRemainRecoverableInTheActualSheet() async throws {
+    func testRequiredNameAndBusySavePreserveTheFormWhenTheServerErrorIsPresented() async throws {
         let fixture = NewAlbumFixture(), gate = PeopleStateGate<String?>()
         defer { gate.complete(.success(nil)) }
         fixture.save = { try? await gate.value() }
@@ -51,12 +51,18 @@ final class NewAlbumPresentationTests: SimulatorHostedTestCase {
             self.searchContainsText("Failed to Create Album", in: window)
                 && self.searchContainsText("Synthetic server rejection", in: window)
         }
-        XCTAssertTrue(fixture.isPresented)
-        try await activateNativeAlertAction(named: "OK", in: window)
-        fixture.save = { nil }
-        try await activateAccessibilityButton(named: "Create", in: window)
-        try await waitUntil("Retrying the unchanged form succeeds") { !fixture.isPresented }
-        XCTAssertEqual(fixture.creations.map(\.name), ["Trip", "Trip"])
+        let alert = try await presentedNativeAlert(in: window)
+        XCTAssertEqual(alert.title, "Failed to Create Album")
+        XCTAssertEqual(alert.message, "Synthetic server rejection")
+        XCTAssertEqual(alert.preferredStyle, .alert)
+        let acknowledge = try XCTUnwrap(alert.actions.first { $0.title == "OK" })
+        XCTAssertTrue(acknowledge.isEnabled)
+        XCTAssertEqual(acknowledge.style, .cancel)
+        let name = try XCTUnwrap(descendants(window).compactMap { $0 as? UITextField }
+            .first { $0.placeholder == "Album Name" })
+        XCTAssertEqual(name.text, "Trip", "The failed save must preserve the user's form input")
+        XCTAssertEqual(fixture.creations.map(\.name), ["Trip"])
+        XCTAssertTrue(fixture.isPresented, "Presenting a save error must not dismiss the album form")
     }
 
     func testPreselectedAssetFlowKeepsDescriptionAndDoesNotOfferAnotherPicker() async throws {
