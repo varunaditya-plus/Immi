@@ -51,6 +51,10 @@ struct PhotoVideoControlsView: UIViewRepresentable {
         bar.attach(to: pager)
     }
 
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: PhotoVideoControlsBar, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? uiView.bounds.width, height: uiView.intrinsicContentSize.height)
+    }
+
     static func dismantleUIView(_ bar: PhotoVideoControlsBar, coordinator: ()) { bar.detach() }
 }
 

@@ -6,25 +6,38 @@ import XCTest
 @MainActor
 final class VideoControlsAccessibilityLayoutTests: ViewerAdaptiveLayoutTestCase {
     private var bars: [PhotoVideoControlsBar] = []
+    private var pagers: [PhotoPagerController] = []
 
     override func tearDown() async throws {
         bars.forEach { $0.detach() }
+        pagers.forEach { $0.stopAllPlayback() }
         try await super.tearDown()
         bars.removeAll()
+        pagers.removeAll()
     }
 
     func testEnlargedScrubTimestampsAndSliderFitTheirActualBarWithoutClipping() async throws {
         for style in [UIUserInterfaceStyle.light, .dark] {
-            let bar = PhotoVideoControlsBar()
+            let pager = PhotoPagerController(loader: PhotoPreviewLoader(session: MockSessionManager()))
+            pagers.append(pager)
+            let window = try await host(VStack {
+                Spacer()
+                PhotoVideoControlsView(pager: pager).frame(minHeight: 48).padding(.horizontal, 28)
+            }, style: style)
+            try await waitUntil("The actual production video controls mount") {
+                self.descendants(window).contains { $0 is PhotoVideoControlsBar }
+            }
+            let bar = try XCTUnwrap(descendants(window).compactMap { $0 as? PhotoVideoControlsBar }.first)
             bars.append(bar)
-            let window = try await host(VideoBarLayoutProbe(bar: bar)
-                .frame(minHeight: 48).padding(.horizontal, 28), style: style)
+            XCTAssertEqual(bar.bounds.height, 48, accuracy: 1)
             window.rootViewController?.traitOverrides.preferredContentSizeCategory = .accessibilityExtraExtraExtraLarge
             resize(window, to: CGSize(width: 320, height: 568))
             bar.playbackDidUpdate(PhotoPlaybackState(isVideo: true, time: 3666, duration: 7200))
             let slider = try XCTUnwrap(descendants(bar).compactMap { $0 as? UISlider }.first)
             slider.sendActions(for: .touchDown)
             let snapshot = try await screenshot(window)
+            XCTAssertLessThan(bar.bounds.height, window.bounds.height / 2,
+                "The real playback bar must fit its controls rather than absorb spare window height")
             let labels = descendants(bar).compactMap { $0 as? UILabel }.filter { $0.text == "1:01:06" || $0.text == "−58:54" }
             XCTAssertEqual(labels.count, 2)
             for label in labels {
@@ -42,10 +55,4 @@ final class VideoControlsAccessibilityLayoutTests: ViewerAdaptiveLayoutTestCase 
             try await waitUntil("Ending the scrub restores the compact playback bar") { abs(bar.bounds.height - 48) < 1 }
         }
     }
-}
-
-private struct VideoBarLayoutProbe: UIViewRepresentable {
-    let bar: PhotoVideoControlsBar
-    func makeUIView(context: Context) -> PhotoVideoControlsBar { bar }
-    func updateUIView(_ view: PhotoVideoControlsBar, context: Context) {}
 }
