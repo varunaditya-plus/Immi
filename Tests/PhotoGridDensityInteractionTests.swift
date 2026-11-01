@@ -169,19 +169,25 @@ final class PhotoGridDensityInteractionTests: SimulatorHostedTestCase {
         }
     }
 
-    func testRemovingTheAnchorDuringAnimatedMenuZoomDoesNotPersistAWrongDensity() async throws {
+    func testRemovingTheAnchorDuringMenuZoomDoesNotPublishAnUnfinishedDensity() async throws {
         let fixture = try await grid()
         let anchor = try centroidPhoto(fixture)
         let remaining = fixture.assets.filter { $0.id != anchor.id }
         var published: [Int] = []
         fixture.controller.onDensityChanged = { published.append($0) }
+        let reducedMotion = UIAccessibility.isReduceMotionEnabled
+        let completedDensity = reducedMotion ? [5] : []
         fixture.controller.zoomDensity(in: false)
+        if reducedMotion {
+            try await waitUntil("The reduced-motion zoom completes before removing its anchor") { published == [5] }
+        }
+        XCTAssertEqual(published, completedDensity)
         fixture.controller.apply(sections: [TimelineSection(id: "month", title: "Month", assets: remaining)],
             configuration: .init(allowsDensityZoom: true, showsSectionHeaders: false, padsFirstRow: true), hero: nil)
-        try await waitUntil("The canceled menu zoom releases its latest content snapshot") {
+        try await waitUntil("The menu zoom releases its latest content snapshot") {
             fixture.collection.numberOfItems(inSection: 0) == 240
         }
-        XCTAssertTrue(published.isEmpty)
+        XCTAssertEqual(published, completedDensity)
         let refreshed = Fixture(controller: fixture.controller, collection: fixture.collection, assets: remaining)
         XCTAssertEqual(try frame(remaining[155].id, refreshed).width, (fixture.collection.bounds.width - 4) / 3, accuracy: 1)
         XCTAssertFalse(fixture.controller.scrollToAsset(id: anchor.id, animated: false))
