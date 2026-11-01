@@ -245,9 +245,8 @@ struct DuplicateGroupCard: View {
                         }
                 }
             }
-            .padding(.vertical, 2)
+            .padding(2)
         }
-        .scrollClipDisabled()
     }
 
     private var actions: some View {
