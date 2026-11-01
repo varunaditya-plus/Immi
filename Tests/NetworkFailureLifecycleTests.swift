@@ -1,3 +1,4 @@
+import Synchronization
 import XCTest
 @testable import ImmichApp
 
@@ -25,7 +26,7 @@ final class NetworkFailureLifecycleTests: XCTestCase {
             }
             await fulfillment(of: [probe.started], timeout: 2)
             try session.setServer("https://current-feedback.example")
-            try XCTUnwrap(probe.connection).fail(URLError(.cannotConnectToHost))
+            try probe.fail(URLError(.cannotConnectToHost))
             do {
                 try await request.value
                 XCTFail("A stale connection must not succeed")
@@ -38,24 +39,35 @@ final class NetworkFailureLifecycleTests: XCTestCase {
     }
 }
 
-@MainActor
-private final class HeldConnectionFailureProbe {
+private final class HeldConnectionFailureProbe: Sendable {
     let started: XCTestExpectation
-    var connection: HeldConnectionFailureProtocol?
+    private let heldConnection = Mutex<HeldConnectionFailureProtocol?>(nil)
 
     init(started: XCTestExpectation) { self.started = started }
     func receive(_ connection: HeldConnectionFailureProtocol) {
-        self.connection = connection
+        heldConnection.withLock { $0 = connection }
         started.fulfill()
+    }
+
+    func fail(_ error: Error) throws {
+        let connection = heldConnection.withLock { value in
+            defer { value = nil }
+            return value
+        }
+        try XCTUnwrap(connection).fail(error)
     }
 }
 
 private final class HeldConnectionFailureProtocol: URLProtocol {
-    @MainActor static var probe: HeldConnectionFailureProbe?
+    private static let currentProbe = Mutex<HeldConnectionFailureProbe?>(nil)
+    static var probe: HeldConnectionFailureProbe? {
+        get { currentProbe.withLock { $0 } }
+        set { currentProbe.withLock { $0 = newValue } }
+    }
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
-        Task { @MainActor in Self.probe?.receive(self) }
+        Self.probe?.receive(self)
     }
     override func stopLoading() {}
     func fail(_ error: Error) { client?.urlProtocol(self, didFailWithError: error) }
