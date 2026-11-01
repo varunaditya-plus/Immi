@@ -48,6 +48,9 @@ final class CollectionsLoadPresentationTests: SimulatorHostedTestCase {
         XCTAssertTrue(fixture.model.hasLoaded)
         XCTAssertTrue(fixture.model.hasLoadedAlbums)
         XCTAssertFalse(fixture.model.hasLoadedPeople)
+        for section in ["Memories", "Pinned", "Albums", "Recent Days"] {
+            try await activateAccessibilityButton(named: "Collapse \(section)", in: window)
+        }
         let failure = try await renderedText(in: window, containing: "Failed to Load")
         XCTAssertTrue(failure.contains("Failed to Load"), failure)
         XCTAssertFalse(failure.contains("No People"), "An unrelated Albums response cannot establish an empty People section")

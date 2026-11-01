@@ -5,6 +5,35 @@ import SwiftUI
 /// tipe generik.
 private let collectionSectionCollapseDuration: Double = 0.32
 
+struct CollectionSectionEmptyState {
+    let title: LocalizedStringKey
+    let systemImage: String
+    let description: LocalizedStringKey
+}
+
+struct CollectionEmptyCard: View {
+    let state: CollectionSectionEmptyState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Image(systemName: state.systemImage)
+                .font(.title2)
+                .foregroundStyle(.tertiary)
+            Spacer(minLength: 36)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(state.title).fontWeight(.semibold)
+                Text(state.description)
+            }
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, minHeight: 156, alignment: .leading)
+        .background(.fill.tertiary, in: .rect(cornerRadius: 24))
+    }
+}
+
 /// Satu baris koleksi yang bisa dilipat.
 ///
 /// Judulnya punya DUA aksi terpisah, seperti di Photos: menekan judulnya
@@ -17,7 +46,7 @@ struct CollectionSection<Destination: View, Content: View>: View {
     /// Tinggi isi saat terbuka. Harus diberikan eksplisit — lihat catatan di
     /// `contentArea`.
     let contentHeight: CGFloat
-    var emptyMessage: LocalizedStringKey? = nil
+    var emptyState: CollectionSectionEmptyState? = nil
     var isLoading = false
     var showsLoadError = false
     var onRetry: (() -> Void)? = nil
@@ -85,10 +114,8 @@ struct CollectionSection<Destination: View, Content: View>: View {
                 ProgressView("Loading…")
                     .padding(.horizontal, 20)
                     .padding(.top, 12)
-            } else if isEmpty, isExpanded, let emptyMessage {
-                Text(emptyMessage)
-                    .foregroundStyle(.secondary)
-                    .font(.subheadline)
+            } else if isEmpty, isExpanded, let emptyState {
+                CollectionEmptyCard(state: emptyState)
                     .padding(.horizontal, 20)
                     .padding(.top, 12)
             } else if !isEmpty {
@@ -228,7 +255,7 @@ struct CollectionSection<Destination: View, Content: View>: View {
             }
             .buttonStyle(.plain)
 
-            if !isEmpty && !isLoading && !showsLoadError {
+            if (!isEmpty || emptyState != nil) && !isLoading && !showsLoadError {
                 Button {
                     // `.smooth` meredam sisa gerakan di ujung animasi, jadi baris
                     // di bawahnya tidak berhenti mendadak seperti pada easeInOut.
