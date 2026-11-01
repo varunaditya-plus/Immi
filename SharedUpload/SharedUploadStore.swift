@@ -37,6 +37,12 @@ struct SharedUploadBatch: Codable, Equatable, Identifiable, Sendable {
     var items: [SharedUploadItem]
 }
 
+struct SharedUploadListing: Sendable {
+    let batches: [SharedUploadBatch]
+    let failures: [UUID: any Error]
+    var firstError: (any Error)? { failures.first?.value }
+}
+
 enum SharedUploadStoreError: LocalizedError {
     case appGroupUnavailable
     case invalidFilename
@@ -212,31 +218,42 @@ actor SharedUploadStore {
     }
 
     func batches(for owner: SharedUploadOwner) throws -> [SharedUploadBatch] {
+        let listing = try listing(for: owner)
+        if let error = listing.firstError { throw error }
+        return listing.batches
+    }
+
+    func listing(for owner: SharedUploadOwner) throws -> SharedUploadListing {
         guard let rootURL else { throw SharedUploadStoreError.appGroupUnavailable }
-        guard fileManager.fileExists(atPath: rootURL.path) else { return [] }
+        guard fileManager.fileExists(atPath: rootURL.path) else { return .init(batches: [], failures: [:]) }
         let directories = try fileManager.contentsOfDirectory(
             at: rootURL,
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles])
 
         var batches: [SharedUploadBatch] = []
+        var failures: [UUID: any Error] = [:]
         for directory in directories {
             guard let id = UUID(uuidString: directory.lastPathComponent),
                   directory.lastPathComponent == id.uuidString else { continue }
-            let manifest = directory.appendingPathComponent("manifest.json")
-            let data: Data
             do {
-                data = try Data(contentsOf: manifest)
-            } catch let error as CocoaError where Self.isMissing(error) {
-                continue
+                let manifest = directory.appendingPathComponent("manifest.json")
+                let data: Data
+                do {
+                    data = try Data(contentsOf: manifest)
+                } catch let error as CocoaError where Self.isMissing(error) {
+                    continue
+                }
+                let batch = try decoder.decode(SharedUploadBatch.self, from: data)
+                guard batch.id == id else { throw CocoaError(.fileReadCorruptFile) }
+                guard batch.owner == owner else { continue }
+                guard batch.version == 1 else { throw CocoaError(.fileReadCorruptFile) }
+                batches.append(batch)
+            } catch {
+                failures[id] = error
             }
-            let batch = try decoder.decode(SharedUploadBatch.self, from: data)
-            guard batch.id == id else { throw CocoaError(.fileReadCorruptFile) }
-            guard batch.owner == owner else { continue }
-            guard batch.version == 1 else { throw CocoaError(.fileReadCorruptFile) }
-            batches.append(batch)
         }
-        return batches.sorted { $0.createdAt < $1.createdAt }
+        return .init(batches: batches.sorted { $0.createdAt < $1.createdAt }, failures: failures)
     }
 
     func fileURL(for item: SharedUploadItem, batchID: UUID) throws -> URL {

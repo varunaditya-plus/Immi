@@ -41,6 +41,60 @@ final class SharedUploadServiceTests: XCTestCase {
         XCTAssertNil(fixture.service.lastError)
     }
 
+    func testUnreadableManifestKeepsItsFilesAndErrorWhileHealthyNeighborsFinish() async throws {
+        for corruption in ["malformed", "version", "id"] {
+            for hasPreviousSnapshot in [false, true] {
+                var uploaded: [UUID] = []
+                let fixture = try fixture(upload: { credential, item, file, _ in
+                    XCTAssertEqual(credential.owner, self.owner)
+                    XCTAssertEqual(try Data(contentsOf: file), Data("original media".utf8))
+                    uploaded.append(item.id)
+                })
+                let unreadable = try await seed(fixture.store, states: [.failed])
+                if hasPreviousSnapshot { await fixture.service.refreshPending(session: fixture.session) }
+                let knownRows = fixture.service.items
+                let original = try await manifestBytes(fixture.store, batch: unreadable)
+                let directory = fixture.root.appendingPathComponent(unreadable.id.uuidString)
+                let manifest = directory.appendingPathComponent("manifest.json")
+                let source = directory.appendingPathComponent(unreadable.items[0].relativePath)
+                let sourceBytes = try Data(contentsOf: source)
+                let damaged: Data
+                if corruption == "malformed" {
+                    damaged = Data("{ incomplete manifest".utf8)
+                } else {
+                    var document = try XCTUnwrap(JSONSerialization.jsonObject(with: original) as? [String: Any])
+                    if corruption == "version" { document[corruption] = 2 }
+                    else { document[corruption] = UUID().uuidString }
+                    damaged = try JSONSerialization.data(withJSONObject: document)
+                }
+                try damaged.write(to: manifest, options: .atomic)
+                let neighbor = try await seed(fixture.store, states: [.queued])
+
+                let work = try XCTUnwrap(fixture.service.processPending(session: fixture.session))
+                await work.value
+
+                XCTAssertEqual(uploaded, neighbor.items.map(\.id))
+                XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent(neighbor.id.uuidString).path))
+                XCTAssertEqual(try Data(contentsOf: manifest), damaged)
+                XCTAssertEqual(try Data(contentsOf: source), sourceBytes)
+                XCTAssertEqual(fixture.service.items, knownRows)
+                XCTAssertNotNil(fixture.service.lastError)
+                XCTAssertFalse(fixture.service.hasCurrentSnapshot, "A partial read cannot establish that the inbox is empty")
+                do {
+                    _ = try await fixture.store.batches(for: owner)
+                    XCTFail("Strict listing must still reject an incomplete inbox")
+                } catch {}
+
+                try original.write(to: manifest, options: .atomic)
+                await fixture.service.refreshPending(session: fixture.session)
+
+                XCTAssertTrue(fixture.service.hasCurrentSnapshot)
+                XCTAssertNil(fixture.service.lastError)
+                XCTAssertEqual(fixture.service.items.map(\.item), unreadable.items)
+            }
+        }
+    }
+
     func testSignedOutRecoveryReclaimsOnlyAnAbandonedDraftWithoutUploadingOrPublishingRows() async throws {
         let fixture = try fixture()
         let active = try await fixture.store.makeDraftDirectory(id: UUID())

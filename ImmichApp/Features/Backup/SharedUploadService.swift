@@ -81,12 +81,12 @@ final class SharedUploadService {
             do {
                 _ = try? await self.store.cleanupAbandonedDrafts()
                 guard let credential else { return }
-                let batches = try await self.store.batches(for: credential.owner)
+                let listing = try await self.store.listing(for: credential.owner)
                 readBatches = true
                 try session.checkCurrent(context)
                 await self.refreshPending(session: session)
                 let processor = SharedUploadProcessor(store: self.store)
-                for batch in batches {
+                for batch in listing.batches {
                     try Task.checkCancellation()
                     try session.checkCurrent(context)
                     do {
@@ -136,19 +136,22 @@ final class SharedUploadService {
         }
         let context = session.snapshot
         do {
-            let batches = try await store.batches(for: credential.owner)
+            let listing = try await store.listing(for: credential.owner)
             try session.checkCurrent(context)
             guard !Task.isCancelled, listingID == id,
                   session.snapshot == context,
                   self.credential(for: session)?.owner == credential.owner else { return }
-            items = batches.flatMap { batch in
+            let unreadable = items.filter { listing.failures[$0.batchID] != nil }
+            items = unreadable + listing.batches.flatMap { batch in
                 batch.items.filter { !$0.state.isFinished }.map {
                     SharedUploadQueueItem(batchID: batch.id, owner: batch.owner, item: $0)
                 }
             }
-            listingError = nil
-            snapshotSession = session
-            currentSnapshot = (context, credential.owner)
+            listingError = listing.firstError?.localizedDescription
+            if listing.failures.isEmpty {
+                snapshotSession = session
+                currentSnapshot = (context, credential.owner)
+            }
         } catch {
             guard !Task.isCancelled, listingID == id,
                   (try? session.checkCurrent(context)) != nil,
