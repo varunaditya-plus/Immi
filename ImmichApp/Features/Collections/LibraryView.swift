@@ -473,9 +473,12 @@ struct LibraryView: View {
         return CollectionSection(
             title: "Memories",
             isExpanded: expansion(for: .memories),
-            isEmpty: hasLoaded && memories.isEmpty,
+            isEmpty: vm?.hasLoadedMemories == true && memories.isEmpty,
             contentHeight: width,
             emptyMessage: "No Memories",
+            isLoading: memories.isEmpty && vm?.hasLoadedMemories != true && vm?.failedSections.contains(.memories) != true,
+            showsLoadError: memories.isEmpty && vm?.failedSections.contains(.memories) == true,
+            onRetry: { Task { await vm?.load() } },
             destination: { MemoriesView() }
         ) {
             ForEach(memories) { story in
@@ -506,9 +509,12 @@ struct LibraryView: View {
         CollectionSection(
             title: "Albums",
             isExpanded: expansion(for: .albums),
-            isEmpty: hasLoaded && albums.isEmpty,
+            isEmpty: vm?.hasLoadedAlbums == true && albums.isEmpty,
             contentHeight: cardWidth(.albums),
             emptyMessage: "No Albums",
+            isLoading: albums.isEmpty && vm?.hasLoadedAlbums != true && vm?.failedSections.contains(.albums) != true,
+            showsLoadError: albums.isEmpty && vm?.failedSections.contains(.albums) == true,
+            onRetry: { Task { await vm?.refreshAlbums() } },
             destination: {
                 allAlbumsDestination(using: vm)
             }
@@ -588,9 +594,12 @@ struct LibraryView: View {
         CollectionSection(
             title: "People",
             isExpanded: expansion(for: .people),
-            isEmpty: hasLoaded && people.isEmpty,
+            isEmpty: vm?.hasLoadedPeople == true && people.isEmpty,
             contentHeight: personSide + 26,
             emptyMessage: "No People",
+            isLoading: people.isEmpty && vm?.hasLoadedPeople != true && vm?.failedSections.contains(.people) != true,
+            showsLoadError: people.isEmpty && vm?.failedSections.contains(.people) == true,
+            onRetry: { Task { await vm?.load() } },
             destination: { peopleDirectory }
         ) {
             ForEach(people) { person in
@@ -806,9 +815,12 @@ struct LibraryView: View {
         return CollectionSection(
             title: "Shared Albums",
             isExpanded: expansion(for: .sharedAlbums),
-            isEmpty: hasLoaded && albums.isEmpty,
+            isEmpty: vm?.hasLoadedAlbums == true && albums.isEmpty,
             contentHeight: width,
             emptyMessage: "No Shared Albums",
+            isLoading: albums.isEmpty && vm?.hasLoadedAlbums != true && vm?.failedSections.contains(.sharedAlbums) != true,
+            showsLoadError: albums.isEmpty && vm?.failedSections.contains(.sharedAlbums) == true,
+            onRetry: { Task { await vm?.refreshAlbums() } },
             destination: { allAlbumsDestination(using: vm, initialScope: .shared) }
         ) {
             sharedAlbumCards(using: vm, width: width)

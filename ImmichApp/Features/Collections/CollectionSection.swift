@@ -18,6 +18,9 @@ struct CollectionSection<Destination: View, Content: View>: View {
     /// `contentArea`.
     let contentHeight: CGFloat
     var emptyMessage: LocalizedStringKey? = nil
+    var isLoading = false
+    var showsLoadError = false
+    var onRetry: (() -> Void)? = nil
     @ViewBuilder let destination: () -> Destination
     @ViewBuilder let content: () -> Content
 
@@ -65,7 +68,24 @@ struct CollectionSection<Destination: View, Content: View>: View {
             header
             // Section kosong tetap menjadi pintu ke layar lengkapnya, tetapi
             // tidak menawarkan aksi lipat untuk isi yang memang tidak ada.
-            if isEmpty, isExpanded, let emptyMessage {
+            if isExpanded, showsLoadError {
+                HStack {
+                    Label("Failed to Load", systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if let onRetry {
+                        Button("Retry", action: onRetry)
+                            .accessibilityLabel(Text("Retry \(Text(title))"))
+                    }
+                }
+                .font(.subheadline)
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+            } else if isExpanded, isLoading {
+                ProgressView("Loading…")
+                    .padding(.horizontal, 20)
+                    .padding(.top, 12)
+            } else if isEmpty, isExpanded, let emptyMessage {
                 Text(emptyMessage)
                     .foregroundStyle(.secondary)
                     .font(.subheadline)
@@ -208,7 +228,7 @@ struct CollectionSection<Destination: View, Content: View>: View {
             }
             .buttonStyle(.plain)
 
-            if !isEmpty {
+            if !isEmpty && !isLoading && !showsLoadError {
                 Button {
                     // `.smooth` meredam sisa gerakan di ujung animasi, jadi baris
                     // di bawahnya tidak berhenti mendadak seperti pada easeInOut.

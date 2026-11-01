@@ -22,6 +22,9 @@ final class LibraryViewModel {
         set { loadedMemories = newValue }
     }
     private(set) var hasLoadedAlbums = false
+    private(set) var hasLoadedMemories = false
+    private(set) var hasLoadedPeople = false
+    private(set) var failedSections: Set<CollectionsSection> = []
     private var loadedRecentDays: [RecentDayCollection] = []
     private struct CollectionAssetStorage { var assets: [AssetLite] = [] }
     private var featuredStorage = CollectionAssetStorage()
@@ -127,6 +130,7 @@ final class LibraryViewModel {
         guard canPublish else { return }
         let request = UUID()
         loadRequest = request
+        failedSections.removeAll()
         let albumsID = UUID()
         albumRequest = albumsID
         let peopleID = UUID()
@@ -159,15 +163,27 @@ final class LibraryViewModel {
 
         // Kenangan TIDAK dipotret: isinya "hari ini, tahun-tahun sebelumnya",
         // jadi potret kemarin bukan sekadar basi — ia salah tanggal.
-        if let loadedMemories { self.memories = loadedMemories }
+        if let loadedMemories {
+            self.memories = loadedMemories
+            hasLoadedMemories = true
+        } else {
+            failedSections.insert(.memories)
+        }
 
         let acceptedAlbums = albumRequest == albumsID ? loadedAlbums : nil
         let acceptedPeople = peopleRequest == peopleID ? loadedPeople : nil
         let acceptedFavorites = loadedFavorites?.revision == favoriteRequest ? loadedFavorites : nil
         apply(acceptedAlbums, to: \.albums, key: LocalSnapshot.Key.libraryAlbums)
-        if acceptedAlbums != nil { hasLoadedAlbums = true }
+        if albumRequest == albumsID {
+            if acceptedAlbums != nil { hasLoadedAlbums = true }
+            else { failedSections.formUnion([.albums, .sharedAlbums]) }
+        }
         applyFavorites(acceptedFavorites)
         apply(acceptedPeople, to: \.people, key: LocalSnapshot.Key.libraryPeople)
+        if peopleRequest == peopleID {
+            if acceptedPeople != nil { hasLoadedPeople = true }
+            else { failedSections.insert(.people) }
+        }
 
         // Hanya kalau ADA yang benar-benar dijawab server. Menyalakannya setelah
         // keempatnya gagal berarti dua hal buruk sekaligus: barisnya menulis
@@ -340,7 +356,12 @@ final class LibraryViewModel {
         let fetched = await fetchAlbums()
         guard canPublish, albumRequest == request else { return }
         apply(fetched, to: \.albums, key: LocalSnapshot.Key.libraryAlbums)
-        if fetched != nil { hasLoadedAlbums = true }
+        if fetched != nil {
+            hasLoadedAlbums = true
+            failedSections.subtract([.albums, .sharedAlbums])
+        } else {
+            failedSections.formUnion([.albums, .sharedAlbums])
+        }
     }
 
     func refreshRecentDays(calendar: Calendar = .current) {
