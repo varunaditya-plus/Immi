@@ -97,7 +97,8 @@ struct SharedUploadClient: Sendable {
         }
 
         struct Response: Decodable { let id: String }
-        guard let decoded = try? JSONDecoder().decode(Response.self, from: data) else {
+        guard let decoded = try? JSONDecoder().decode(Response.self, from: data),
+              !decoded.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw SharedUploadClientError.invalidResponse
         }
         return decoded.id

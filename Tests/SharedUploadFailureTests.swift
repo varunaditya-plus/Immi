@@ -87,23 +87,25 @@ final class SharedUploadFailureTests: XCTestCase {
     }
 
     func testMalformedSuccessResponseKeepsTheOriginalForAReadableResponseOnRetry() async throws {
-        let fixture = try await SharedFailureFixture(replies: [
-            .http(201, #"{"unexpected":"missing asset id"}"#), .success("readable-asset"),
-        ])
-        defer { fixture.close() }
+        for payload in [#"{"unexpected":"missing asset id"}"#, #"{"id":""}"#, #"{"id":" \n\t "}"#] {
+            let fixture = try await SharedFailureFixture(replies: [
+                .http(201, payload), .success("readable-asset"),
+            ])
+            defer { fixture.close() }
 
-        let first = try await fixture.process()
+            let first = try await fixture.process()
 
-        XCTAssertEqual(first, .finished(remaining: 1))
-        let saved = try await fixture.reopenedBatch()
-        XCTAssertEqual(saved?.items.first?.state, .queued)
-        XCTAssertFalse(saved?.items.first?.lastError?.isEmpty ?? true)
-        XCTAssertEqual(try? Data(contentsOf: fixture.source(0)), fixture.bytes(0))
-        fixture.assertNoMultipartFiles()
-        let recovered = try await fixture.process()
-        XCTAssertEqual(recovered, .finished(remaining: 0))
-        XCTAssertEqual(fixture.transport.captures.count, 2)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.directory.path))
+            XCTAssertEqual(first, .finished(remaining: 1))
+            let saved = try await fixture.reopenedBatch()
+            XCTAssertEqual(saved?.items.first?.state, .queued)
+            XCTAssertFalse(saved?.items.first?.lastError?.isEmpty ?? true)
+            XCTAssertEqual(try? Data(contentsOf: fixture.source(0)), fixture.bytes(0))
+            fixture.assertNoMultipartFiles()
+            let recovered = try await fixture.process()
+            XCTAssertEqual(recovered, .finished(remaining: 0))
+            XCTAssertEqual(fixture.transport.captures.count, 2)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.directory.path))
+        }
     }
 
     func testTransportTimeoutKeepsTheOriginalAndDoesNotBecomeATerminalFailure() async throws {
@@ -124,6 +126,19 @@ final class SharedUploadFailureTests: XCTestCase {
         XCTAssertEqual(recovered, .finished(remaining: 0))
         XCTAssertEqual(fixture.transport.captures.count, 2)
         XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.directory.path))
+    }
+
+    func testSuccessfulResponseKeepsOpaqueNonemptyIdentifiersUnchanged() async throws {
+        for id in ["opaque-server-asset", "CaseSensitiveID", " opaque-with-padding "] {
+            let fixture = try await SharedFailureFixture(replies: [.success(id)])
+            defer { fixture.close() }
+
+            let uploadedID = try await fixture.uploadFirst()
+
+            XCTAssertEqual(uploadedID, id)
+            XCTAssertEqual(try Data(contentsOf: fixture.source(0)), fixture.bytes(0))
+            fixture.assertNoMultipartFiles()
+        }
     }
 }
 
@@ -169,6 +184,10 @@ private final class SharedFailureFixture {
             batchID: batch.id, owner: batch.owner, upload: { item, source, directory in
                 _ = try await self.client.upload(item: item, fileURL: source, bodyDirectory: directory)
             }, progress: progress)
+    }
+
+    func uploadFirst() async throws -> String {
+        try await client.upload(item: batch.items[0], fileURL: source(0), bodyDirectory: directory)
     }
 
     func reopenedBatch() async throws -> SharedUploadBatch? {

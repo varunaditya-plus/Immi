@@ -255,7 +255,11 @@ class BackupRepository {
             let id: String
             let status: String?
         }
-        return try JSONDecoder.immich.decode(UploadResponse.self, from: data).id
+        let id = try JSONDecoder.immich.decode(UploadResponse.self, from: data).id
+        guard !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "The upload response has no asset identifier."))
+        }
+        return id
     }
 
     func getStorageInfo() async throws -> ServerStorageDTO {
