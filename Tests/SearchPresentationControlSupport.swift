@@ -39,13 +39,22 @@ extension SimulatorHostedTestCase {
         let alert = try XCTUnwrap(presented)
         let action = try XCTUnwrap(alert.actions.first { $0.title == title })
         XCTAssertTrue(action.isEnabled)
-        if let button = searchPresentationViews(in: alert.view).compactMap({ $0 as? UIButton }).first(where: {
-            $0.currentTitle == title || $0.configuration?.title == title || $0.accessibilityLabel == title
+        alert.preferredAction = action
+        let controls = searchPresentationViews(in: alert.view).compactMap { $0 as? UIControl }
+        if let control = controls.first(where: {
+            let matches = $0.accessibilityLabel == title || searchPresentationViews(in: $0).contains {
+                ($0 as? UILabel)?.text == title
+            }
+            return matches && $0.isEnabled
+                && (!$0.allControlEvents.intersection([.touchUpInside, .primaryActionTriggered]).isEmpty)
         }) {
-            XCTAssertTrue(button.isEnabled)
-            button.sendActions(for: .touchUpInside)
+            control.sendActions(for: control.allControlEvents.contains(.touchUpInside) ? .touchUpInside : .primaryActionTriggered)
+        } else if let field = alert.textFields?.first(where: {
+            $0.delegate?.responds(to: #selector(UITextFieldDelegate.textFieldShouldReturn(_:))) == true
+        }), let delegate = field.delegate {
+            XCTAssertTrue(field.isFirstResponder || field.becomeFirstResponder())
+            _ = delegate.textFieldShouldReturn?(field)
         } else {
-            alert.preferredAction = action
             var returnCommand: UIKeyCommand?
             try await waitUntil("The native confirmation registers its public Return command") {
                 returnCommand = alert.keyCommands?.first { $0.input == "\r" }
@@ -55,7 +64,10 @@ extension SimulatorHostedTestCase {
                 let fields = (alert.textFields ?? []).map {
                     "firstResponder=\($0.isFirstResponder) hasText=\($0.hasText) delegate=\(String(describing: $0.delegate)) commands=\(($0.keyCommands ?? []).compactMap(\.input))"
                 }
-                let diagnostic = XCTAttachment(string: "keyWindow=\(alert.view.window?.isKeyWindow == true) enabled=\(action.isEnabled) fields=\(fields)")
+                let controlDetails = controls.map {
+                    "\(type(of: $0)) enabled=\($0.isEnabled) events=\($0.allControlEvents.rawValue) labels=\(searchPresentationViews(in: $0).compactMap { ($0 as? UILabel)?.text })"
+                }
+                let diagnostic = XCTAttachment(string: "keyWindow=\(alert.view.window?.isKeyWindow == true) enabled=\(action.isEnabled) fields=\(fields) controls=\(controlDetails)")
                 diagnostic.name = "Native confirmation input readiness"
                 diagnostic.lifetime = .keepAlways
                 add(diagnostic)
