@@ -19,6 +19,7 @@ struct LibraryView: View {
     @State private var showReorder = false
     @State private var showPinnedEditor = false
     @State private var contentWidth: CGFloat = 390
+    @ScaledMetric(relativeTo: .caption) private var personCaptionHeight: CGFloat = 20
     @State private var showSettings = false
     @State private var showBackup = false
     @State private var backupNotifier = BackupNotifier.shared
@@ -595,7 +596,7 @@ struct LibraryView: View {
             title: "People",
             isExpanded: expansion(for: .people),
             isEmpty: vm?.hasLoadedPeople == true && people.isEmpty,
-            contentHeight: personSide + 26,
+            contentHeight: personSide + 6 + personCaptionHeight,
             emptyMessage: "No People",
             isLoading: people.isEmpty && vm?.hasLoadedPeople != true && vm?.failedSections.contains(.people) != true,
             showsLoadError: people.isEmpty && vm?.failedSections.contains(.people) == true,

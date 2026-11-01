@@ -107,6 +107,56 @@ final class CollectionsLoadPresentationTests: SimulatorHostedTestCase {
         XCTAssertTrue(fixture.model.failedSections.isEmpty)
     }
 
+    func testPeopleNamesRetainTheirSectionSpacingAtLargestAccessibilitySizeInBothAppearances() async throws {
+        for style: UIUserInterfaceStyle in [.light, .dark] {
+            let fixture = fixture()
+            fixture.people.result = .success([PersonDTO(id: UUID().uuidString, name: "Amy", birthDate: nil,
+                thumbnailPath: nil, isHidden: false)])
+            let window = try await host(LibraryView(isActive: false, viewModel: fixture.model)
+                .environment(\.dynamicTypeSize, .accessibility5), style: style)
+            window.frame.size = CGSize(width: 320, height: 2200)
+            window.rootViewController?.view.frame = window.bounds
+            try await waitUntil("The populated People section has loaded") { fixture.model.hasLoadedPeople }
+            window.layoutIfNeeded()
+            var personFrame: CGRect?
+            var nextHeadingFrame: CGRect?
+            try await waitUntil("The real People card and following section heading have layout frames") {
+                var personVisited = Set<ObjectIdentifier>()
+                var headingVisited = Set<ObjectIdentifier>()
+                personFrame = self.accessibilityFrame(named: "Amy", in: window, visited: &personVisited)
+                nextHeadingFrame = self.accessibilityFrame(named: "Featured Photos", in: window, visited: &headingVisited)
+                return personFrame?.isEmpty == false && nextHeadingFrame?.isEmpty == false
+            }
+            XCTAssertGreaterThanOrEqual(try XCTUnwrap(nextHeadingFrame).minY - (try XCTUnwrap(personFrame).maxY), 28,
+                "The full People card must retain the 30pt section spacing instead of consuming it with its larger caption")
+        }
+    }
+
+    private func accessibilityFrame(named name: String, in object: NSObject,
+                                    visited: inout Set<ObjectIdentifier>) -> CGRect? {
+        guard visited.insert(ObjectIdentifier(object)).inserted else { return nil }
+        if let view = object as? UIView, view.isHidden || view.alpha <= 0 { return nil }
+        if object.accessibilityLabel == name, object.accessibilityTraits.contains(.button) {
+            return object.accessibilityFrame
+        }
+        if let view = object as? UIView {
+            for child in view.subviews {
+                if let frame = accessibilityFrame(named: name, in: child, visited: &visited) { return frame }
+            }
+        }
+        for case let child as NSObject in object.accessibilityElements ?? [] {
+            if let frame = accessibilityFrame(named: name, in: child, visited: &visited) { return frame }
+        }
+        let count = object.accessibilityElementCount()
+        if (1...500).contains(count) {
+            for index in 0..<count {
+                guard let child = object.accessibilityElement(at: index) as? NSObject else { continue }
+                if let frame = accessibilityFrame(named: name, in: child, visited: &visited) { return frame }
+            }
+        }
+        return nil
+    }
+
     private func fixture() -> (model: LibraryViewModel, albums: CollectionStatusAlbumRepository,
                                people: CollectionStatusPeopleRepository, memories: CollectionStatusMemoriesRepository) {
         let api = makeStubAPIClient()
