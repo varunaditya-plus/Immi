@@ -87,6 +87,7 @@ final class PhotoPagerCell: UICollectionViewCell {
     private let playbackFailureView = UIStackView()
     private let playbackFailureLabel = UILabel()
     private let playbackRetryButton = UIButton(type: .system)
+    private var imageLoadFailed = false
     /// Intent pengguna, terpisah dari `timeControlStatus`. Status AVPlayer dapat
     /// menjadi paused/waiting ketika buffer habis tanpa berarti pengguna pause.
     private var wantsVideoPlayback = false
@@ -267,7 +268,7 @@ final class PhotoPagerCell: UICollectionViewCell {
         retryConfig.baseForegroundColor = .white
         playbackRetryButton.configuration = retryConfig
         playbackRetryButton.accessibilityIdentifier = "photoPlaybackRetry"
-        playbackRetryButton.addTarget(self, action: #selector(togglePlayback), for: .touchUpInside)
+        playbackRetryButton.addTarget(self, action: #selector(retryMedia), for: .touchUpInside)
         playbackFailureView.axis = .vertical
         playbackFailureView.spacing = 8
         playbackFailureView.isLayoutMarginsRelativeArrangement = true
@@ -617,6 +618,7 @@ final class PhotoPagerCell: UICollectionViewCell {
     }
 
     private func startLoad(_ assetID: String, loader: PhotoPreviewLoader) {
+        if imageLoadFailed { hidePlaybackFailure() }
         let context = imageContext(for: assetID, loader: loader)
         let request = UUID()
         imageLoadRequest = request
@@ -628,7 +630,11 @@ final class PhotoPagerCell: UICollectionViewCell {
                   self.loader === loader, self.imageContextIsCurrent(context, loader: loader),
                   loader.visibilityPolicy.allows(id: assetID)
             else { return }
-            guard let image else { return }
+            guard let image else {
+                if !self.isVideo { self.showImageFailure() }
+                return
+            }
+            if self.imageLoadFailed { self.hidePlaybackFailure() }
             self.setImage(image, context: context)
         }
     }
@@ -921,10 +927,27 @@ final class PhotoPagerCell: UICollectionViewCell {
     }
 
     private func hidePlaybackFailure() {
+        imageLoadFailed = false
         playbackFailureView.isHidden = true
     }
 
+    private func showImageFailure() {
+        imageLoadFailed = true
+        playbackFailureLabel.text = String(localized: "Photo Unavailable")
+        playbackRetryButton.isHidden = false
+        playbackFailureView.isUserInteractionEnabled = true
+        playbackFailureView.isHidden = false
+    }
+
+    @objc private func retryMedia() {
+        if imageLoadFailed {
+            guard isPlaybackContextCurrent, let assetID = currentAssetID, let loader, loadTask == nil else { return }
+            startLoad(assetID, loader: loader)
+        } else { togglePlayback() }
+    }
+
     private func showPlaybackFailure(isLivePhoto: Bool) {
+        imageLoadFailed = false
         loadingIndicator.stopAnimating()
         playbackFailureLabel.text = isLivePhoto
             ? String(localized: "Unable to play Live Photo. Touch and hold to try again.")
