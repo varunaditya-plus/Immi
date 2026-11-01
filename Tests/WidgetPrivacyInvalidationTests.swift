@@ -125,6 +125,60 @@ final class WidgetPrivacyInvalidationTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: file), Data([1, 2, 3]))
     }
 
+    func testNewerWidgetRefreshKeepsItsSnapshotWhenAnOlderThumbnailFinishesLast() async throws {
+        let directory = try temporaryDirectory()
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let started = expectation(description: "The earlier widget refresh has reached its held thumbnail")
+        let gate = WidgetPrivacyGate(started: started)
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4), format: format)
+        let olderImage = try XCTUnwrap(renderer.image { context in
+            UIColor.red.setFill(); context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+        }.pngData())
+        let newerImage = try XCTUnwrap(renderer.image { context in
+            UIColor.blue.setFill(); context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+        }.pngData())
+        let owner = BackupQueueOwner(server: "https://widget-order.example.invalid/api", userID: "synthetic-\(UUID())")
+        let session = WidgetEditedSession(owner: owner)
+        try session.setServer("https://widget-order.example.invalid")
+        session.isLoggedIn = true
+        let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
+        let ownerKey = SHA256.hash(data: try encoder.encode(owner)).map { String(format: "%02x", $0) }.joined()
+        let editDirectory = URL.applicationSupportDirectory.appendingPathComponent("media-edits").appendingPathComponent(ownerKey)
+        addTeardownBlock { try? FileManager.default.removeItem(at: editDirectory) }
+        let oldAPI = WidgetPrivacyAPI(session: session, imageGate: gate, metadataGate: nil,
+            assetIDs: ["older-favorite"], includesCollections: false, imageBytes: olderImage)
+        let oldRefresh = Task { await WidgetSnapshotExporter.refresh(api: oldAPI, imageAPI: oldAPI,
+            container: directory, selectedAlbumIDs: []) }
+        addTeardownBlock { await gate.close(); await oldRefresh.value }
+        await fulfillment(of: [started], timeout: 2)
+        let editRevision = MediaEditStore.shared.revision
+        let currentAPI = WidgetPrivacyAPI(session: session, imageGate: nil, metadataGate: nil,
+            assetIDs: ["newer-favorite"], includesCollections: false, imageBytes: newerImage)
+
+        await WidgetSnapshotExporter.refresh(api: currentAPI, imageAPI: currentAPI,
+            container: directory, selectedAlbumIDs: [])
+        let url = directory.appendingPathComponent("Widgets/snapshot.json")
+        let currentSnapshot = try Data(contentsOf: url)
+        XCTAssertEqual(try imageNames(in: directory).count, 1)
+        let currentRequests = await currentAPI.thumbnailCount.assetIDs
+        XCTAssertEqual(currentRequests, ["newer-favorite"])
+        XCTAssertEqual(MediaEditStore.shared.revision, editRevision,
+            "This ordering regression must not pass by invalidating a different edit/session guard")
+        await gate.release()
+        await oldRefresh.value
+
+        XCTAssertEqual(try Data(contentsOf: url), currentSnapshot)
+        let name = try XCTUnwrap(imageNames(in: directory).first)
+        let image = directory.appendingPathComponent("Widgets").appendingPathComponent(name)
+        XCTAssertEqual(try Data(contentsOf: image), newerImage)
+        XCTAssertNotNil(UIImage(contentsOfFile: image.path))
+        let generations = try FileManager.default.contentsOfDirectory(
+            at: directory.appendingPathComponent("Widgets"), includingPropertiesForKeys: nil)
+            .filter(\.hasDirectoryPath)
+        XCTAssertEqual(generations.count, 1, "The superseded refresh must discard its staged image directory")
+    }
+
     func testLateUneditedThumbnailCannotReplaceAWidgetPublishedAfterALocalEdit() async throws {
         let directory = try temporaryDirectory()
         let owner = BackupQueueOwner(server: "https://widget-edit.example.invalid/api", userID: "synthetic-\(UUID())")

@@ -48,6 +48,7 @@ enum WidgetSnapshotExporter {
             clear(container: container)
             return
         }
+        visibilityRevision = UUID()
         let isEligible: (String) -> Bool = { id in
             !dataManager.nonTimelineAssetIDs.contains(id)
                 && !RemovedAssets.shared.ids.contains(id)
