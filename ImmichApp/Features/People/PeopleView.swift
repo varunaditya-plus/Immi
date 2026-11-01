@@ -316,6 +316,7 @@ struct PeoplePortrait: View {
 struct PersonDetailView: View {
     @State private var detail: PersonDetailState
     let repo: PeopleRepository
+    private let sharedLinkRepository: SharedLinkRepository?
     var listVM: PeopleListViewModel?
     var onPersonUpdated: ((PersonUpdate) -> Void)? = nil
 
@@ -325,6 +326,7 @@ struct PersonDetailView: View {
     @State private var albumPickerAsset: AssetLite?
     @State private var albumPickerSelection: SelectedAssetIDs?
     @State private var sharedLink: SharedLinkPresentation?
+    @State private var linkedAssetIDs: [String] = []
     @State private var reassignmentSelection: SelectedAssetIDs?
     @State private var showRenameSheet = false
     @State private var showsSearch = false
@@ -334,12 +336,13 @@ struct PersonDetailView: View {
 
     init(
         person: PersonDTO, repo: PeopleRepository, listVM: PeopleListViewModel? = nil,
-        onPersonUpdated: ((PersonUpdate) -> Void)? = nil
+        onPersonUpdated: ((PersonUpdate) -> Void)? = nil, sharedLinkRepository: SharedLinkRepository? = nil
     ) {
         _detail = State(initialValue: PersonDetailState(person: person))
         self.repo = repo
         self.listVM = listVM
         self.onPersonUpdated = onPersonUpdated
+        self.sharedLinkRepository = sharedLinkRepository
     }
 
     private var person: PersonDTO { detail.person }
@@ -378,7 +381,7 @@ struct PersonDetailView: View {
                     }
                 }
             }
-            .sheet(item: $sharedLink) { ShareSheet(url: $0.url) }
+            .sheet(item: $sharedLink, onDismiss: { linkedAssetIDs.removeAll() }) { ShareSheet(url: $0.url) }
             .sheet(item: $reassignmentSelection) { selection in
                 PersonFaceReassignmentView(person: person, assetIDs: selection.ids, repository: repo,
                     assets: { vm?.assets ?? [] }) {
@@ -387,6 +390,16 @@ struct PersonDetailView: View {
                 }
             }
             .errorToast($actionMessage)
+            .onChange(of: visibilityPolicy.state) { _, _ in
+                if !linkedAssetIDs.allSatisfy({ visibilityPolicy.allows(id: $0) }) {
+                    sharedLink = nil
+                    linkedAssetIDs.removeAll()
+                }
+            }
+            .onChange(of: session.snapshot) { _, _ in
+                sharedLink = nil
+                linkedAssetIDs.removeAll()
+            }
             .onChange(of: session.accountGeneration) { _, _ in dismiss() }
             .task { await start() }
     }
@@ -456,22 +469,34 @@ struct PersonDetailView: View {
 
     private func createSharedLink(for ids: [String]) {
         guard !ids.isEmpty else { return }
-        let repo = SharedLinkRepository(api: APIClient(session: session))
+        let generation = LocalSnapshot.generation
+        let context = session.snapshot
+        let repo = sharedLinkRepository ?? SharedLinkRepository(api: APIClient(session: session))
+        let isAllowed = {
+            !Task.isCancelled && detail.isCurrent && generation == LocalSnapshot.generation
+                && session.snapshot == context && ids.allSatisfy { visibilityPolicy.allows(id: $0) }
+        }
         Task {
+            guard isAllowed() else { return }
             vm?.actionError = nil
             do {
                 let link = try await repo.create(assetIds: ids)
-                guard let url = link.publicURL(base: session.baseURL) else {
+                guard isAllowed() else { return }
+                guard let url = link.publicURL(base: context.baseURL) else {
                     vm?.actionError = String(localized: "Failed to create shared link")
                     return
                 }
+                linkedAssetIDs = ids
                 sharedLink = SharedLinkPresentation(url: url)
             } catch {
+                guard isAllowed() else { return }
                 vm?.actionError = (error as? APIError)?.errorDescription
                     ?? String(localized: "Failed to create shared link")
             }
         }
     }
+
+    private var visibilityPolicy: AssetVisibilityPolicy { AssetVisibilityPolicy(scope: .timeline) }
 
     @ViewBuilder
     private var personMenu: some View {
