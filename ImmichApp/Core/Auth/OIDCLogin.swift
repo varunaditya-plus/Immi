@@ -81,32 +81,71 @@ struct OIDCLoginRequest {
 
 @MainActor
 final class OIDCWebSession: NSObject, ASWebAuthenticationPresentationContextProviding {
-    private var activeSession: ASWebAuthenticationSession?
+    typealias SessionFactory = (URL, @escaping ASWebAuthenticationSession.CompletionHandler) -> ASWebAuthenticationSession
+
+    private struct Authentication {
+        let id: UUID
+        let session: ASWebAuthenticationSession
+        let continuation: CheckedContinuation<URL, Error>
+    }
+
+    private let makeSession: SessionFactory
+    private var activeSession: Authentication?
+
+    init(makeSession: SessionFactory? = nil) {
+        self.makeSession = makeSession ?? { url, completion in
+            ASWebAuthenticationSession(url: url,
+                callback: .customScheme(OIDCLoginRequest.callbackScheme), completionHandler: completion)
+        }
+        super.init()
+    }
 
     func authenticate(at url: URL) async throws -> URL {
+        try Task.checkCancellation()
         guard ["https", "http"].contains(url.scheme?.lowercased() ?? "")
         else { throw OIDCLoginError.invalidAuthorizationURL }
         guard activeSession == nil else { throw OIDCLoginError.browserUnavailable }
 
-        return try await withCheckedThrowingContinuation { continuation in
-            let session = ASWebAuthenticationSession(
-                url: url,
-                callback: .customScheme(OIDCLoginRequest.callbackScheme)
-            ) { [weak self] callback, error in
-                Task { @MainActor in
-                    self?.activeSession = nil
-                    if let error { continuation.resume(throwing: error) }
-                    else if let callback { continuation.resume(returning: callback) }
-                    else { continuation.resume(throwing: OIDCLoginError.invalidCallback) }
+        let attempt = UUID()
+        let callback = try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            return try await withCheckedThrowingContinuation { continuation in
+                let session = makeSession(url) { [weak self] callback, error in
+                    Task { @MainActor in
+                        let result: Result<URL, Error>
+                        if let error { result = .failure(error) }
+                        else if let callback { result = .success(callback) }
+                        else { result = .failure(OIDCLoginError.invalidCallback) }
+                        self?.finish(attempt, result: result)
+                    }
+                }
+                session.presentationContextProvider = self
+                activeSession = Authentication(id: attempt, session: session, continuation: continuation)
+                if !session.start() {
+                    finish(attempt, result: .failure(OIDCLoginError.browserUnavailable))
                 }
             }
-            session.presentationContextProvider = self
-            activeSession = session
-            if !session.start() {
-                activeSession = nil
-                continuation.resume(throwing: OIDCLoginError.browserUnavailable)
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                guard self?.activeSession?.id == attempt else { return }
+                self?.cancel()
             }
         }
+        try Task.checkCancellation()
+        return callback
+    }
+
+    func cancel() {
+        guard let activeSession else { return }
+        self.activeSession = nil
+        activeSession.session.cancel()
+        activeSession.continuation.resume(throwing: CancellationError())
+    }
+
+    private func finish(_ attempt: UUID, result: Result<URL, Error>) {
+        guard let activeSession, activeSession.id == attempt else { return }
+        self.activeSession = nil
+        activeSession.continuation.resume(with: result)
     }
 
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {

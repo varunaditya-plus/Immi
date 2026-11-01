@@ -54,6 +54,7 @@ class SessionManager {
     }
 
     private func invalidateRequests() {
+        oidcBrowser.cancel()
         requestRevision = UUID()
     }
 
@@ -67,7 +68,7 @@ class SessionManager {
     }
 
     private var api: APIClient { APIClient(session: self, urlSession: urlSession) }
-    @ObservationIgnored private let oidcBrowser = OIDCWebSession()
+    @ObservationIgnored private let oidcBrowser: OIDCWebSession
 
     init(
         urlSession: URLSession? = nil,
@@ -75,13 +76,15 @@ class SessionManager {
         dataManager: SwiftDataManager? = nil,
         credentialStore: any SessionCredentialStore = KeychainStore(),
         sharedSessionStore: SharedSessionStore = .shared,
-        restoresSession: Bool = true
+        restoresSession: Bool = true,
+        oidcBrowser: OIDCWebSession? = nil
     ) {
         self.urlSession = urlSession
         self.defaults = defaults
         self.dataManager = dataManager ?? .shared
         self.credentialStore = credentialStore
         self.sharedSessionStore = sharedSessionStore
+        self.oidcBrowser = oidcBrowser ?? OIDCWebSession()
         if restoresSession { loadStoredSession() }
     }
 

@@ -149,6 +149,41 @@ final class SessionManagerTests: XCTestCase {
         }
     }
 
+    func testLeavingOnboardingDismissesPendingOIDCWithoutExchangingOrSavingCredentials() async throws {
+        for editsAddress in [false, true] {
+            let fixture = try SessionFixture()
+            defer { fixture.cleanup() }
+            let browser = OIDCWebSessionFixture()
+            defer { browser.browser.cancel() }
+            let session = fixture.makeSession(restoresSession: false, oidcBrowser: browser.browser)
+            fixture.server.respond(to: "/server/features", status: 200,
+                json: #"{"passwordLogin":true,"oauth":true,"search":true}"#)
+            fixture.server.respond(to: "/oauth/authorize", status: 200,
+                json: #"{"url":"https://oidc.example/authorize"}"#)
+            let model = OnboardingViewModel(session: session)
+            model.serverText = fixture.server.baseURL.absoluteString
+            let connected = await model.connectToServer()
+            XCTAssertTrue(connected)
+            let started = expectation(description: "The real sign-in path is waiting in the OIDC browser")
+            browser.nextStart = started
+            let pending = Task { await model.signInWithOIDC() }
+            await fulfillment(of: [started], timeout: 2)
+            let activeBrowser = try XCTUnwrap(browser.sessions.first)
+
+            if editsAddress { model.serverText = "https://another-server.example" }
+            else { model.prepareToEditServer() }
+            let accepted = await pending.value
+
+            XCTAssertFalse(accepted)
+            XCTAssertEqual(activeBrowser.cancelCount, 1)
+            XCTAssertFalse(fixture.server.hasRequested("/oauth/callback"))
+            XCTAssertFalse(session.isLoggedIn)
+            XCTAssertNil(session.currentUser)
+            XCTAssertNil(fixture.credentials.read("token"))
+            XCTAssertNil(fixture.sharedSessionStore.load())
+        }
+    }
+
     func testCancelingOnboardingDoesNotInvalidateAnEstablishedSession() async throws {
         let fixture = try SessionFixture()
         defer { fixture.cleanup() }
@@ -880,14 +915,15 @@ private final class SessionFixture {
         urlSession = URLSession(configuration: configuration)
     }
 
-    func makeSession(restoresSession: Bool) -> SessionManager {
+    func makeSession(restoresSession: Bool, oidcBrowser: OIDCWebSession? = nil) -> SessionManager {
         SessionManager(
             urlSession: urlSession,
             defaults: defaults,
             dataManager: dataManager,
             credentialStore: credentials,
             sharedSessionStore: sharedSessionStore,
-            restoresSession: restoresSession)
+            restoresSession: restoresSession,
+            oidcBrowser: oidcBrowser)
     }
 
     func signIn() async throws {
