@@ -61,6 +61,7 @@ final class AlbumPickerRecoveryTests: SimulatorHostedTestCase {
             request.recognitionLanguages = ["en-US"]
             try VNImageRequestHandler(cgImage: try XCTUnwrap(image.cgImage)).perform([request])
             text = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: " ")
+                .replacingOccurrences(of: "(?<=\\p{L})-\\s+(?=\\p{L})", with: "", options: .regularExpression)
             if text.contains(expected) { break }
         } while Date() < deadline
         return text
