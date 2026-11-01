@@ -1342,6 +1342,7 @@ struct AssetDetailView: View {
         } label: {
             Image(systemName: "xmark")
         }
+        .accessibilityLabel("Cancel")
     }
 
     private var saveEditButton: some View {
@@ -1351,6 +1352,7 @@ struct AssetDetailView: View {
             Image(systemName: "checkmark")
         }
         .buttonStyle(.borderedProminent)
+        .accessibilityLabel("Save")
     }
 
     private var closeButton: some View {
