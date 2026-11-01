@@ -31,6 +31,17 @@ final class SearchSuggestionsTests: XCTestCase {
         XCTAssertTrue(selected.isEmpty)
     }
 
+    func testCollectionNameMatchingTrimsTheQueryWithoutLosingInternalSpacesCaseOrAccents() {
+        let locale = Locale(identifier: "en_US")
+        for (query, title) in [(" Holiday ", "Holiday Family Trip"), ("\nHOLIDAY\t", "Holiday Family Trip"),
+            ("  cafe  ", "Café Visits"), ("\n  Family trip  \t", "Holiday Family Trip")] {
+            XCTAssertTrue(SearchSuggestions.matches(query, title: title, locale: locale), query)
+        }
+        for query in ["", " \n\t ", "  holiday photos  ", "familytrip"] {
+            XCTAssertFalse(SearchSuggestions.matches(query, title: "Holiday Family Trip", locale: locale), query)
+        }
+    }
+
     func testDateSuggestionsRecognizeValidLeapDaysMonthsAndYearsWithoutNormalizingInvalidDays() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "UTC"))

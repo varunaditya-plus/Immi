@@ -93,7 +93,8 @@ enum SearchSuggestions {
     }
 
     static func matches(_ query: String, title: String, locale: Locale = .current) -> Bool {
-        title.range(of: query, options: [.caseInsensitive, .diacriticInsensitive], locale: locale) != nil
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !query.isEmpty && title.range(of: query, options: [.caseInsensitive, .diacriticInsensitive], locale: locale) != nil
     }
 
     static func exactlyMatches(_ query: String, title: String, locale: Locale = .current) -> Bool {
