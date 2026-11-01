@@ -15,6 +15,7 @@ enum PhotoStoryMediaState: Equatable { case loading, ready, failed }
 /// satu arah berhenti bekerja.
 struct MemoryStoryView: View {
     private let sourceStories: [MemoryStory]
+    private let previewLoader: PhotoPreviewLoader?
     @State private var snapshotGeneration = LocalSnapshot.generation
     private var stories: [MemoryStory] {
         guard snapshotGeneration == LocalSnapshot.generation else { return [] }
@@ -30,14 +31,16 @@ struct MemoryStoryView: View {
     var prepareShare: (AssetLite) async -> URL?
 
     init(stories: [MemoryStory], initialStoryID: String? = nil,
-         prepareShare: @escaping (AssetLite) async -> URL?) {
+         prepareShare: @escaping (AssetLite) async -> URL?, previewLoader: PhotoPreviewLoader? = nil) {
         sourceStories = stories
         self.initialStoryID = initialStoryID
         self.prepareShare = prepareShare
+        self.previewLoader = previewLoader
     }
 
     @Environment(\.dismiss) private var dismiss
     @Environment(SessionManager.self) private var session
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var currentStoryID: String?
     /// Foto yang sedang tampil di TIAP kenangan.
@@ -54,7 +57,13 @@ struct MemoryStoryView: View {
     @State private var sharedRequestContext: SessionRequestContext?
     @State private var sharePreparation = SharePreparation()
     @State private var shareError: ErrorEvent?
+    @State private var mediaStates: [MediaPosition: PhotoStoryMediaState] = [:]
     private var isPreparingShare: Bool { sharePreparation.isPreparing }
+    private var isPlaybackPaused: Bool { isPressing || isPreparingShare || shareItem != nil || scenePhase != .active }
+    private var isWaitingForMedia: Bool {
+        guard let story = currentStory, let asset = currentAsset else { return true }
+        return mediaStates[MediaPosition(storyID: story.id, assetID: asset.id), default: .loading] == .loading
+    }
 
     var body: some View {
         ZStack {
@@ -104,7 +113,7 @@ struct MemoryStoryView: View {
             index: currentAssetIndex,
             // Menyiapkan berkas share juga menahannya: sheet-nya akan muncul di
             // atas story yang diam-diam sudah berpindah foto kalau tidak.
-            isPaused: isPressing || isPreparingShare || shareItem != nil,
+            isPaused: isPlaybackPaused || isWaitingForMedia,
             duration: currentDuration,
             onFinish: advance)
     }
@@ -154,7 +163,10 @@ struct MemoryStoryView: View {
                     MemoryStorySlide(
                         asset: asset,
                         isActive: isActive(asset, in: story),
-                        isPaused: isPressing)
+                        isPaused: isPlaybackPaused, previewLoader: previewLoader,
+                        onMediaStateChanged: { value in
+                            mediaStates[MediaPosition(storyID: story.id, assetID: asset.id)] = value
+                        })
                         .containerRelativeFrame([.horizontal, .vertical])
                         .id(asset.id)
                 }
@@ -230,6 +242,7 @@ struct MemoryStoryView: View {
                 .background(.black.opacity(0.35), in: .circle)
         }
         .padding(16)
+        .accessibilityLabel("Close")
     }
 
     private var footer: some View {
@@ -272,6 +285,7 @@ struct MemoryStoryView: View {
             .background(.white.opacity(0.15), in: .circle)
         }
         .disabled(currentAsset == nil)
+        .accessibilityLabel("Share")
     }
 
     // MARK: - Keadaan sekarang
@@ -342,6 +356,11 @@ struct MemoryStoryView: View {
             shareItem = urls.first.map { SharedLinkPresentation(url: $0) }
         }
     }
+
+    private struct MediaPosition: Hashable {
+        let storyID: String
+        let assetID: String
+    }
 }
 
 // MARK: - Satu halaman
@@ -361,7 +380,7 @@ struct MemoryStorySlide: View {
     var body: some View {
         ZStack {
             if LocalPhotoLibrary.isLocal(asset.id) || (onMediaStateChanged != nil && !asset.isVideo) {
-                MemoryStoryLoadedImage(assetID: asset.id, loader: previewLoader, visibilityPolicy: visibilityPolicy,
+                MemoryStoryLoadedImage(assetID: asset.id, thumbhash: asset.thumbhash, loader: previewLoader, visibilityPolicy: visibilityPolicy,
                     onMediaStateChanged: asset.isVideo ? nil : onMediaStateChanged)
             } else {
                 // TIGA lapis, tapi hanya DUA permintaan jaringan.
@@ -418,6 +437,9 @@ struct MemoryStorySlide: View {
                     onMediaStateChanged: onMediaStateChanged)
             }
         }
+        .onChange(of: isActive, initial: true) { _, active in
+            if asset.isVideo, !active { onMediaStateChanged?(.loading) }
+        }
     }
 }
 
@@ -430,6 +452,7 @@ private struct MemoryStoryLoadedImage: View {
     }
 
     let assetID: String
+    let thumbhash: String?
     let loader: PhotoPreviewLoader?
     let visibilityPolicy: AssetVisibilityPolicy
     let onMediaStateChanged: ((PhotoStoryMediaState) -> Void)?
@@ -443,7 +466,7 @@ private struct MemoryStoryLoadedImage: View {
         let key = LoadKey(assetID: assetID, sourceID: loader.sourceID(for: assetID),
             context: loader.requestContext, generation: LocalSnapshot.generation)
         return ZStack {
-            if let image, imageKey == key {
+            if let image = imageKey == key ? image : ThumbHash.placeholder(for: thumbhash) {
                 Image(uiImage: image).resizable().scaledToFill().blur(radius: 40)
                     .overlay(Color.black.opacity(0.25))
                 Image(uiImage: image).resizable().scaledToFit()
