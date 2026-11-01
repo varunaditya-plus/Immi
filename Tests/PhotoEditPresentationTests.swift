@@ -163,40 +163,46 @@ final class PhotoEditPresentationTests: SimulatorHostedTestCase {
     func testTheImageCompareAccessibilityActionShowsTheRealOriginalPixelsWithoutChangingTheSavedRecipe() async throws {
         let (fixture, window) = try await show()
         try await activateAccessibilityButton(named: "Exposure", in: window)
-        var edited: NSObject?
-        try await waitUntil("The rendered image exposes its real comparison action") {
-            edited = self.accessibilityObject("Edited Photo", in: window)
-            return edited != nil
-        }
-        let image = try XCTUnwrap(edited)
-        let frame = window.convert(image.accessibilityFrame, from: nil)
-        let baseline = try centerLuminance(await screenshot(window), frame: frame, window: window)
-        _ = try await changeSlider(in: window)
-        var editedScreenshot: UIImage?
-        try await waitUntil("The actual Exposure preview becomes brighter before comparison") {
-            let snapshot = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in
-                window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
-            }
-            guard let luminance = try? self.centerLuminance(snapshot, frame: frame, window: window),
-                  luminance > baseline + 2 else { return false }
-            editedScreenshot = snapshot
+        var baseline: PhotoPreviewSample?
+        try await waitUntil("The known gray original is rendered at the current photo position") {
+            guard let sample = self.renderedPhoto("Edited Photo", in: window),
+                  (80...100).contains(sample.luminance) else { return false }
+            baseline = sample
             return true
         }
-        let editedPixels = try XCTUnwrap(editedScreenshot)
+        let originalPixels = try XCTUnwrap(baseline)
+        _ = try await changeSlider(in: window)
+        var edited: PhotoPreviewSample?
+        var lastEdited: PhotoPreviewSample?
+        try await waitUntil("The actual Exposure preview becomes brighter before comparison") {
+            lastEdited = self.renderedPhoto("Edited Photo", in: window)
+            guard let sample = lastEdited,
+                  sample.luminance > originalPixels.luminance + 2 else { return false }
+            edited = sample
+            return true
+        }
+        let editedPixels = try XCTUnwrap(edited,
+            "Original luminance: \(originalPixels.luminance); last edited sample: \(String(describing: lastEdited.map { ($0.frame, $0.luminance) }))")
         var currentImage: NSObject?
         try await waitUntil("The updated preview exposes its real comparison action") {
             currentImage = self.accessibilityObject("Edited Photo", in: window)
             return currentImage != nil
         }
         XCTAssertTrue(try XCTUnwrap(currentImage).accessibilityActivate())
-        try await waitUntil("The actual comparison action switches the image to Original") {
-            self.accessibilityObject("Original Photo", in: window) != nil
+        var compared: PhotoPreviewSample?
+        var lastOriginal: PhotoPreviewSample?
+        try await waitUntil("The actual comparison action restores the original pixels") {
+            lastOriginal = self.renderedPhoto("Original Photo", in: window)
+            guard let sample = lastOriginal,
+                  abs(sample.luminance - originalPixels.luminance) <= 2 else { return false }
+            compared = sample
+            return true
         }
-        let originalScreenshot = try await screenshot(window)
-
-        XCTAssertLessThan(try centerLuminance(originalScreenshot, frame: frame, window: window),
-            try centerLuminance(editedPixels, frame: frame, window: window))
-        XCTAssertEqual(try centerLuminance(originalScreenshot, frame: frame, window: window), baseline, accuracy: 2)
+        let originalElement = accessibilityObject("Original Photo", in: window)
+        let comparedPixels = try XCTUnwrap(compared,
+            "Original sample: \(String(describing: lastOriginal.map { ($0.frame, $0.luminance) })); label frame: \(String(describing: originalElement?.accessibilityFrame)); bounds: \(window.bounds)")
+        XCTAssertLessThan(comparedPixels.luminance, editedPixels.luminance)
+        XCTAssertEqual(comparedPixels.luminance, originalPixels.luminance, accuracy: 2)
         try await activateAccessibilityButton(named: "Crop", in: window)
         try await waitUntil("Entering Crop exits comparison and restores its editable image") {
             self.accessibilityObject("Edited Photo", in: window) != nil
@@ -309,12 +315,13 @@ final class PhotoEditPresentationTests: SimulatorHostedTestCase {
 
     private func views(_ view: UIView) -> [UIView] { [view] + view.subviews.flatMap(views) }
 
-    private func accessibilityObject(_ label: String, in root: NSObject) -> NSObject? {
+    private func accessibilityObject(_ label: String, in root: NSObject,
+                                     matching: (NSObject) -> Bool = { _ in true }) -> NSObject? {
         var visited = Set<ObjectIdentifier>()
         func find(_ object: NSObject, depth: Int) -> NSObject? {
             guard depth < 40, visited.insert(ObjectIdentifier(object)).inserted else { return nil }
             if let view = object as? UIView, view.isHidden || view.alpha <= 0 { return nil }
-            if object.accessibilityLabel == label { return object }
+            if object.accessibilityLabel == label, matching(object) { return object }
             if let view = object as? UIView {
                 for child in view.subviews { if let found = find(child, depth: depth + 1) { return found } }
             }
@@ -331,6 +338,29 @@ final class PhotoEditPresentationTests: SimulatorHostedTestCase {
             return nil
         }
         return find(root, depth: 0)
+    }
+
+    private struct PhotoPreviewSample {
+        let frame: CGRect
+        let luminance: Double
+    }
+
+    private func renderedPhoto(_ label: String, in window: UIWindow) -> PhotoPreviewSample? {
+        window.layoutIfNeeded()
+        let bounds = window.bounds
+        // The Original badge inherits the photo's label; sample the image-sized element.
+        guard let element = accessibilityObject(label, in: window,
+            matching: { $0.accessibilityFrame.width > bounds.width / 2 }) else { return nil }
+        let frame = window.convert(element.accessibilityFrame, from: nil)
+        guard !frame.isEmpty, frame.width > bounds.width / 2, bounds.contains(frame) else { return nil }
+        let snapshot = UIGraphicsImageRenderer(bounds: bounds).image { _ in
+            window.drawHierarchy(in: bounds, afterScreenUpdates: true)
+        }
+        guard window.bounds == bounds, let current = accessibilityObject(label, in: window,
+            matching: { $0.accessibilityFrame.width > bounds.width / 2 }),
+              window.convert(current.accessibilityFrame, from: nil) == frame,
+              let luminance = try? centerLuminance(snapshot, frame: frame, window: window) else { return nil }
+        return PhotoPreviewSample(frame: frame, luminance: luminance)
     }
 
     private func centerLuminance(_ image: UIImage, frame: CGRect, window: UIWindow) throws -> Double {
