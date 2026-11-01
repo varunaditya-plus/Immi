@@ -387,10 +387,7 @@ struct PhotoEditToolControls: View {
     }
 
     private var baseAspect: CGFloat {
-        let rotated = [UIImage.Orientation.left, .leftMirrored, .right, .rightMirrored].contains(image.imageOrientation)
-        let width = rotated ? image.size.height : image.size.width
-        let height = rotated ? image.size.width : image.size.height
-        let aspect = width * recipe.crop.width / max(1, height * recipe.crop.height)
+        let aspect = image.size.width * recipe.crop.width / max(1, image.size.height * recipe.crop.height)
         return recipe.quarterTurns.isMultiple(of: 2) ? aspect : 1 / max(0.000_001, aspect)
     }
 

@@ -259,6 +259,39 @@ final class PhotoEditPresentationTests: SimulatorHostedTestCase {
         XCTAssertEqual(saved.framing, recipe.framing)
     }
 
+    func testOrientedPhotoCropLockUsesTheRenderedPortraitAspectExactlyOnce() async throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let source = UIGraphicsImageRenderer(size: CGSize(width: 180, height: 120), format: format).image { context in
+            UIColor.systemTeal.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 180, height: 120))
+        }
+        let pixels = try XCTUnwrap(source.cgImage)
+        for orientation: UIImage.Orientation in [.up, .right, .rightMirrored] {
+            let image = UIImage(cgImage: pixels, scale: 1, orientation: orientation)
+            let rendered = try await PhotoEditRenderer.shared.renderPreview(image, recipe: PhotoEditRecipe())
+            let physicalAspect = rendered.size.width / rendered.size.height
+            XCTAssertEqual(image.size.width / image.size.height, physicalAspect, accuracy: 0.000_001)
+            var recipe = PhotoEditRecipe()
+            recipe.framing = CGRect(x: 0.1, y: 0.1, width: 0.6, height: 0.4)
+            recipe.cropAspectRatio = nil
+            let (fixture, window) = try await show(recipe: recipe, image: image)
+            try await activateAccessibilityButton(named: "Crop", in: window)
+
+            try await activateAccessibilityButton(named: "Lock Aspect Ratio", in: window)
+            try await activateAccessibilityButton(named: "Done", in: window)
+
+            try await waitUntil("The actual oriented-photo Lock control saves its physical constraint") {
+                fixture.saves.count == 1 && !fixture.isPresented
+            }
+            let saved = try XCTUnwrap(fixture.saves.first)
+            XCTAssertEqual(try XCTUnwrap(saved.cropAspectRatio), 0.6 * physicalAspect / 0.4, accuracy: 0.000_001)
+            XCTAssertEqual(saved.framing, recipe.framing)
+            let cropped = try await PhotoEditRenderer.shared.renderPreview(image, recipe: saved)
+            XCTAssertEqual(cropped.size.width / cropped.size.height, try XCTUnwrap(saved.cropAspectRatio), accuracy: 0.03)
+        }
+    }
+
     private func show(recipe: PhotoEditRecipe = PhotoEditRecipe(), image supplied: UIImage? = nil, requiresSave: Bool = false) async throws -> (PhotoEditorTestFixture, UIWindow) {
         let image = supplied ?? UIGraphicsImageRenderer(size: CGSize(width: 180, height: 120)).image { context in
             UIColor(white: 0.35, alpha: 1).setFill()
