@@ -167,6 +167,7 @@ struct PhotoCollectionScreen<Options: View>: View {
     /// ukuran teks pilihan pengguna, jadi angka tetap apa pun akan meleset persis
     /// di kasus-kasus itu.
     @State private var heroTitleTop: CGFloat = .infinity
+    @State private var heroCaptionHeight: CGFloat = 0
     /// Judul sampul sudah tergulir sampai menyentuh toolbar.
     ///
     /// Yang disimpan hanya keadaan akhirnya, bukan offset gulirnya — grid
@@ -339,10 +340,25 @@ struct PhotoCollectionScreen<Options: View>: View {
     }
 
     private var grid: some View {
+        GeometryReader { geometry in
+            // UIKit reserves the same height SwiftUI draws. Long accessibility
+            // captions may grow past the landscape target instead of clipping.
+            let height = max(
+                geometry.size.width > geometry.size.height ? min(420, geometry.size.height * 0.65) : 420,
+                geometry.safeAreaInsets.top + heroCaptionHeight)
+            photoGrid(heroHeight: height)
+        }
+        .backgroundExtensionEffect(
+            isEnabled: horizontalSizeClass == .regular && layout == .hero)
+        .ignoresSafeArea(edges: [.top, .bottom])
+        .overlay { statusOverlay }
+    }
+
+    private func photoGrid(heroHeight: CGFloat) -> some View {
         PhotoGridView(
             sections: visibilityPolicy.filterSections(gridSections),
-            configuration: configuration,
-            hero: heroView,
+            configuration: configuration(heroHeight: heroHeight),
+            hero: heroView(height: heroHeight),
             isSelecting: $isSelecting,
             selectedIDs: $selectedIDs,
             onOpen: { _ in sharePreparation.cancel(); copyPreparation.cancel() },
@@ -359,17 +375,6 @@ struct PhotoCollectionScreen<Options: View>: View {
             onDensityChanged: { gridColumns = $0 },
             visibilityPolicy: visibilityPolicy,
             session: session)
-        // Album, Favorites, dan koleksi hero lain menempel langsung pada safe
-        // area sidebar iPad. Perluas seluruh bidang grid agar sampul dan foto
-        // tetap berlanjut di bawah kaca sidebar seperti pada tab Photos.
-        .backgroundExtensionEffect(
-            isEnabled: horizontalSizeClass == .regular && layout == .hero)
-        // Menembus sampai ke belakang nav bar di kedua mode — lihat catatan yang
-        // sama di `TimelineView`. Mode sampul butuh itu supaya gambarnya terlihat
-        // penuh; mode bulanan butuh itu supaya kaca bar-nya punya foto untuk
-        // diburamkan alih-alih warna polos.
-        .ignoresSafeArea(edges: [.top, .bottom])
-        .overlay { statusOverlay }
     }
 
     /// Layar detail, dibangun untuk dipresentasikan oleh grid.
@@ -437,12 +442,12 @@ struct PhotoCollectionScreen<Options: View>: View {
     }
 
     /// Sampul hanya ada di mode `.hero`; mode bulanan langsung mulai dari grid.
-    private var heroView: AnyView? {
+    private func heroView(height: CGFloat) -> AnyView? {
         guard layout == .hero else { return nil }
-        return AnyView(hero)
+        return AnyView(hero(height: height))
     }
 
-    private var configuration: PhotoGridConfiguration {
+    private func configuration(heroHeight: CGFloat) -> PhotoGridConfiguration {
         PhotoGridConfiguration(
             layoutStyle: layout == .hero && aspectRatioGrid && !showsFaces ? .justified : .square,
             columns: max(gridColumns, 1),
@@ -453,7 +458,7 @@ struct PhotoCollectionScreen<Options: View>: View {
             } : nil,
             showsSectionHeaders: layout == .monthly,
             startsAtNewest: false,
-            heroHeight: layout == .hero ? 420 : 0,
+            heroHeight: layout == .hero ? heroHeight : 0,
             // Petak "+" disembunyikan selama memilih: ia bukan foto, jadi tidak
             // punya arti dalam seleksi dan hanya mengacaukan barisnya.
             showsAddTile: onAddPhotos != nil && !isSelecting
@@ -504,13 +509,13 @@ struct PhotoCollectionScreen<Options: View>: View {
 
     // MARK: - Sampul
 
-    private var hero: some View {
+    private func hero(height: CGFloat) -> some View {
         ZStack(alignment: .bottom) {
             coverImage
             scrim
             heroCaption
         }
-        .frame(height: 420)
+        .frame(height: height)
         .clipped()
         // Ruang acuan pengukuran judul. Diberi nama supaya angkanya relatif
         // terhadap PUNCAK SAMPUL — dan karena sampul adalah sel pertama grid,
@@ -624,6 +629,8 @@ struct PhotoCollectionScreen<Options: View>: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 20)
         .padding(.bottom, 16)
+        .fixedSize(horizontal: false, vertical: true)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { heroCaptionHeight = $0 }
     }
 
     private var itemCountText: String {
