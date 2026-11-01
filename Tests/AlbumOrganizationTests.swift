@@ -68,6 +68,16 @@ final class AlbumOrganizationTests: XCTestCase {
         XCTAssertEqual(restored.orderedAlbums([album("shared-inside")], in: folder.id).map(\.id), ["shared-inside"])
         XCTAssertEqual(restored.orderedAlbums([album("personal-a"), album("personal-b")]).map(\.id),
             ["personal-b", "personal-a"])
+
+        let nextFolder = try XCTUnwrap(store.createFolder(name: "Summer", parentID: nil))
+        store.moveAlbum("shared-inside", to: nextFolder.id)
+        XCTAssertEqual(self.store().value.containerOrders[AlbumOrganization.sharedContainer],
+            ["album:shared-root", "album:shared-inside"], "Changing Personal membership cannot erase Shared rank")
+        store.moveAlbum("shared-root", to: folder.id)
+        XCTAssertEqual(self.store().value.containerOrders[AlbumOrganization.sharedContainer],
+            ["album:shared-root", "album:shared-inside"])
+        XCTAssertEqual(self.store().value.albumFolders["shared-inside"], nextFolder.id)
+        XCTAssertEqual(self.store().value.albumFolders["shared-root"], folder.id)
     }
 
     func testFolderAndAlbumNamesDoNotCrossServersOrAccounts() throws {

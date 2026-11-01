@@ -162,7 +162,7 @@ final class AlbumsOrganizationStore {
         change {
             guard folderID == nil || $0.folders.contains(where: { $0.id == folderID }) else { return }
             $0.albumFolders[id] = folderID
-            for container in Array($0.containerOrders.keys) {
+            for container in Array($0.containerOrders.keys) where container != AlbumOrganization.sharedContainer {
                 $0.containerOrders[container]?.removeAll { $0 == AlbumOrganization.albumEntry(id) }
             }
         }
