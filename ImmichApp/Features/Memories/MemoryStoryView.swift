@@ -18,7 +18,8 @@ struct MemoryStoryView: View {
     private let previewLoader: PhotoPreviewLoader?
     @State private var snapshotGeneration = LocalSnapshot.generation
     private var stories: [MemoryStory] {
-        guard snapshotGeneration == LocalSnapshot.generation else { return [] }
+        guard snapshotGeneration == LocalSnapshot.generation,
+              sessionContext == nil || sessionContext == session.snapshot else { return [] }
         let policy = AssetVisibilityPolicy(scope: .timeline)
         return sourceStories.compactMap { $0.filteringAssets(using: policy) }
     }
@@ -57,6 +58,7 @@ struct MemoryStoryView: View {
     @State private var sharedRequestContext: SessionRequestContext?
     @State private var sharePreparation = SharePreparation()
     @State private var shareError: ErrorEvent?
+    @State private var sessionContext: SessionRequestContext?
     @State private var mediaStates: [MediaPosition: PhotoStoryMediaState] = [:]
     private var isPreparingShare: Bool { sharePreparation.isPreparing }
     private var isPlaybackPaused: Bool { isPressing || isPreparingShare || shareItem != nil || scenePhase != .active }
@@ -84,10 +86,17 @@ struct MemoryStoryView: View {
                 isAllowed: { AssetVisibilityPolicy(scope: .timeline).allows(id: $0) })
         }
         .errorToast($shareError)
-        .onDisappear { sharePreparation.cancel(); sharedSourceIDs = []; sharedRequestContext = nil }
+        .onDisappear { cleanupSharing() }
         .onChange(of: currentAsset?.id) { _, _ in sharePreparation.cancel() }
         .onAppear {
+            if sessionContext == nil { sessionContext = session.snapshot }
+            guard sessionContext == session.snapshot else { cleanupSharing(); dismiss(); return }
             currentStoryID = initialStoryID ?? stories.first?.id
+        }
+        .onChange(of: session.snapshot) { _, context in
+            guard let sessionContext, context != sessionContext else { return }
+            cleanupSharing()
+            dismiss()
         }
         .onChange(of: stories.map { $0.assets.map(\.id) }) { _, _ in
             if let sharedAssetID, !AssetVisibilityPolicy(scope: .timeline).allows(id: sharedAssetID) {
@@ -341,7 +350,8 @@ struct MemoryStoryView: View {
     }
 
     private func share() {
-        guard let asset = currentAsset, !isPreparingShare, shareItem == nil else { return }
+        guard sessionContext == session.snapshot,
+              let asset = currentAsset, !isPreparingShare, shareItem == nil else { return }
         shareError = nil
         sharePreparation.start(ids: [asset.id], session: session, prepare: { _ in
             if let url = await prepareShare(asset) { return [url] }
@@ -355,6 +365,15 @@ struct MemoryStoryView: View {
             sharedRequestContext = sharePreparation.preparedContext
             shareItem = urls.first.map { SharedLinkPresentation(url: $0) }
         }
+    }
+
+    private func cleanupSharing() {
+        sharePreparation.cancel()
+        if let url = shareItem?.url { TemporaryMediaStore.remove(url) }
+        shareItem = nil
+        sharedAssetID = nil
+        sharedSourceIDs = []
+        sharedRequestContext = nil
     }
 
     private struct MediaPosition: Hashable {

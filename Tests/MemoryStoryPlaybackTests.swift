@@ -129,6 +129,63 @@ final class MemoryStoryPlaybackTests: SimulatorHostedTestCase {
         XCTAssertEqual(requests, 2)
     }
 
+    func testSessionRevisionDismissesTheMountedMemoryAndStopsItsVideoWithoutAnAccountReset() async throws {
+        let movie = try await makePagerPlaybackMovie()
+        files.append(movie)
+        let session = MockSessionManager()
+        let server = "https://memory-session.example"
+        try session.setServer(server)
+        let loader = MemoryStoryFixtureLoader(session: session)
+        loader.loadVideo = { _ in AVURLAsset(url: movie) }
+        let presentation = MemoryStoryTestPresentation()
+        let window = try await show(photo(videoDuration: 30), loader: loader, session: session, presentation: presentation)
+        try await waitUntil("The actual memory player starts before its request context changes") {
+            (self.player(in: window)?.rate ?? 0) > 0
+        }
+        let player = try XCTUnwrap(player(in: window))
+        let generation = LocalSnapshot.generation, context = session.snapshot
+
+        try session.setServer(server)
+
+        XCTAssertEqual(LocalSnapshot.generation, generation)
+        XCTAssertNotEqual(session.snapshot, context)
+        try await waitUntil("Changing only the session revision dismisses the old memory") { !presentation.isPresented }
+        try await waitUntil("Dismissal stops and releases the actual video item") {
+            player.rate == 0 && player.currentItem == nil
+        }
+    }
+
+    func testSessionRevisionRejectsAHeldMemoryShareAndCleansItsLateFile() async throws {
+        let movie = try await makePagerPlaybackMovie()
+        files.append(movie)
+        let shareSource = FileManager.default.temporaryDirectory.appendingPathComponent("memory-session-share-\(UUID()).mov")
+        try FileManager.default.copyItem(at: movie, to: shareSource)
+        defer { try? FileManager.default.removeItem(at: shareSource) }
+        let file = try TemporaryMediaStore.adoptShareFile(at: shareSource, suggestedFilename: "Memory.mov")
+        shareFiles.append(file)
+        let session = MockSessionManager(), gate = PeopleStateGate<URL?>()
+        let server = "https://memory-held-share.example"
+        try session.setServer(server)
+        defer { gate.complete(.success(nil)) }
+        let loader = MemoryStoryFixtureLoader(session: session)
+        let presentation = MemoryStoryTestPresentation()
+        let window = try await show(photo(), loader: loader, session: session, presentation: presentation,
+            prepare: { _ in try? await gate.value() })
+        try await activateAccessibilityButton(named: "Share", in: window)
+        await fulfillment(of: [gate.started], timeout: 2)
+        let generation = LocalSnapshot.generation
+
+        try session.setServer(server)
+
+        XCTAssertEqual(LocalSnapshot.generation, generation)
+        try await waitUntil("The memory closes while its old share is still held") { !presentation.isPresented }
+        gate.complete(.success(file))
+        try await waitUntil("The obsolete share removes the file returned after dismissal") {
+            !FileManager.default.fileExists(atPath: file.path)
+        }
+        XCTAssertNil(shareController(in: window.rootViewController))
+    }
+
     private func show(_ asset: AssetLite, loader: PhotoPreviewLoader, session: SessionManager,
                       presentation: MemoryStoryTestPresentation,
                       prepare: @escaping (AssetLite) async -> URL? = { _ in nil }) async throws -> UIWindow {
