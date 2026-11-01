@@ -1378,7 +1378,6 @@ final class BackupService {
                 applyQueueSnapshot()
             } catch {
                 uploadTask.cancel()
-                try? FileManager.default.removeItem(at: prepared.bodyFile)
                 throw error
             }
         } catch {
@@ -1563,7 +1562,6 @@ final class BackupService {
                 applyQueueSnapshot()
             } catch {
                 uploadTask.cancel()
-                try? FileManager.default.removeItem(at: prepared.bodyFile)
                 throw error
             }
         } catch {
