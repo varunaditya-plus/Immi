@@ -185,11 +185,10 @@ struct AssetInfoPanel: View {
                     .background(Color(.tertiarySystemFill))
                     .clipShape(RoundedRectangle(cornerRadius: 4))
             }
-            Image(systemName: "camera.aperture")
-                .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
+        .background(Color(.quaternarySystemFill))
     }
 
     private var cameraBody: some View {
