@@ -1,6 +1,20 @@
 import SwiftUI
 import UIKit
 
+@MainActor
+@Observable
+final class PhotoPlaybackOptions {
+    private(set) var rate: Float = 1
+    private(set) var isLooping = false
+    private(set) var availableRates: [Float] = [1]
+
+    func update(_ state: PhotoPlaybackState) {
+        if rate != state.rate { rate = state.rate }
+        if isLooping != state.isLooping { isLooping = state.isLooping }
+        if availableRates != state.availableRates { availableRates = state.availableRates }
+    }
+}
+
 /// Pager foto layar detail, ditopang `UICollectionView`.
 ///
 /// Versi SwiftUI-nya harus membangun `ForEach` atas seluruh perpustakaan supaya
@@ -127,6 +141,7 @@ final class PhotoPagerController: UIViewController {
     var onScrollProgress: ((Double) -> Void)?
     /// Bar kontrol video; dipegang lemah karena ia hidup di sisi SwiftUI.
     weak var playbackObserver: (any PhotoPlaybackObserver)?
+    let playbackOptions = PhotoPlaybackOptions()
 
     init(loader: PhotoPreviewLoader, imageAnalyzer: (any PhotoImageAnalyzing)? = nil) {
         self.loader = loader
@@ -446,7 +461,12 @@ final class PhotoPagerController: UIViewController {
     /// Mengabarkan keadaan sekarang — dipakai bar kontrol saat baru menyambung
     /// atau setelah halaman berpindah.
     func reportPlaybackState() {
-        playbackObserver?.playbackDidUpdate(currentCell?.playbackState ?? PhotoPlaybackState())
+        updatePlaybackObservers(currentCell?.playbackState ?? PhotoPlaybackState())
+    }
+
+    private func updatePlaybackObservers(_ state: PhotoPlaybackState) {
+        playbackOptions.update(state)
+        playbackObserver?.playbackDidUpdate(state)
     }
 
     /// Halaman yang sedang di tengah layar; -1 kalau belum bisa dihitung.
@@ -510,7 +530,7 @@ extension PhotoPagerController: UICollectionViewDataSource {
         // ikut hidup dan laporannya akan menimpa keadaan yang benar.
         pageCell.onPlaybackChanged = { [weak self] state in
             guard let self, indexPath.item == self.currentIndex else { return }
-            self.playbackObserver?.playbackDidUpdate(state)
+            self.updatePlaybackObservers(state)
         }
         return pageCell
     }
@@ -523,7 +543,7 @@ extension PhotoPagerController: UICollectionViewDelegate {
                         forItemAt indexPath: IndexPath) {
         (cell as? PhotoPagerCell)?.setImageAnalysisActive(indexPath.item == currentIndex && canAnalyzeCurrentImage)
         if indexPath.item == currentIndex, let cell = cell as? PhotoPagerCell {
-            playbackObserver?.playbackDidUpdate(cell.playbackState)
+            updatePlaybackObservers(cell.playbackState)
         }
     }
 

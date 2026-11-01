@@ -637,8 +637,8 @@ struct AssetDetailView: View {
                 // strip tetap dipakai untuk berpindah aset.
                 if currentAsset.isVideo, let pagerController {
                     PhotoVideoControlsView(pager: pagerController)
-                        .frame(height: 46)
-                        .padding(.horizontal, 12)
+                        .frame(height: 48)
+                        .padding(.horizontal, 28)
                 }
 
                 PhotoFilmstripView(
@@ -1150,6 +1150,19 @@ struct AssetDetailView: View {
         Menu {
             Button("Copy", systemImage: "doc.on.doc") { copyCurrentMedia() }
                 .disabled(viewer.isPreparing(.copy))
+
+            if currentAsset.isVideo, let pagerController {
+                let options = pagerController.playbackOptions
+                Picker(selection: Binding(get: { options.rate }, set: { pagerController.setPlaybackRate($0) })) {
+                    ForEach(options.availableRates, id: \.self) { rate in
+                        Text(String(format: "%g×", rate)).tag(rate)
+                    }
+                } label: { Label("Playback Speed", systemImage: "speedometer") }
+                .pickerStyle(.menu)
+                Toggle(isOn: Binding(get: { options.isLooping }, set: { looping in
+                    if looping != options.isLooping { pagerController.toggleLooping() }
+                })) { Label("Loop Video", systemImage: "repeat") }
+            }
 
             if currentAsset.isLivePhoto, trashActions == nil {
                 Menu("Live Photo", systemImage: "livephoto") {
