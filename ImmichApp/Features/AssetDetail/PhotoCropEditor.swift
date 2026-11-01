@@ -39,12 +39,12 @@ struct PhotoCropEditor: View {
 
     var body: some View {
         NavigationStack {
-            PhotoEditorContentViewport(isInteracting: history.isEditing) {
+            PhotoEditorContentViewport(isInteracting: history.isEditing) { previewHeight in
                 VStack(spacing: 0) {
                     if isAllowed(), let image {
                         PhotoEditCanvas(image: image, recipe: recipe, tool: tool, comparing: false,
                             onEditingChanged: history.editingChanged)
-                            .frame(minHeight: PhotoEditorMetrics.minimumPreviewHeight)
+                            .frame(height: previewHeight)
                         PhotoEditToolControls(image: image, recipe: recipe, tool: tool, aspectDrawer: $aspectDrawer,
                             onEditingChanged: history.editingChanged)
                         toolPicker
@@ -166,7 +166,7 @@ struct PhotoCropEditor: View {
             history.editingChanged(false)
             tool = $0
         }), isEnabled: !isSaving)
-        .padding(.bottom, 16)
+        .padding(.bottom, PhotoEditorMetrics.toolPickerBottomPadding)
     }
 
     private var moreMenu: some View {

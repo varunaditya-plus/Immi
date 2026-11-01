@@ -223,7 +223,7 @@ struct MediaVideoEditor: View {
                 if isAllowed(), ready, isPrimaryVideo {
                     canvas.ignoresSafeArea(.container)
                 }
-                PhotoEditorContentViewport(isInteracting: history.isEditing || isScrubbingPreview) {
+                PhotoEditorContentViewport(isInteracting: history.isEditing || isScrubbingPreview) { previewHeight in
                     VStack(spacing: 0) {
                         if !isAllowed() {
                             Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -237,9 +237,9 @@ struct MediaVideoEditor: View {
                             }
                         } else if ready {
                             if isPrimaryVideo {
-                                Color.clear.frame(maxWidth: .infinity, minHeight: PhotoEditorMetrics.minimumPreviewHeight, maxHeight: .infinity)
+                                Color.clear.frame(maxWidth: .infinity).frame(height: previewHeight)
                             } else {
-                                canvas.frame(maxWidth: .infinity, minHeight: PhotoEditorMetrics.minimumPreviewHeight, maxHeight: .infinity)
+                                canvas.frame(maxWidth: .infinity).frame(height: previewHeight)
                             }
                             if let tool, let image = preview.poster {
                                 PhotoEditToolControls(image: image, recipe: photo, tool: tool, aspectDrawer: $aspectDrawer,
@@ -555,7 +555,7 @@ struct MediaVideoEditor: View {
             tool = selected
         }), primaryTitle: isLivePhoto ? String(localized: "Live") : String(localized: "Video"),
             primarySymbol: isLivePhoto ? "livephoto" : "video.fill", isEnabled: !isSaving)
-        .padding(.bottom, 16)
+        .padding(.bottom, PhotoEditorMetrics.toolPickerBottomPadding)
     }
 
     private func updatePreview() async {

@@ -4,22 +4,27 @@ import UIKit
 enum PhotoEditorMetrics {
     static let controlPanelHeight: CGFloat = 148
     static let toolPickerHeight: CGFloat = 60
+    static let toolPickerBottomPadding: CGFloat = 16
     static let minimumPreviewHeight: CGFloat = 112
 }
 
 struct PhotoEditorContentViewport<Content: View>: View {
     let isInteracting: Bool
-    private let content: Content
+    private let content: (CGFloat) -> Content
+    @ScaledMetric(relativeTo: .body) private var controlsHeight = PhotoEditorMetrics.controlPanelHeight
+    @ScaledMetric(relativeTo: .body) private var pickerHeight = PhotoEditorMetrics.toolPickerHeight
 
-    init(isInteracting: Bool, @ViewBuilder content: () -> Content) {
+    init(isInteracting: Bool, @ViewBuilder content: @escaping (CGFloat) -> Content) {
         self.isInteracting = isInteracting
-        self.content = content()
+        self.content = content
     }
 
     var body: some View {
         GeometryReader { geometry in
+            let previewHeight = max(PhotoEditorMetrics.minimumPreviewHeight,
+                geometry.size.height - controlsHeight - pickerHeight - PhotoEditorMetrics.toolPickerBottomPadding)
             ScrollView {
-                content
+                content(previewHeight)
                     .frame(minHeight: geometry.size.height)
             }
             .scrollDisabled(isInteracting)
