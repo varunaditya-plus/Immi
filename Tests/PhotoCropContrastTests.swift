@@ -13,7 +13,7 @@ final class PhotoCropContrastTests: SimulatorHostedTestCase {
             let window = try await host(PhotoCropEditor(initialRecipe: PhotoEditRecipe(), loadImage: { image },
                 isAllowed: { true }, onSave: { _ in true }, onRevert: { true }), style: style)
             try await activateAccessibilityButton(named: "Crop", in: window)
-            try await activateAccessibilityButton(named: "Aspect Ratio", in: window)
+            try await activateSearchMenuAction(named: "Aspect Ratio", in: window)
             try assertTextContrast("FREEFORM", image: await screenshot(window))
             try assertTextContrast("SQUARE", image: await screenshot(window))
         }

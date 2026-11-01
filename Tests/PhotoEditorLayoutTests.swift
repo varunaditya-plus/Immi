@@ -18,7 +18,11 @@ final class PhotoEditorLayoutTests: SimulatorHostedTestCase {
         let initial = try photoFrame(in: await screenshot(window))
         XCTAssertGreaterThan(initial.width, window.bounds.width / 2)
         for tool in ["Filters", "Crop", "Aspect Ratio"] {
-            try await activateAccessibilityButton(named: tool, in: window)
+            if tool == "Aspect Ratio" {
+                try await activateSearchMenuAction(named: tool, in: window)
+            } else {
+                try await activateAccessibilityButton(named: tool, in: window)
+            }
             let frame = try photoFrame(in: await screenshot(window))
             XCTAssertEqual(frame.minX, initial.minX, accuracy: 1, "\(tool) must not shift the photo horizontally")
             XCTAssertEqual(frame.minY, initial.minY, accuracy: 1, "\(tool) must not shift the photo vertically")
