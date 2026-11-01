@@ -415,49 +415,10 @@ struct SyncStatusView: View {
         trailing: (title: LocalizedStringKey, symbol: String, value: Int?)
     ) -> some View {
         Section(title) {
-            HStack(spacing: 12) {
-                statusCard(leading)
-                statusCard(trailing)
-            }
-            .listRowInsets(EdgeInsets())
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
-        }
-    }
-
-    private func statusCard(
-        _ item: (title: LocalizedStringKey, symbol: String, value: Int?)
-    ) -> some View {
-        VStack(spacing: 9) {
-            Label(item.title, systemImage: item.symbol)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.tint)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-
-            Group {
-                if let value = item.value {
-                    Text(value.formatted())
-                        .contentTransition(.numericText())
-                } else if vm.isRefreshing {
-                    ProgressView()
-                        .controlSize(.small)
-                } else {
-                    Text("—")
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .font(.title2.weight(.medium))
-            .monospacedDigit()
-            .frame(height: 28)
-        }
-        .frame(maxWidth: .infinity, minHeight: 104)
-        .background(
-            Color(uiColor: .secondarySystemGroupedBackground),
-            in: .rect(cornerRadius: 18))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18)
-                .strokeBorder(.separator.opacity(0.35), lineWidth: 0.5)
+            SyncStatusCards(leading: leading, trailing: trailing, isRefreshing: vm.isRefreshing)
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
         }
     }
 
@@ -601,6 +562,63 @@ struct SyncStatusView: View {
             Image(systemName: "xmark.circle.fill")
                 .font(.title3)
                 .foregroundStyle(.red)
+        }
+    }
+}
+
+struct SyncStatusCards: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let leading: (title: LocalizedStringKey, symbol: String, value: Int?)
+    let trailing: (title: LocalizedStringKey, symbol: String, value: Int?)
+    let isRefreshing: Bool
+
+    var body: some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: 12))
+            : AnyLayout(HStackLayout(spacing: 12))
+        layout {
+            statusCard(leading)
+            statusCard(trailing)
+        }
+    }
+
+    private func statusCard(
+        _ item: (title: LocalizedStringKey, symbol: String, value: Int?)
+    ) -> some View {
+        VStack(spacing: 9) {
+            Label(item.title, systemImage: item.symbol)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.tint)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                .minimumScaleFactor(dynamicTypeSize.isAccessibilitySize ? 1 : 0.8)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Group {
+                if let value = item.value {
+                    Text(value.formatted())
+                        .contentTransition(.numericText())
+                } else if isRefreshing {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Text("—")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .font(.title2.weight(.medium))
+            .monospacedDigit()
+            .frame(minHeight: 28)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 16)
+        .padding(.horizontal, dynamicTypeSize.isAccessibilitySize ? 16 : 0)
+        .frame(maxWidth: .infinity, minHeight: 104)
+        .background(
+            Color(uiColor: .secondarySystemGroupedBackground),
+            in: .rect(cornerRadius: 18))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18)
+                .strokeBorder(.separator.opacity(0.35), lineWidth: 0.5)
         }
     }
 }
