@@ -1,10 +1,11 @@
 import SwiftUI
 import UIKit
+import Vision
 import XCTest
 @testable import ImmichApp
 
 @MainActor
-final class AssetViewerDatePresentationTests: SimulatorHostedTestCase {
+final class AssetViewerDatePresentationTests: ViewerAdaptiveLayoutTestCase {
     private var assetIDs: [String] = []
 
     override func tearDown() async throws {
@@ -137,8 +138,86 @@ final class AssetViewerDatePresentationTests: SimulatorHostedTestCase {
         XCTAssertFalse(titles(window).contains(title(otherDate)))
     }
 
+    func testTheTwoLineCaptureTitleFollowsSavedMetadataAndPagingInBothAppearances() async throws {
+        let original = Date(timeIntervalSince1970: 1_600_000_000)
+        let saved = original.addingTimeInterval(3_660)
+        let other = AssetLite(id: UUID().uuidString, isVideo: false, ratio: 1, thumbhash: nil,
+            createdAt: original.addingTimeInterval(-172_800))
+        for width: CGFloat in [320, 390] {
+            for style in [UIUserInterfaceStyle.light, .dark] {
+                let (window, model, repository) = try await showViewer(date: original,
+                    additional: [other], style: style)
+                resize(window, to: CGSize(width: width, height: 844))
+                try await assertCaptureTitle(original, in: window)
+
+                let accepted = await model.updateDate(repository.value.id, to: saved)
+                XCTAssertTrue(accepted)
+
+                try await assertCaptureTitle(saved, in: window)
+                XCTAssertTrue(titles(window).contains(title(saved)), "The navigation stack must retain its text title")
+                let pager = try XCTUnwrap(findPager(in: try XCTUnwrap(window.rootViewController)))
+                pager.onPageChanged?(other)
+                try await assertCaptureTitle(other.createdAt, in: window)
+                pager.onPageChanged?(AssetLite(id: repository.value.id, isVideo: false, ratio: 1,
+                    thumbhash: nil, createdAt: original))
+                try await assertCaptureTitle(saved, in: window)
+
+                try await activateInfo(in: window)
+                try await waitUntil("The real caption field is mounted") {
+                    self.visibleViews(in: window).contains { $0 is UITextView }
+                }
+                let caption = try XCTUnwrap(visibleViews(in: window).compactMap { $0 as? UITextView }.first)
+                XCTAssertTrue(caption.becomeFirstResponder())
+                try await waitUntil("Caption editing exposes its actual Cancel and Save controls") {
+                    self.accessibilityButton(named: "Cancel", in: window) != nil
+                        && self.accessibilityButton(named: "Save", in: window) != nil
+                }
+                XCTAssertNil(accessibilityObject(saved.formatted(date: .long, time: .shortened), in: window),
+                    "The capture title must not displace the existing caption-editing toolbar")
+                try await activateAccessibilityButton(named: "Cancel", in: window)
+                try await waitUntil("Closing caption editing restores the visible Info control") {
+                    self.accessibilityButton(named: "Info", in: window) != nil
+                }
+                try await activateInfo(in: window)
+                try await assertCaptureTitle(saved, in: window)
+            }
+        }
+    }
+
+    private func assertCaptureTitle(_ date: Date, in window: UIWindow) async throws {
+        let label = date.formatted(date: .long, time: .shortened)
+        try await waitUntil("The visible capture title contains the current date and time") {
+            self.accessibilityObject(label, in: window) != nil
+        }
+        let element = try XCTUnwrap(accessibilityObject(label, in: window))
+        XCTAssertFalse(element.accessibilityTraits.contains(.button), "The title must not introduce an unused action")
+        let frame = window.convert(element.accessibilityFrame, from: nil)
+        XCTAssertGreaterThan(frame.height, 28, "Date and time need two distinct text lines")
+        XCTAssertTrue(window.bounds.contains(frame), "The title must fit between the navigation actions")
+        let snapshot = try await screenshot(window)
+        let image = try XCTUnwrap(snapshot.cgImage)
+        let scale = CGFloat(image.width) / window.bounds.width
+        let crop = try XCTUnwrap(image.cropping(to: frame.insetBy(dx: -4, dy: -4)
+            .applying(CGAffineTransform(scaleX: scale, y: scale))))
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.recognitionLanguages = ["en-US"]
+        try VNImageRequestHandler(cgImage: crop).perform([request])
+        let observations = request.results ?? []
+        func normalize(_ value: String) -> String { value.filter { !$0.isWhitespace }.lowercased() }
+        let dateLine = try XCTUnwrap(observations.first {
+            normalize($0.topCandidates(1).first?.string ?? "") == normalize(date.formatted(date: .long, time: .omitted))
+        }, "The complete date must be visibly rendered in the capture capsule")
+        let timeLine = try XCTUnwrap(observations.first {
+            normalize($0.topCandidates(1).first?.string ?? "") == normalize(date.formatted(date: .omitted, time: .shortened))
+        }, "The complete capture time must be visibly rendered beneath the date")
+        XCTAssertGreaterThan(dateLine.boundingBox.midY, timeLine.boundingBox.midY,
+            "The capture time belongs below the date, as in Photos")
+    }
+
     private func showViewer(date: Date, additional: [AssetLite] = [],
-                            onAssetUpdated: ((String) -> Void)? = nil) async throws
+                            onAssetUpdated: ((String) -> Void)? = nil,
+                            style: UIUserInterfaceStyle = .light) async throws
         -> (UIWindow, AssetDetailViewModel, ViewerDateRepository) {
         let id = UUID().uuidString
         assetIDs.append(id)
@@ -148,7 +227,7 @@ final class AssetViewerDatePresentationTests: SimulatorHostedTestCase {
         let asset = AssetLite(id: id, isVideo: false, ratio: 1, thumbhash: nil, createdAt: date)
         let viewer = AssetDetailView(currentAsset: asset, assets: [asset] + additional,
             isModal: true, onAssetUpdated: onAssetUpdated, viewModel: model)
-        return (try await host(NavigationStack { viewer }), model, repository)
+        return (try await host(NavigationStack { viewer }, style: style), model, repository)
     }
 
     private func title(_ date: Date) -> String {

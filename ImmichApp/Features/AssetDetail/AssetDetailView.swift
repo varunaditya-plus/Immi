@@ -333,8 +333,26 @@ struct AssetDetailView: View {
     }
 
     private var navigationTitleText: String {
-        (matchingDetail?.fileCreatedAt ?? currentAsset.createdAt)
-            .formatted(date: .abbreviated, time: .omitted)
+        captureDate.formatted(date: .abbreviated, time: .omitted)
+    }
+
+    private var captureDate: Date { matchingDetail?.fileCreatedAt ?? currentAsset.createdAt }
+
+    private var captureDateTitle: some View {
+        VStack(spacing: 0) {
+            Text(captureDate.formatted(date: .long, time: .omitted))
+                .font(.subheadline.weight(.semibold))
+            Text(captureDate.formatted(date: .omitted, time: .shortened))
+                .font(.caption.weight(.medium))
+        }
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
+        .dynamicTypeSize(...DynamicTypeSize.large)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 4)
+        .glassEffect(.regular, in: .capsule)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(captureDate.formatted(date: .long, time: .shortened))
     }
 
     private var isStatusBarHidden: Bool {
@@ -1109,6 +1127,10 @@ struct AssetDetailView: View {
 
     @ToolbarContentBuilder
     private var topToolbar: some ToolbarContent {
+        if !isEditingDescription {
+            ToolbarItem(placement: .principal) { captureDateTitle }
+                .sharedBackgroundVisibility(.hidden)
+        }
         // Mode edit deskripsi mengambil alih navigation bar: batal di kiri,
         // simpan di kanan. Aksesori keyboard tidak dipakai karena pendaftaran
         // `placement: .keyboard` dari dalam overlay tidak konsisten.
