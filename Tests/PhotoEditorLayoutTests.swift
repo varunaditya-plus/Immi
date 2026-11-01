@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import Vision
 import XCTest
 @testable import ImmichApp
 
@@ -34,6 +35,41 @@ final class PhotoEditorLayoutTests: SimulatorHostedTestCase {
         }
         for tool in PhotoEditorTool.allCases {
             XCTAssertNotNil(UIImage(systemName: tool.symbol), tool.title)
+        }
+    }
+
+    func testLargeToolCaptionsRenderCompletelyWithoutTouchingAdjacentLabels() async throws {
+        let window = try await host(PhotoEditorToolPicker(selected: .constant(.filters))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(.white)
+            .dynamicTypeSize(.xxxLarge)
+            .environment(\.locale, Locale(identifier: "en_US"))
+            .preferredColorScheme(.light))
+        let snapshot = try await screenshot(window)
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.recognitionLanguages = ["en-US"]
+        request.usesLanguageCorrection = false
+        try VNImageRequestHandler(cgImage: XCTUnwrap(snapshot.cgImage)).perform([request])
+        var frames: [CGRect] = []
+        for title in ["Adjust", "Filters", "Crop"] {
+            var label: CGRect?
+            for observation in request.results ?? [] {
+                guard let text = observation.topCandidates(1).first,
+                      let range = text.string.range(of: title, options: .caseInsensitive),
+                      let recognized = try text.boundingBox(for: range) else { continue }
+                let box = recognized.boundingBox
+                label = CGRect(x: box.minX * window.bounds.width, y: (1 - box.maxY) * window.bounds.height,
+                    width: box.width * window.bounds.width, height: box.height * window.bounds.height)
+                break
+            }
+            let frame = try XCTUnwrap(label, "The complete \(title) caption must remain readable at XXXL")
+            XCTAssertTrue(window.bounds.contains(frame), "The \(title) caption must fit inside the visible window")
+            frames.append(frame)
+        }
+        for (left, right) in zip(frames, frames.dropFirst()) {
+            XCTAssertGreaterThanOrEqual(right.minX - left.maxX, 4,
+                "Large tool captions must retain visible space between adjacent words")
         }
     }
 

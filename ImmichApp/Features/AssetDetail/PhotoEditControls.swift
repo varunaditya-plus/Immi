@@ -943,6 +943,7 @@ struct PhotoEditorToolPicker: View {
     private let primary: (title: String, symbol: String)?
     var isEnabled: Bool
     @ScaledMetric(relativeTo: .body) private var height = PhotoEditorMetrics.toolPickerHeight
+    @ScaledMetric(relativeTo: .caption2) private var itemWidth: CGFloat = 48
 
     init(selected: Binding<PhotoEditorTool>, isEnabled: Bool = true) {
         _selected = Binding<PhotoEditorTool?>(get: { selected.wrappedValue }, set: { if let value = $0 { selected.wrappedValue = value } })
@@ -975,9 +976,9 @@ struct PhotoEditorToolPicker: View {
                     .opacity(selected == tool ? 1 : 0).accessibilityHidden(true)
                 Image(systemName: tool == .adjust && selected != tool ? "dial.low" : symbol)
                     .font(.system(size: 20)).symbolRenderingMode(.monochrome)
-                Text(title).font(.caption2.weight(.medium)).lineLimit(1)
+                Text(title).font(.caption2.weight(.medium)).lineLimit(1).minimumScaleFactor(0.75)
             }
-            .frame(minWidth: 48, minHeight: height - 4)
+            .frame(minWidth: itemWidth, minHeight: height - 4)
             .foregroundStyle(selected == tool ? Color.primary : Color.secondary)
             .contentShape(Capsule())
         }
