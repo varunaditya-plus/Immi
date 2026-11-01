@@ -56,7 +56,7 @@ final class AlbumCommentComposerTests: SimulatorHostedTestCase {
         let album = AlbumResponseDTO(id: UUID().uuidString, albumName: "Shared album", description: nil,
             assetCount: 0, albumThumbnailAssetId: nil, shared: true, createdAt: .distantPast, assets: nil)
         let window = try await host(AlbumActivitySheet(album: album, viewModel: model))
-        addTeardownBlock { await repository.complete(.failure(CancellationError())) }
+        addTeardownBlock { repository.complete(.failure(CancellationError())) }
         try await waitUntil("The real native composer is mounted") { self.input(in: window) != nil }
         return (window, model, repository)
     }
