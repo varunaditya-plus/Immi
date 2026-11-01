@@ -39,6 +39,7 @@ final class VideoControlsAccessibilityLayoutTests: ViewerAdaptiveLayoutTestCase 
             XCTAssertTrue(strings.contains { $0.contains("1:01:06") }, "The elapsed timestamp must render completely: \(strings)")
             XCTAssertTrue(strings.contains { $0.contains("58:54") }, "The remaining timestamp must render completely: \(strings)")
             slider.sendActions(for: .touchUpInside)
+            try await waitUntil("Ending the scrub restores the compact playback bar") { abs(bar.bounds.height - 48) < 1 }
         }
     }
 }
