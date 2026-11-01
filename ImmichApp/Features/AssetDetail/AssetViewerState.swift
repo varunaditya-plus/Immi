@@ -182,54 +182,15 @@ final class AssetViewerState {
         existingLocalIDs: ([String]) -> Set<String>,
         serverIDsByLocalIdentifier: [String: String]
     ) -> Bool {
-        let localIDs = pages.filter { LocalPhotoLibrary.isLocal($0.id) }
-            .map { LocalPhotoLibrary.localIdentifier(from: $0.id) }
-        guard !localIDs.isEmpty else { return false }
-        let accessible = hasReadAccess ? existingLocalIDs(localIDs) : []
         let selected = currentAsset
-        var selectedID = selected.id
-        var nextIndex = 0
-        var serverPages: [String: AssetLite] = [:]
-        for page in pages where !LocalPhotoLibrary.isLocal(page.id) {
-            serverPages[page.id] = page
-        }
-        var positions: [String: Int] = [:]
-        var updated: [AssetLite] = []
-        var changed = false
-        for page in pages {
-            if page.id == selected.id { nextIndex = updated.count }
-            var retained = page
-            if LocalPhotoLibrary.isLocal(page.id) {
-                let localID = LocalPhotoLibrary.localIdentifier(from: page.id)
-                if !accessible.contains(localID) {
-                    changed = true
-                    guard let serverID = serverIDsByLocalIdentifier[localID], !serverID.isEmpty,
-                          !LocalPhotoLibrary.isLocal(serverID) else { continue }
-                    retained = serverPages[serverID] ?? AssetLite(
-                        id: serverID, isVideo: page.isVideo, ratio: page.ratio,
-                        thumbhash: page.thumbhash, createdAt: page.createdAt,
-                        isFavorite: page.isFavorite, duration: page.duration,
-                        livePhotoVideoID: page.livePhotoVideoID, origin: .server)
-                    retained.origin = .server
-                    if page.id == selected.id { selectedID = serverID }
-                }
-            }
-            if let index = positions[retained.id] {
-                if retained.id != page.id { updated[index].origin = .server }
-            } else {
-                positions[retained.id] = updated.count
-                updated.append(retained)
-            }
-        }
-        guard changed else { return false }
+        guard let readable = ReadablePhotoPages.refresh(pages, currentAssetID: selected.id,
+            hasReadAccess: hasReadAccess, existingLocalIDs: existingLocalIDs,
+            serverIDsByLocalIdentifier: serverIDsByLocalIdentifier) else { return false }
         let previousVisit = selection.visit
-        storage.assets = updated
-        if let index = updated.firstIndex(where: { $0.id == selectedID }) {
-            if selectedID == selected.id { selection.index = index }
-            else { selection = Selection(index: index, fallback: updated[index]) }
-        } else if !updated.isEmpty {
-            let next = min(nextIndex, updated.count - 1)
-            selection = Selection(index: next, fallback: updated[next])
+        storage.assets = readable.assets
+        if let index = readable.assets.firstIndex(where: { $0.id == readable.currentAssetID }) {
+            if readable.currentAssetID == selected.id { selection.index = index }
+            else { selection = Selection(index: index, fallback: readable.assets[index]) }
         } else {
             selection = Selection(index: 0, fallback: selected)
         }
@@ -297,5 +258,60 @@ final class AssetViewerState {
             if asset.origin != .both { storage.assets[index].origin = .both }
             uploadingIDs.remove(asset.id)
         }
+    }
+}
+
+@MainActor
+enum ReadablePhotoPages {
+    struct Result {
+        let assets: [AssetLite]
+        let currentAssetID: String?
+    }
+
+    static func refresh(
+        _ pages: [AssetLite], currentAssetID: String?, hasReadAccess: Bool,
+        existingLocalIDs: ([String]) -> Set<String>, serverIDsByLocalIdentifier: [String: String]
+    ) -> Result? {
+        let localIDs = pages.filter { LocalPhotoLibrary.isLocal($0.id) }
+            .map { LocalPhotoLibrary.localIdentifier(from: $0.id) }
+        guard !localIDs.isEmpty else { return nil }
+        let accessible = hasReadAccess ? existingLocalIDs(localIDs) : []
+        var selectedID = currentAssetID
+        var nextIndex = 0
+        var serverPages: [String: AssetLite] = [:]
+        for page in pages where !LocalPhotoLibrary.isLocal(page.id) { serverPages[page.id] = page }
+        var positions: [String: Int] = [:]
+        var updated: [AssetLite] = []
+        var changed = false
+        for page in pages {
+            if page.id == currentAssetID { nextIndex = updated.count }
+            var retained = page
+            if LocalPhotoLibrary.isLocal(page.id) {
+                let localID = LocalPhotoLibrary.localIdentifier(from: page.id)
+                if !accessible.contains(localID) {
+                    changed = true
+                    guard let serverID = serverIDsByLocalIdentifier[localID], !serverID.isEmpty,
+                          !LocalPhotoLibrary.isLocal(serverID) else { continue }
+                    retained = serverPages[serverID] ?? AssetLite(
+                        id: serverID, isVideo: page.isVideo, ratio: page.ratio,
+                        thumbhash: page.thumbhash, createdAt: page.createdAt,
+                        isFavorite: page.isFavorite, duration: page.duration,
+                        livePhotoVideoID: page.livePhotoVideoID, origin: .server)
+                    retained.origin = .server
+                    if page.id == currentAssetID { selectedID = serverID }
+                }
+            }
+            if let index = positions[retained.id] {
+                if retained.id != page.id { updated[index].origin = .server }
+            } else {
+                positions[retained.id] = updated.count
+                updated.append(retained)
+            }
+        }
+        guard changed else { return nil }
+        if !updated.contains(where: { $0.id == selectedID }) {
+            selectedID = updated.isEmpty ? nil : updated[min(nextIndex, updated.count - 1)].id
+        }
+        return Result(assets: updated, currentAssetID: selectedID)
     }
 }

@@ -4,8 +4,8 @@ import SwiftUI
 @MainActor
 @Observable
 final class PhotoSlideshowState {
-    private let source: [AssetLite]
-    private let sourceIndex: [String: Int]
+    private var source: [AssetLite]
+    private var sourceIndex: [String: Int]
     @ObservationIgnored private let displayAsset: (AssetLite) -> AssetLite
     private let generation = LocalSnapshot.generation
     let policy: AssetVisibilityPolicy
@@ -23,7 +23,8 @@ final class PhotoSlideshowState {
          visibilityPolicy: AssetVisibilityPolicy? = nil, dataManager: SwiftDataManager? = nil, removed: RemovedAssets? = nil,
          displayAsset: @escaping (AssetLite) -> AssetLite = { $0 }) {
         var seen = Set<String>()
-        source = assets.filter { seen.insert($0.id).inserted }
+        let source = assets.filter { seen.insert($0.id).inserted }
+        self.source = source
         self.displayAsset = displayAsset
         sourceIndex = Dictionary(uniqueKeysWithValues: source.enumerated().map { ($0.element.id, $0.offset) })
         policy = visibilityPolicy ?? AssetVisibilityPolicy(scope: .timeline, dataManager: dataManager, removed: removed)
@@ -62,6 +63,23 @@ final class PhotoSlideshowState {
         currentAssetID = next?.id ?? available.last?.id
         hasEnded = false
         restartInterval()
+    }
+
+    @discardableResult
+    func refreshLocalAccess(hasReadAccess: Bool, existingLocalIDs: ([String]) -> Set<String>,
+                            serverIDsByLocalIdentifier: [String: String]) -> Bool {
+        guard let readable = ReadablePhotoPages.refresh(source, currentAssetID: currentAssetID,
+            hasReadAccess: hasReadAccess, existingLocalIDs: existingLocalIDs,
+            serverIDsByLocalIdentifier: serverIDsByLocalIdentifier) else { return false }
+        source = readable.assets
+        sourceIndex = Dictionary(uniqueKeysWithValues: source.enumerated().map { ($0.element.id, $0.offset) })
+        if currentAssetID != readable.currentAssetID {
+            currentAssetID = readable.currentAssetID
+            hasEnded = false
+            restartInterval()
+        }
+        reconcile()
+        return true
     }
 
     func select(_ id: String) {
@@ -122,6 +140,8 @@ final class PhotoSlideshowState {
 struct PhotoSlideshowView: View {
     private let prepareShare: (AssetLite) async -> URL?
     private let previewLoader: PhotoPreviewLoader?
+    private let localLibrary: LocalPhotoLibrary
+    private let existingLocalIDs: @MainActor ([String]) -> Set<String>
     @State private var state: PhotoSlideshowState
     @State private var sharePreparation = SharePreparation()
     @State private var shareItem: SharedLinkPresentation?
@@ -136,9 +156,12 @@ struct PhotoSlideshowView: View {
 
     init(assets: [AssetLite], session: SessionManager, initialAssetID: String? = nil,
          visibilityPolicy: AssetVisibilityPolicy? = nil, prepareShare: @escaping (AssetLite) async -> URL?, state: PhotoSlideshowState? = nil,
-         previewLoader: PhotoPreviewLoader? = nil) {
+         previewLoader: PhotoPreviewLoader? = nil, localLibrary: LocalPhotoLibrary? = nil,
+         existingLocalIDs: @escaping @MainActor ([String]) -> Set<String> = LocalPhotoLibrary.existingLocalIdentifiers) {
         self.prepareShare = prepareShare
         self.previewLoader = previewLoader
+        self.localLibrary = localLibrary ?? .shared
+        self.existingLocalIDs = existingLocalIDs
         _state = State(initialValue: state ?? PhotoSlideshowState(assets: assets, initialAssetID: initialAssetID,
             visibilityPolicy: visibilityPolicy, displayAsset: { MediaEditingPipeline.shared.displayAsset($0, session: session) }))
     }
@@ -199,6 +222,14 @@ struct PhotoSlideshowView: View {
             dismiss()
         }
         .onChange(of: scenePhase) { _, phase in state.isSceneActive = phase == .active }
+        .onChange(of: localLibrary.revision, initial: true) { _, _ in
+            let currentID = state.currentAssetID
+            if state.refreshLocalAccess(hasReadAccess: localLibrary.isAuthorized, existingLocalIDs: existingLocalIDs,
+                serverIDsByLocalIdentifier: SwiftDataManager.shared.serverAssetIDsByLocalIdentifier()) {
+                if state.currentAssetID != currentID { sharePreparation.cancel() }
+                reconcile()
+            }
+        }
         .onChange(of: state.assets.map(\.id)) { _, _ in reconcile() }
         .onChange(of: state.currentAssetID) { _, _ in sharePreparation.cancel() }
         .onDisappear { cleanup() }
@@ -257,6 +288,7 @@ struct PhotoSlideshowView: View {
     private func reconcile() {
         state.reconcile()
         if let sharedAssetID, !state.allowsSharing(sharedAssetID) {
+            if let url = shareItem?.url { TemporaryMediaStore.remove(url) }
             shareItem = nil
             self.sharedAssetID = nil
             sharedSourceIDs = []

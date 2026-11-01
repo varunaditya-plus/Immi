@@ -1,5 +1,6 @@
 import AVFoundation
 import Observation
+import Photos
 import SwiftData
 import SwiftUI
 import UIKit
@@ -392,7 +393,8 @@ final class PhotoSlideshowPresentationTests: SimulatorHostedTestCase {
         presentations.append(presentation)
         let window = try await host(SlideshowTestPresenter(presentation: presentation,
             assets: [local] + server, model: nil, prepare: { _ in nil },
-            visibilityPolicy: policy, previewLoader: loader).environment(session as SessionManager))
+            visibilityPolicy: policy, previewLoader: loader, localLibrary: readableSlideshowLibrary())
+            .environment(session as SessionManager))
         try await waitUntil("The archived collection's actual slideshow opens with both admitted photos") {
             self.searchContainsText("1 of 2", in: window) && loaded == [local.id]
         }
@@ -436,7 +438,8 @@ final class PhotoSlideshowPresentationTests: SimulatorHostedTestCase {
         })
         let model = model([asset])
         let window = try await host(PhotoSlideshowView(assets: [asset], session: session, prepareShare: { _ in nil },
-            state: model, previewLoader: loader).environment(session as SessionManager).environment(\.scenePhase, .active))
+            state: model, previewLoader: loader, localLibrary: readableSlideshowLibrary(), existingLocalIDs: { Set($0) })
+            .environment(session as SessionManager).environment(\.scenePhase, .active))
         try await waitUntil("The real loader's PhotoKit branch receives only the selected local identifier") { requested == [asset.id] }
         try assertGreenImageCenter(await screenshot(window))
         XCTAssertNil(MockURLProtocol.lastRequest)
@@ -460,7 +463,8 @@ final class PhotoSlideshowPresentationTests: SimulatorHostedTestCase {
         let session = MockSessionManager()
         try session.setServer("https://held-slideshow.example")
         _ = try await host(SlideshowTestPresenter(presentation: presentation, assets: [video, following],
-            model: model, prepare: { _ in nil }, previewLoader: loader).environment(session as SessionManager))
+            model: model, prepare: { _ in nil }, previewLoader: loader, localLibrary: readableSlideshowLibrary())
+            .environment(session as SessionManager))
         await fulfillment(of: [gate.started], timeout: 2)
         try await Task.sleep(for: .milliseconds(3300))
         XCTAssertEqual(model.currentAssetID, video.id, "Waiting longer than the video's duration must not skip the unloaded clip")
@@ -499,7 +503,8 @@ final class PhotoSlideshowPresentationTests: SimulatorHostedTestCase {
             let model = model([asset])
             model.togglePlayback()
             let window = try await host(PhotoSlideshowView(assets: [asset], session: loaderSession, prepareShare: { _ in nil },
-                state: model, previewLoader: loader).environment(\.scenePhase, .active))
+                state: model, previewLoader: loader, localLibrary: readableSlideshowLibrary(), existingLocalIDs: { Set($0) })
+                .environment(\.scenePhase, .active))
             await fulfillment(of: [gate.started], timeout: 2)
             if invalidation == "mapping" {
                 try SwiftDataManager.shared.upsertBackupRecord(assetID: UUID().uuidString, checksum: "", localIdentifier: localID)
@@ -542,7 +547,8 @@ final class PhotoSlideshowPresentationTests: SimulatorHostedTestCase {
             return requests == 1 ? old : try? await gate.value()
         }
         let window = try await host(PhotoSlideshowView(assets: [asset], session: loaderSession, prepareShare: { _ in nil },
-            state: model, previewLoader: loader).environment(\.scenePhase, .active))
+            state: model, previewLoader: loader, localLibrary: readableSlideshowLibrary(), existingLocalIDs: { Set($0) })
+            .environment(\.scenePhase, .active))
         try await waitUntil("The original bitmap is installed before its source changes") { model.mediaState == .ready }
         try assertGreenImageCenter(await screenshot(window))
         loader.cached = old
@@ -649,13 +655,20 @@ private struct SlideshowTestPresenter: View {
     let prepare: (AssetLite) async -> URL?
     var visibilityPolicy: AssetVisibilityPolicy? = nil
     var previewLoader: PhotoPreviewLoader? = nil
+    var localLibrary: LocalPhotoLibrary? = nil
     var body: some View {
         Color.clear.fullScreenCover(isPresented: $presentation.isPresented) {
             PhotoSlideshowView(assets: assets, session: session, visibilityPolicy: visibilityPolicy, prepareShare: prepare,
-                state: model, previewLoader: previewLoader)
+                state: model, previewLoader: previewLoader, localLibrary: localLibrary, existingLocalIDs: { Set($0) })
                 .environment(\.scenePhase, .active)
         }
     }
+}
+
+@MainActor
+private func readableSlideshowLibrary() -> LocalPhotoLibrary {
+    LocalPhotoLibrary(defaults: UserDefaults(suiteName: "slideshow-readable-\(UUID())")!,
+        reader: .init(authorizationStatus: { .limited }))
 }
 
 @MainActor
