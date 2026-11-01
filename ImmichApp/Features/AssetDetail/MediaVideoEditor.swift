@@ -465,17 +465,31 @@ struct MediaVideoEditor: View {
             let width = geometry.size.width, start = history.values.video.trimStart / max(preview.duration, 0.001) * width
             let finish = end / max(preview.duration, 0.001) * width
             ZStack(alignment: .leading) {
-                HStack(spacing: 0) {
-                    ForEach(preview.frames) { frame in
-                        Image(uiImage: frame.image).resizable().scaledToFill()
-                            .frame(width: width / CGFloat(max(preview.frames.count, 1)), height: 40).clipped()
-                    }
-                }.clipShape(RoundedRectangle(cornerRadius: 6))
-                Color.black.opacity(0.65).frame(width: max(0, start), height: 40)
-                Color.black.opacity(0.65).frame(width: max(0, width - finish), height: 40).offset(x: finish)
-                RoundedRectangle(cornerRadius: 6).stroke(trimColor, lineWidth: 2).frame(width: max(1, finish - start), height: 40).offset(x: start)
-                Rectangle().fill(.white).frame(width: 2, height: 40)
-                    .offset(x: preview.sourceTime / max(preview.duration, 0.001) * width)
+                ZStack(alignment: .leading) {
+                    HStack(spacing: 0) {
+                        ForEach(preview.frames) { frame in
+                            Image(uiImage: frame.image).resizable().scaledToFill()
+                                .frame(width: width / CGFloat(max(preview.frames.count, 1)), height: 40).clipped()
+                        }
+                    }.clipShape(RoundedRectangle(cornerRadius: 6))
+                    Color.black.opacity(0.65).frame(width: max(0, start), height: 40)
+                    Color.black.opacity(0.65).frame(width: max(0, width - finish), height: 40).offset(x: finish)
+                    RoundedRectangle(cornerRadius: 6).stroke(trimColor, lineWidth: 2).frame(width: max(1, finish - start), height: 40).offset(x: start)
+                    Rectangle().fill(.white).frame(width: 2, height: 40)
+                        .offset(x: preview.sourceTime / max(preview.duration, 0.001) * width)
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Playback Position")
+                .accessibilityValue(Measurement(value: preview.sourceTime, unit: UnitDuration.seconds)
+                    .formatted(.measurement(width: .abbreviated, usage: .asProvided,
+                        numberFormatStyle: .number.precision(.fractionLength(2))).locale(locale)))
+                .accessibilityAdjustableAction { direction in
+                    guard !isSaving, isAllowed() else { return }
+                    preview.pause()
+                    let delta = direction == .increment ? 1 / preview.frameRate : -1 / preview.frameRate
+                    preview.seek(preview.sourceTime + delta)
+                }
+                .accessibilityIdentifier("videoEditor.frames")
                 trimHandle(start: true, width: width).offset(x: start - 22)
                 trimHandle(start: false, width: width).offset(x: finish - 22)
             }
@@ -486,17 +500,6 @@ struct MediaVideoEditor: View {
                 preview.seek(min(max(value.location.x / width * preview.duration, history.values.video.trimStart), end))
             })
             .accessibilityElement(children: .contain)
-            .accessibilityLabel("Playback Position")
-            .accessibilityValue(Measurement(value: preview.sourceTime, unit: UnitDuration.seconds)
-                .formatted(.measurement(width: .abbreviated, usage: .asProvided,
-                    numberFormatStyle: .number.precision(.fractionLength(2))).locale(locale)))
-            .accessibilityAdjustableAction { direction in
-                guard !isSaving, isAllowed() else { return }
-                preview.pause()
-                let delta = direction == .increment ? 1 / preview.frameRate : -1 / preview.frameRate
-                preview.seek(preview.sourceTime + delta)
-            }
-            .accessibilityIdentifier("videoEditor.frames")
         }
     }
 
