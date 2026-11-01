@@ -19,6 +19,8 @@ final class MemoriesViewModel {
     private let repo: MemoriesRepository
     private let assetRepo: AssetDetailRepository
     private let dataManager: SwiftDataManager
+    private var loadID = UUID()
+    private var phaseBeforeLoad: LoadingPhase<Void> = .idle
 
     init(repo: MemoriesRepository, assetRepo: AssetDetailRepository, dataManager: SwiftDataManager? = nil) {
         self.repo = repo
@@ -27,16 +29,21 @@ final class MemoriesViewModel {
     }
 
     func loadMemories() async {
-        guard snapshotGeneration == LocalSnapshot.generation else { return }
+        guard !Task.isCancelled, snapshotGeneration == LocalSnapshot.generation else { return }
+        let request = UUID()
+        loadID = request
+        if !phase.isLoading { phaseBeforeLoad = phase }
         phase = .loading
         do {
             // Layar penuh, jadi tidak dipotong seperti baris di Library.
             let memories = try await repo.getMemories()
-            guard !Task.isCancelled, snapshotGeneration == LocalSnapshot.generation else { return }
+            guard request == loadID, snapshotGeneration == LocalSnapshot.generation else { return }
+            guard !Task.isCancelled else { phase = phaseBeforeLoad; return }
             stories = MemoryStory.build(from: memories, limit: .max)
             phase = .loaded(())
         } catch {
-            guard !Task.isCancelled, snapshotGeneration == LocalSnapshot.generation else { return }
+            guard request == loadID, snapshotGeneration == LocalSnapshot.generation else { return }
+            guard !Task.isCancelled, !(error is CancellationError) else { phase = phaseBeforeLoad; return }
             phase = .failed((error as? APIError)?.errorDescription
                 ?? String(localized: "Failed to load memories"))
         }
