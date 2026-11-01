@@ -742,7 +742,7 @@ final class MemoryStoryVideoView: UIView {
 /// detik supaya segmennya terisi mulus. Kalau kemajuannya disimpan di viewer,
 /// seluruh story — dua pager bersarang dan semua fotonya — ikut dibangun ulang
 /// sesering itu juga.
-private struct MemoryStoryProgress: View {
+struct MemoryStoryProgress: View {
     /// Kenangan mana yang sedang dihitung — BUKAN cuma nomor fotonya.
     ///
     /// Berpindah tahun hampir selalu mendarat di foto nomor 0, sama seperti
@@ -768,18 +768,21 @@ private struct MemoryStoryProgress: View {
     private let tick: Double = 1.0 / 30.0
 
     var body: some View {
-        HStack(spacing: 4) {
-            ForEach(0..<max(count, 0), id: \.self) { segment in
-                Capsule()
-                    .fill(.white.opacity(0.3))
-                    .frame(height: 3)
-                    .overlay(alignment: .leading) {
-                        GeometryReader { proxy in
-                            Capsule()
-                                .fill(.white)
-                                .frame(width: proxy.size.width * fill(for: segment))
+        GeometryReader { geometry in
+            let spacing = min(4, geometry.size.width / (CGFloat(max(count, 1)) * 2))
+            HStack(spacing: spacing) {
+                ForEach(0..<max(count, 0), id: \.self) { segment in
+                    Capsule()
+                        .fill(.white.opacity(0.3))
+                        .frame(height: 3)
+                        .overlay(alignment: .leading) {
+                            GeometryReader { proxy in
+                                Capsule()
+                                    .fill(.white)
+                                    .frame(width: proxy.size.width * fill(for: segment))
+                            }
                         }
-                    }
+                }
             }
         }
         .frame(height: 3)
