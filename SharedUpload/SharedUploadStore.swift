@@ -217,12 +217,6 @@ actor SharedUploadStore {
         }
     }
 
-    func batches(for owner: SharedUploadOwner) throws -> [SharedUploadBatch] {
-        let listing = try listing(for: owner)
-        if let error = listing.firstError { throw error }
-        return listing.batches
-    }
-
     func listing(for owner: SharedUploadOwner) throws -> SharedUploadListing {
         guard let rootURL else { throw SharedUploadStoreError.appGroupUnavailable }
         guard fileManager.fileExists(atPath: rootURL.path) else { return .init(batches: [], failures: [:]) }

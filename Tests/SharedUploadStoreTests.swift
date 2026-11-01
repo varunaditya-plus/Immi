@@ -215,3 +215,11 @@ final class SharedUploadStoreTests: XCTestCase {
                 lastError: nil)])
     }
 }
+
+extension SharedUploadStore {
+    func batches(for owner: SharedUploadOwner) throws -> [SharedUploadBatch] {
+        let listing = try listing(for: owner)
+        if let error = listing.firstError { throw error }
+        return listing.batches
+    }
+}
