@@ -222,7 +222,7 @@ struct OnboardingView: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 22)
+        .frame(minHeight: 22)
     }
 
     private func serverButtonLabel(_ title: String, isLoading: Bool) -> some View {
@@ -234,7 +234,7 @@ struct OnboardingView: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 22)
+        .frame(minHeight: 22)
     }
 
     private func presentCurrentError(from vm: OnboardingViewModel) {
