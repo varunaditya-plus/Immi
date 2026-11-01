@@ -147,9 +147,13 @@ let sharedLinkSpacing: CGFloat = 14
 
 struct SharedLinkRow: View {
     let link: SharedLinkDTO
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        HStack(alignment: .top, spacing: sharedLinkSpacing) {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: sharedLinkSpacing))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: sharedLinkSpacing))
+        layout {
             thumbnail
                 .frame(width: sharedLinkThumbnailSide, height: sharedLinkThumbnailSide)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -168,25 +172,33 @@ struct SharedLinkRow: View {
                 expiry
 
                 if !permissions.isEmpty {
-                    HStack(spacing: 8) {
-                        ForEach(permissions, id: \.self) { permission in
-                            Text(permission)
-                                .font(.caption)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 5)
-                                .overlay {
-                                    Capsule().stroke(.secondary.opacity(0.5))
-                                }
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) {
+                            permissionBadges
+                        }
+                        .fixedSize(horizontal: true, vertical: false)
+                        VStack(alignment: .leading, spacing: 8) {
+                            permissionBadges
                         }
                     }
                     .padding(.top, 2)
                 }
             }
 
-            Spacer(minLength: 0)
+            if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
         }
         .padding(.vertical, 8)
         .contentShape(Rectangle())
+    }
+
+    private var permissionBadges: some View {
+        ForEach(permissions, id: \.self) { permission in
+            Text(permission)
+                .font(.caption)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+                .overlay { Capsule().stroke(.secondary.opacity(0.5)) }
+        }
     }
 
     /// `Color.clear.overlay` supaya gambar yang mengisi tidak melaporkan ukuran
