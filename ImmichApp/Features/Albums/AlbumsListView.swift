@@ -221,6 +221,10 @@ struct AlbumsListView: View {
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
+        ToolbarItem(placement: .principal) {
+            Text(folderTitle).font(.headline).lineLimit(1).accessibilityAddTraits(.isHeader)
+        }
+        .sharedBackgroundVisibility(.hidden)
         ToolbarItemGroup(placement: .topBarTrailing) {
             Menu {
                 Button { vm?.showCreateSheet = true } label: {
