@@ -187,7 +187,16 @@ final class NativeConfirmationUITests: XCTestCase {
         try tap(app.buttons["Continue"])
         try enter(LoopbackImmichServer.email, in: app.textFields["you@example.com"])
         try enter(LoopbackImmichServer.password, in: app.secureTextFields["Required"])
-        try tap(app.buttons["Sign In"])
+        let signIn = app.buttons["Sign In"]
+        let go = app.keyboards.buttons["Go"]
+        if signIn.exists && signIn.isHittable {
+            try tap(signIn)
+        } else if go.exists && go.isHittable {
+            try tap(go)
+        } else {
+            try reveal(signIn)
+            try tap(signIn)
+        }
         try wait("The complete app finishes its authenticated launch", timeout: 30) {
             self.collectionsControl.exists
         }
@@ -244,6 +253,8 @@ final class NativeConfirmationUITests: XCTestCase {
     }
 
     private func enter(_ value: String, in field: XCUIElement) throws {
+        try wait("The requested text field appears") { field.exists }
+        try reveal(field)
         try tap(field)
         if let previous = field.value as? String, previous != field.placeholderValue, !previous.isEmpty {
             field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: previous.count))
@@ -255,6 +266,7 @@ final class NativeConfirmationUITests: XCTestCase {
         let processes: [XCUIApplication] = [app, XCUIApplication(bundleIdentifier: "com.apple.springboard")]
         try wait("The requested native control is enabled and hittable", timeout: 15) {
             if element.exists && element.isHittable && element.isEnabled { return true }
+            if self.dismissKeyboardTutorialIfPresent() { return false }
             for process in processes {
                 for prompt in [process.alerts["Save Password?"], process.sheets["Save Password?"]] {
                     if prompt.exists {
@@ -269,10 +281,41 @@ final class NativeConfirmationUITests: XCTestCase {
         element.tap()
     }
 
+    private func dismissKeyboardTutorialIfPresent() -> Bool {
+        let message = "Speed up your typing by sliding your finger across the letters to compose a word."
+        let processes: [XCUIApplication] = [app, XCUIApplication(bundleIdentifier: "com.apple.springboard")]
+        for process in processes where process.staticTexts[message].exists {
+            let button = process.buttons.matching(identifier: "Continue").allElementsBoundByIndex.first { $0.isHittable && $0.isEnabled }
+            button?.tap()
+            return true
+        }
+        return false
+    }
+
     private func reveal(_ element: XCUIElement) throws {
         for _ in 0..<10 {
             if element.exists && element.isHittable { return }
-            app.swipeUp()
+            if dismissKeyboardTutorialIfPresent() { continue }
+            let keyboard = app.keyboards.firstMatch
+            guard keyboard.exists else { app.swipeUp(); continue }
+            let screen = app.frame
+            var visible = screen.insetBy(dx: 8, dy: 16)
+            // The keyboard's accessibility frame omits the predictive text bar.
+            visible.size.height = max(0, min(visible.maxY, keyboard.frame.minY - 60) - visible.minY)
+            let viewport = app.scrollViews.allElementsBoundByIndex.filter(\.isHittable)
+                .map { $0.frame.intersection(visible) }
+                .filter { !$0.isNull && $0.width > screen.width * 0.65 && $0.height > 60 }
+                .max { $0.height < $1.height }
+            guard let viewport else { break }
+            let target = element.exists ? element.frame : .zero
+            let upwards = target.isEmpty || target.midY > viewport.midY
+            let x = viewport.midX - screen.minX
+            let top = viewport.minY + 12 - screen.minY
+            let bottom = viewport.maxY - 12 - screen.minY
+            let origin = app.coordinate(withNormalizedOffset: .zero)
+            let start = origin.withOffset(CGVector(dx: x, dy: upwards ? bottom : top))
+            let end = origin.withOffset(CGVector(dx: x, dy: upwards ? top : bottom))
+            start.press(forDuration: 0.1, thenDragTo: end)
         }
         try wait("The requested control can be reached by normal scrolling") { element.exists && element.isHittable }
     }
