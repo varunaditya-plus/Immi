@@ -161,11 +161,11 @@ struct JourneyProfileButton: View {
     @State private var settingsPresentationTask: Task<Void, Never>?
     private let tip = BackupSetupProfileTip()
 
-    init(isActive: Bool = true, journey: BackupSetupJourney = .shared,
+    init(isActive: Bool = true, journey: BackupSetupJourney? = nil,
          openSettings: @escaping () -> Void) {
         self.isActive = isActive
         self.openSettings = openSettings
-        _journey = State(initialValue: journey)
+        _journey = State(initialValue: journey ?? .shared)
     }
 
     var body: some View {
