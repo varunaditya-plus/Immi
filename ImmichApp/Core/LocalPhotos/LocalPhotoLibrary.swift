@@ -213,6 +213,15 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
         var requestAuthorization: () async -> PHAuthorizationStatus = {
             await PHPhotoLibrary.requestAuthorization(for: .readWrite)
         }
+        var writeDownloadedFile: (URL, Bool) async throws -> String? = { fileURL, isVideo in
+            var localIdentifier: String?
+            try await PHPhotoLibrary.shared().performChanges {
+                let request = PHAssetCreationRequest.forAsset()
+                request.addResource(with: isVideo ? .video : .photo, fileURL: fileURL, options: nil)
+                localIdentifier = request.placeholderForCreatedAsset?.localIdentifier
+            }
+            return localIdentifier
+        }
         var photosInAlbums: (Set<String>) async -> LocalPhotoScan = { ids in
             await Task.detached(priority: .userInitiated) { LocalPhotoLibrary.fetchPhotos(inAlbums: ids) }.value
         }
@@ -974,20 +983,12 @@ final class LocalPhotoLibrary: NSObject, LocalSpaceLibrary {
 
     /// Menyimpan hasil download server ke pustaka perangkat dan mengembalikan
     /// `PHAsset.localIdentifier` yang baru dibuat.
-    func saveDownloadedFile(_ fileURL: URL, isVideo: Bool) async -> String? {
-        guard await requestAccess() else { return nil }
-
-        var localIdentifier: String?
+    func saveDownloadedFile(_ fileURL: URL, isVideo: Bool,
+                            isAllowed: @MainActor () -> Bool = { true }) async -> String? {
+        guard !Task.isCancelled, isAllowed(), await requestAccess(),
+              !Task.isCancelled, isAllowed() else { return nil }
         do {
-            try await PHPhotoLibrary.shared().performChanges {
-                let request = PHAssetCreationRequest.forAsset()
-                request.addResource(
-                    with: isVideo ? .video : .photo,
-                    fileURL: fileURL,
-                    options: nil)
-                localIdentifier = request.placeholderForCreatedAsset?.localIdentifier
-            }
-            return localIdentifier
+            return try await reader.writeDownloadedFile(fileURL, isVideo)
         } catch {
             return nil
         }

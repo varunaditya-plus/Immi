@@ -484,9 +484,51 @@ final class LocalPhotoLibraryLifecycleTests: XCTestCase {
         XCTAssertEqual(calls, 2)
     }
 
+    func testDownloadDoesNotWriteAfterAuthorizationChangesDuringThePermissionPrompt() async {
+        for cancelled in [false, true] {
+            let access = Access(.notDetermined)
+            let permission = heldPermission()
+            var allowed = true, writes = 0
+            let library = library(access: access, request: { await permission.value() }, write: { _, _ in
+                writes += 1
+                return "unexpected-photo"
+            })
+            let pending = Task {
+                await library.saveDownloadedFile(URL(fileURLWithPath: "/fixture/photo.jpg"), isVideo: false,
+                    isAllowed: { allowed })
+            }
+            await fulfillment(of: [permission.started], timeout: 2)
+            if cancelled { pending.cancel() } else { allowed = false }
+            access.status = .authorized
+            permission.complete(.authorized)
+
+            let result = await pending.value
+
+            XCTAssertNil(result)
+            XCTAssertEqual(writes, 0, "A permission callback cannot authorize a cancelled or newly private download")
+        }
+    }
+
+    func testAuthorizedDownloadWritesTheRequestedFileAndMediaTypeExactlyOnce() async {
+        let access = Access(.authorized)
+        let file = URL(fileURLWithPath: "/fixture/video.mov")
+        var writes: [(URL, Bool)] = []
+        let library = library(access: access, write: { url, isVideo in
+            writes.append((url, isVideo))
+            return "saved-video"
+        })
+
+        let result = await library.saveDownloadedFile(file, isVideo: true)
+
+        XCTAssertEqual(result, "saved-video")
+        XCTAssertEqual(writes.map(\.0), [file])
+        XCTAssertEqual(writes.map(\.1), [true])
+    }
+
     private func library(
         access: Access,
         request: (() async -> PHAuthorizationStatus)? = nil,
+        write: ((URL, Bool) async throws -> String?)? = nil,
         scan: ((Set<String>) async -> LocalPhotoScan)? = nil,
         albums: (() async -> [LocalAlbum])? = nil,
         counts: (() async -> LocalLibraryStatusCounts)? = nil,
@@ -497,6 +539,7 @@ final class LocalPhotoLibraryLifecycleTests: XCTestCase {
         return LocalPhotoLibrary(defaults: UserDefaults(suiteName: suite)!, reader: .init(
             authorizationStatus: { access.status },
             requestAuthorization: request ?? { XCTFail("Unexpected permission prompt"); return access.status },
+            writeDownloadedFile: write ?? { _, _ in XCTFail("Unexpected photo write"); return nil },
             photosInAlbums: scan ?? { _ in XCTFail("Unexpected photo enumeration"); return .init(photos: [], albumTitles: [:]) },
             albums: albums ?? { XCTFail("Unexpected album enumeration"); return [] },
             statusCounts: counts ?? { XCTFail("Unexpected count enumeration"); return .init(assets: 0, albums: 0) },

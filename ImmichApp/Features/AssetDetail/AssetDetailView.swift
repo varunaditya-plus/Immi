@@ -6,6 +6,8 @@ import LinkPresentation
 import SwiftUI
 
 struct AssetDetailView: View {
+    typealias DeviceFileSaver = @MainActor (URL, Bool, @MainActor () -> Bool) async -> String?
+
     @State private var viewer: AssetViewerState
     let visibilityPolicy: AssetVisibilityPolicy
     let trashActions: TrashViewerActions?
@@ -22,6 +24,7 @@ struct AssetDetailView: View {
     /// favorit tidak memengaruhi pengelompokan bucket, jadi tidak perlu
     /// memuat ulang timeline.
     var onFavoriteChanged: ((String, Bool) -> Void)? = nil
+    private let saveDeviceFile: DeviceFileSaver
 
     @Environment(SessionManager.self) private var session
     @Environment(\.dismiss) private var dismiss
@@ -129,7 +132,10 @@ struct AssetDetailView: View {
         onFavoriteChanged: ((String, Bool) -> Void)? = nil,
         trashActions: TrashViewerActions? = nil,
         viewModel: AssetDetailViewModel? = nil,
-        recentlyViewedStore: RecentlyViewedStore? = nil
+        recentlyViewedStore: RecentlyViewedStore? = nil,
+        saveDeviceFile: @escaping DeviceFileSaver = { file, isVideo, isAllowed in
+            await LocalPhotoLibrary.shared.saveDownloadedFile(file, isVideo: isVideo, isAllowed: isAllowed)
+        }
     ) {
         _viewer = State(initialValue: AssetViewerState(currentAsset: currentAsset, assets: assets))
         _vm = State(initialValue: viewModel)
@@ -141,6 +147,7 @@ struct AssetDetailView: View {
         self.onAssetUpdated = onAssetUpdated
         self.onFavoriteChanged = onFavoriteChanged
         self.trashActions = trashActions
+        self.saveDeviceFile = saveDeviceFile
     }
 
     private var currentAsset: AssetLite {
@@ -1901,16 +1908,23 @@ struct AssetDetailView: View {
         guard target.asset.origin == .server, let serverID = target.serverID, let vm else { return }
         let filename = target.detail?.originalFileName ?? serverID
         let accountGeneration = LocalSnapshot.generation
+        let requestContext = session.snapshot
+        let isAllowed = {
+            !Task.isCancelled && accountGeneration == LocalSnapshot.generation
+                && session.snapshot == requestContext
+                && serverAssetID(for: target.asset) == serverID
+                && visibilityPolicy.allows(id: target.asset.id) && visibilityPolicy.allows(id: serverID)
+        }
         viewer.download(target, operation: {
+            guard isAllowed() else { return false }
             guard let file = await vm.downloadCurrentFile(serverID, filename: filename) else { return false }
             defer { TemporaryMediaStore.remove(file) }
-            guard accountGeneration == LocalSnapshot.generation, !Task.isCancelled else { return false }
-            guard let localID = await LocalPhotoLibrary.shared.saveDownloadedFile(file, isVideo: PhotoExportService.contentType(of: file).conforms(to: .movie)) else {
-                if viewer.isCurrent(target), accountGeneration == LocalSnapshot.generation,
-                   !Task.isCancelled { vm.actionError = ErrorEvent(String(localized: "Could not save to Photos.")) }
+            guard isAllowed() else { return false }
+            guard let localID = await saveDeviceFile(file, PhotoExportService.contentType(of: file).conforms(to: .movie), isAllowed) else {
+                if viewer.isCurrent(target), isAllowed() { vm.actionError = ErrorEvent(String(localized: "Could not save to Photos.")) }
                 return false
             }
-            guard accountGeneration == LocalSnapshot.generation, !Task.isCancelled else { return false }
+            guard isAllowed() else { return false }
             do {
                 try SwiftDataManager.shared.linkDeviceAsset(localIdentifier: localID, to: serverID)
                 return true
