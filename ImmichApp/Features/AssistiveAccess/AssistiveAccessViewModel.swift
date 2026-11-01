@@ -6,15 +6,19 @@ import Observation
 final class AssistiveAccessViewModel {
     private let snapshotGeneration = LocalSnapshot.generation
 
-    private var loadedPhotos: [AssetLite] = []
-    private var loadedFavorites: [AssetLite] = []
-    private var loadedAlbum: [AssetLite] = []
+    // AssetLite equality compares IDs; the container also publishes changed metadata.
+    private struct Sources {
+        var photos: [AssetLite] = []
+        var favorites: [AssetLite] = []
+        var album: [AssetLite] = []
+    }
+    private var source = Sources()
     private var loading = false
     private var loadID = UUID()
 
-    var photos: [AssetLite] { admitted(loadedPhotos, scope: .timeline) }
-    var favorites: [AssetLite] { admitted(loadedFavorites, scope: .timeline) }
-    var album: [AssetLite] { admitted(loadedAlbum, scope: .collection) }
+    var photos: [AssetLite] { admitted(source.photos, scope: .timeline) }
+    var favorites: [AssetLite] { admitted(source.favorites, scope: .timeline) }
+    var album: [AssetLite] { admitted(source.album, scope: .collection) }
     var isLoading: Bool { isCurrent && loading }
     var isCurrent: Bool {
         snapshotGeneration == LocalSnapshot.generation && session.snapshot == requestContext
@@ -57,16 +61,16 @@ final class AssistiveAccessViewModel {
             let cached = LocalSnapshot.load(
                 [AssetLite].self, for: LocalSnapshot.Key.favorites)
                 ?? photos.filter(\.isFavorite)
-            loadedFavorites = chronological(cached)
+            source.favorites = chronological(cached)
         } else {
-            loadedFavorites = []
+            source.favorites = []
         }
         if !albumID.isEmpty {
             let cached = LocalSnapshot.load(
                 [AssetLite].self, for: LocalSnapshot.Key.album(albumID)) ?? []
-            loadedAlbum = chronological(cached)
+            source.album = chronological(cached)
         } else {
-            loadedAlbum = []
+            source.album = []
         }
 
         loading = photos.isEmpty
@@ -85,12 +89,12 @@ final class AssistiveAccessViewModel {
         restorePhotos()
         if let favoriteResult {
             let ordered = chronological(favoriteResult)
-            loadedFavorites = ordered
+            source.favorites = ordered
             LocalSnapshot.save(ordered, for: LocalSnapshot.Key.favorites, expectedGeneration: snapshotGeneration)
         }
         if let albumResult {
             let ordered = chronological(albumResult)
-            loadedAlbum = ordered
+            source.album = ordered
             LocalSnapshot.save(ordered, for: LocalSnapshot.Key.album(albumID), expectedGeneration: snapshotGeneration)
         }
     }
@@ -98,7 +102,7 @@ final class AssistiveAccessViewModel {
     private func restorePhotos() {
         // Cache Timeline memang disimpan menaik. Urutan itu dipertahankan agar
         // foto terbaru berada di ujung bawah, sama seperti Photos utama.
-        loadedPhotos = dataManager.timelineAssets().map(\.asset)
+        source.photos = dataManager.timelineAssets().map(\.asset)
     }
 
     private func admitted(_ assets: [AssetLite], scope: AssetVisibilityPolicy.Scope) -> [AssetLite] {

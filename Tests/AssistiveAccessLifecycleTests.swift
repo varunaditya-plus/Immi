@@ -75,6 +75,56 @@ final class AssistiveAccessLifecycleTests: XCTestCase {
         XCTAssertFalse(model.isLoading)
     }
 
+    func testSameAssetMetadataRefreshNotifiesEveryPublicSourceWhileLoadingRemainsFalse() async throws {
+        let original = asset("metadata", at: 100), album = albumID()
+        try manager.restoreToTimeline([AssetLite(original)])
+        let initialReads = try respond(["favorites": [original], album: [original]])
+        let firstSync = gate(), heldSync = gate()
+        firstSync.complete(.success(()))
+        let sequence = AssistiveSyncSequence([firstSync, heldSync])
+        let model = AssistiveAccessViewModel(api: api, dataManager: manager, performSync: { await sequence.run() })
+        await model.load(showsFavorites: true, albumID: album)
+        await fulfillment(of: Array(initialReads.values), timeout: 2)
+        XCTAssertFalse(model.isLoading)
+
+        var changed = original
+        changed.fileCreatedAt = Date(timeIntervalSince1970: 200)
+        changed.isFavorite = false
+        changed.exifInfo = try JSONDecoder().decode(ExifDTO.self,
+            from: Data(#"{"exifImageWidth":200,"exifImageHeight":100}"#.utf8))
+        var favorite = changed
+        favorite.isFavorite = true
+        let reads = try respond(["favorites": [favorite], album: [changed]])
+        let refresh = Task { await model.load(showsFavorites: true, albumID: album) }
+        addTeardownBlock { await heldSync.complete(.success(())); await refresh.value }
+        await fulfillment(of: [heldSync.started] + Array(reads.values), timeout: 2)
+        XCTAssertFalse(model.isLoading, "All three cached sources are full, so a busy-state notification cannot refresh this UI")
+        XCTAssertEqual(model.photos.first?.createdAt, original.fileCreatedAt)
+        XCTAssertEqual(model.favorites.first?.createdAt, original.fileCreatedAt)
+        XCTAssertEqual(model.album.first?.createdAt, original.fileCreatedAt)
+        try manager.restoreToTimeline([AssetLite(changed)])
+        let photosChanged = expectation(description: "The same timeline ID publishes its new date and favorite")
+        let favoritesChanged = expectation(description: "The same favorite ID publishes its new date and ratio")
+        let albumChanged = expectation(description: "The same album ID publishes its new date and favorite")
+        withObservationTracking { _ = model.photos.first?.createdAt } onChange: { photosChanged.fulfill() }
+        withObservationTracking { _ = model.favorites.first?.ratio } onChange: { favoritesChanged.fulfill() }
+        withObservationTracking { _ = model.album.first?.isFavorite } onChange: { albumChanged.fulfill() }
+
+        heldSync.complete(.success(()))
+        await refresh.value
+
+        await fulfillment(of: [photosChanged, favoritesChanged, albumChanged], timeout: 2)
+        XCTAssertFalse(model.isLoading)
+        for source in [model.photos, model.favorites, model.album] {
+            XCTAssertEqual(source.map(\.id), [original.id])
+            XCTAssertEqual(source.first?.createdAt, changed.fileCreatedAt)
+            XCTAssertEqual(source.first?.ratio, 2)
+        }
+        XCTAssertEqual(model.photos.first?.isFavorite, false)
+        XCTAssertEqual(model.favorites.first?.isFavorite, true)
+        XCTAssertEqual(model.album.first?.isFavorite, false)
+    }
+
     func testAnOlderPreferenceLoadCannotOverwriteTheNewerAlbumOrGlobalFavoritesSnapshot() async throws {
         let originalFavorite = AssetLite(asset("cached-favorite")), oldFavorite = asset("old-favorite")
         let oldPhoto = asset("old-album"), newPhoto = asset("new-album")
