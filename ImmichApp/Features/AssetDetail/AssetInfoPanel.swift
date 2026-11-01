@@ -167,6 +167,7 @@ struct AssetInfoPanel: View {
         }
         .background(Color(.secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .dynamicTypeSize(...DynamicTypeSize.large)
     }
 
     private var cameraHeader: some View {
