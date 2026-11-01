@@ -14,6 +14,114 @@ final class PhotoEditorCompactLayoutTests: ViewerAdaptiveLayoutTestCase {
         files.removeAll()
     }
 
+    func testNarrowCropToolbarsKeepCancelAndDoneVisibleAndSaveTheActualPhotoVideoAndLiveDrafts() async throws {
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 180, height: 120)).image { context in
+            UIColor.systemTeal.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 180, height: 120))
+        }
+        let movie = try await makePagerPlaybackMovie()
+        files.append(movie)
+        for width: CGFloat in [320, 375, 390, 414] {
+            for style in [UIUserInterfaceStyle.light, .dark] {
+                for kind in [MediaEditDocument.Kind.photo, .video, .livePhoto] {
+                    var saved: [PhotoEditRecipe] = []
+                    let editor: AnyView
+                    if kind == .photo {
+                        editor = AnyView(PhotoCropEditor(initialRecipe: .init(), loadImage: { image },
+                            isAllowed: { true }, onSave: { saved.append($0); return true }, onRevert: { true }))
+                    } else {
+                        editor = AnyView(MediaVideoEditor(sourceURL: movie, isLivePhoto: kind == .livePhoto,
+                            isAllowed: { true }, onSave: { _, _, photo in saved.append(photo); return true }, onRevert: { true }))
+                    }
+                    let window = try await host(editor.dynamicTypeSize(.large), style: style)
+                    resize(window, to: CGSize(width: width, height: 667))
+                    for tool in ["Adjust", "Filters"] {
+                        try await activateAccessibilityButton(named: tool, in: window)
+                        try await assertVisibleToolbarCommands(["Cancel", "Done", "More"], in: window,
+                            context: "\(kind) \(tool) at \(width) points")
+                        if tool == "Adjust", width < 350 {
+                            try await activateAccessibilityButton(named: "Exposure", in: window)
+                            var slider: UISlider?
+                            try await waitUntil("The actual Exposure slider is ready before testing menu history") {
+                                slider = self.descendants(window).compactMap { $0 as? UISlider }
+                                    .first { $0.accessibilityLabel == "Exposure" && $0.isEnabled }
+                                return slider != nil
+                            }
+                            let control = try XCTUnwrap(slider)
+                            control.sendActions(for: .touchDown)
+                            control.value = 0.75
+                            control.sendActions(for: .valueChanged)
+                            control.sendActions(for: .touchUpInside)
+                            try await activateSearchMenuAction(named: "Undo", in: window)
+                            try await waitUntil("The real narrow-menu Undo restores the original adjustment") {
+                                abs(control.value - 0.5) < 0.001
+                            }
+                            try await activateSearchMenuAction(named: "Redo", in: window)
+                            try await waitUntil("The real narrow-menu Redo restores the edited adjustment") {
+                                abs(control.value - 0.75) < 0.001
+                            }
+                        }
+                    }
+                    try await activateAccessibilityButton(named: "Crop", in: window)
+                    let commands = ["Cancel", "Done", "More"]
+                        + (width >= 350 ? ["Flip", "Rotate Left"] : [])
+                        + (width >= 400 ? ["Aspect Ratio"] : [])
+                    try await assertVisibleToolbarCommands(commands, in: window,
+                        context: "\(kind) Crop at \(width) points")
+                    if width < 400 {
+                        try await activateSearchMenuAction(named: "Aspect Ratio", in: window)
+                    } else {
+                        try await activateAccessibilityButton(named: "Aspect Ratio", in: window)
+                    }
+                    try await activateAccessibilityButton(named: "SQUARE", in: window)
+                    for title in ["Flip", "Rotate Left"] {
+                        if width < 350 {
+                            try await activateSearchMenuAction(named: title, in: window)
+                        } else {
+                            try await activateAccessibilityButton(named: title, in: window)
+                        }
+                    }
+                    try await assertVisibleToolbarCommands(commands, in: window,
+                        context: "\(kind) Save after crop changes at \(width) points")
+                    try await activateAccessibilityButton(named: "Done", in: window)
+                    try await waitUntil("The actual narrow \(kind) editor saves its flipped draft") { saved.count == 1 }
+                    let recipe = try XCTUnwrap(saved.first)
+                    XCTAssertTrue(recipe.flipHorizontal)
+                    XCTAssertEqual(recipe.quarterTurns, 3)
+                    XCTAssertEqual(recipe.cropAspectRatio, 1)
+                    XCTAssertEqual(recipe[.exposure], width < 350 ? 0.5 : 0, accuracy: 0.001)
+                    window.isHidden = true
+                    window.rootViewController = nil
+                }
+            }
+        }
+    }
+
+    private func assertVisibleToolbarCommands(_ titles: [String], in window: UIWindow, context: String) async throws {
+        var frames: [String: CGRect] = [:]
+        for title in titles {
+            var control: NSObject?
+            try await waitUntil("The \(context) toolbar retains enabled \(title)") {
+                control = self.accessibilityButton(named: title, in: window)
+                return control != nil
+            }
+            if control == nil { _ = try await screenshot(window) }
+            let button = try XCTUnwrap(control)
+            let frame = if let view = button as? UIView {
+                view.convert(view.bounds, to: window)
+            } else { window.convert(button.accessibilityFrame, from: nil) }
+            XCTAssertFalse(frame.isEmpty)
+            XCTAssertTrue(window.bounds.contains(frame), "The \(context) \(title) control must fit inside the viewport")
+            frames[title] = frame
+        }
+        if let cancel = frames["Cancel"], let flip = frames["Flip"] {
+            XCTAssertLessThan(cancel.minX, flip.minX, "The \(context) Cancel action must remain before the crop transforms")
+        }
+        if let done = frames["Done"], let more = frames["More"] {
+            XCTAssertGreaterThan(done.maxX, more.maxX, "The \(context) Done action must remain after More")
+        }
+    }
+
     func testShortLandscapePhotoEditorKeepsItsPreviewAndAdjustmentReachableAtAccessibilitySize() async throws {
         let image = UIGraphicsImageRenderer(size: CGSize(width: 600, height: 400)).image { context in
             UIColor.green.setFill(); context.fill(CGRect(x: 0, y: 0, width: 600, height: 400))

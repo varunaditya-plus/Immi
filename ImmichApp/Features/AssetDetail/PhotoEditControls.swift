@@ -6,6 +6,8 @@ enum PhotoEditorMetrics {
     static let toolPickerHeight: CGFloat = 60
     static let toolPickerBottomPadding: CGFloat = 16
     static let minimumPreviewHeight: CGFloat = 112
+    static let narrowToolbarWidth: CGFloat = 350
+    static let wideToolbarWidth: CGFloat = 400
 }
 
 struct PhotoEditorContentViewport<Content: View>: View {
@@ -948,30 +950,39 @@ private struct PhotoBlackPointShape: Shape {
 struct PhotoCropTransformButtons: View {
     @Binding var recipe: PhotoEditRecipe
     var onEditingChanged: (Bool) -> Void
+    var isInMenu = false
     @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
-        HStack(spacing: 8) {
-            Button("Flip", systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right") {
-                guard isEnabled else { return }
-                onEditingChanged(true)
-                defer { onEditingChanged(false) }
-                if recipe.quarterTurns.isMultiple(of: 2) { recipe.flipHorizontal.toggle() }
-                else { recipe.flipVertical.toggle() }
-                recipe.framing.origin.x = 1 - recipe.framing.maxX
-            }.frame(width: 44, height: 44)
-            Button("Rotate Left", systemImage: "rotate.left") {
-                guard isEnabled else { return }
-                onEditingChanged(true)
-                defer { onEditingChanged(false) }
-                let frame = recipe.framing
-                recipe.quarterTurns = (recipe.quarterTurns + 3) % 4
-                recipe.framing = CGRect(x: frame.minY, y: 1 - frame.maxX, width: frame.height, height: frame.width)
-                if let ratio = recipe.cropAspectRatio, ratio > 0 { recipe.cropAspectRatio = 1 / ratio }
-            }.frame(width: 44, height: 44)
+        if isInMenu {
+            buttons
+        } else {
+            HStack(spacing: 8) { buttons }
+                .labelStyle(.iconOnly).buttonStyle(.plain)
+                .glassEffect(.regular, in: .capsule)
         }
-        .labelStyle(.iconOnly).buttonStyle(.plain)
-        .glassEffect(.regular, in: .capsule)
+    }
+
+    @ViewBuilder private var buttons: some View {
+        Button("Flip", systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right") {
+            guard isEnabled else { return }
+            onEditingChanged(true)
+            defer { onEditingChanged(false) }
+            if recipe.quarterTurns.isMultiple(of: 2) { recipe.flipHorizontal.toggle() }
+            else { recipe.flipVertical.toggle() }
+            recipe.framing.origin.x = 1 - recipe.framing.maxX
+        }
+        .frame(width: isInMenu ? nil : 44, height: isInMenu ? nil : 44)
+        Button("Rotate Left", systemImage: "rotate.left") {
+            guard isEnabled else { return }
+            onEditingChanged(true)
+            defer { onEditingChanged(false) }
+            let frame = recipe.framing
+            recipe.quarterTurns = (recipe.quarterTurns + 3) % 4
+            recipe.framing = CGRect(x: frame.minY, y: 1 - frame.maxX, width: frame.height, height: frame.width)
+            if let ratio = recipe.cropAspectRatio, ratio > 0 { recipe.cropAspectRatio = 1 / ratio }
+        }
+        .frame(width: isInMenu ? nil : 44, height: isInMenu ? nil : 44)
     }
 }
 

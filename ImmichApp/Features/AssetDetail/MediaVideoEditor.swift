@@ -180,6 +180,7 @@ struct MediaVideoEditor: View {
     @State private var tool: PhotoEditorTool?
     @State private var aspectDrawer = false
     @State private var isSaving = false
+    @State private var editorWidth: CGFloat = 0
     @State private var loadFailed = false
     @State private var loadRevision = UUID()
     @State private var ready = false
@@ -212,6 +213,11 @@ struct MediaVideoEditor: View {
     private var end: Double { history.values.video.trimEnd ?? preview.duration }
     private var stillMode: Bool { isLivePhoto && [.off, .longExposure].contains(history.values.live.mode) }
     private var isPrimaryVideo: Bool { tool == nil && !isLivePhoto }
+    private var usesCompactCropToolbar: Bool { tool == .crop && editorWidth < PhotoEditorMetrics.wideToolbarWidth }
+    private var movesCropTransformsToMenu: Bool { tool == .crop && editorWidth < PhotoEditorMetrics.narrowToolbarWidth }
+    private var movesHistoryToMenu: Bool {
+        (tool == .adjust || tool == .filters) && editorWidth < PhotoEditorMetrics.narrowToolbarWidth
+    }
     private var trimColor: Color {
         dragStart != nil || history.values.video.trimStart > 0 || history.values.video.trimEnd != nil
             ? .yellow : Color(uiColor: .systemGray3)
@@ -268,29 +274,31 @@ struct MediaVideoEditor: View {
                     .disabled(isSaving)
                 }
                 .sharedBackgroundVisibility(.hidden)
-                ToolbarItem(placement: .topBarLeading) {
-                    if tool == nil {
-                        PhotoEditorToolbarButton(history.values.video.isMuted ? "Unmute" : "Mute",
-                            systemImage: history.values.video.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill") {
-                            var value = history.values; value.video.isMuted.toggle(); history.update(value)
+                if !movesCropTransformsToMenu, !movesHistoryToMenu {
+                    ToolbarItem(placement: .topBarLeading) {
+                        if tool == nil {
+                            PhotoEditorToolbarButton(history.values.video.isMuted ? "Unmute" : "Mute",
+                                systemImage: history.values.video.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill") {
+                                var value = history.values; value.video.isMuted.toggle(); history.update(value)
+                            }
+                            .disabled(!ready || isSaving || !isAllowed())
+                        } else if tool == .crop {
+                            PhotoCropTransformButtons(recipe: photo, onEditingChanged: history.editingChanged)
+                                .disabled(isSaving)
+                        } else {
+                            HStack(spacing: 8) {
+                                Button("Undo", systemImage: "arrow.uturn.backward", action: history.undo)
+                                    .frame(width: 44, height: 44).disabled(!history.canUndo || isSaving)
+                                Button("Redo", systemImage: "arrow.uturn.forward", action: history.redo)
+                                    .frame(width: 44, height: 44).disabled(!history.canRedo || isSaving)
+                            }
+                            .labelStyle(.iconOnly).buttonStyle(.plain)
+                            .glassEffect(.regular, in: .capsule)
                         }
-                        .disabled(!ready || isSaving || !isAllowed())
-                    } else if tool == .crop {
-                        PhotoCropTransformButtons(recipe: photo, onEditingChanged: history.editingChanged)
-                            .disabled(isSaving)
-                    } else {
-                        HStack(spacing: 8) {
-                            Button("Undo", systemImage: "arrow.uturn.backward", action: history.undo)
-                                .frame(width: 44, height: 44).disabled(!history.canUndo || isSaving)
-                            Button("Redo", systemImage: "arrow.uturn.forward", action: history.redo)
-                                .frame(width: 44, height: 44).disabled(!history.canRedo || isSaving)
-                        }
-                        .labelStyle(.iconOnly).buttonStyle(.plain)
-                        .glassEffect(.regular, in: .capsule)
                     }
+                    .sharedBackgroundVisibility(.hidden)
                 }
-                .sharedBackgroundVisibility(.hidden)
-                if tool == .crop {
+                if tool == .crop, !usesCompactCropToolbar {
                     ToolbarItemGroup(placement: .topBarTrailing) {
                         Button("Aspect Ratio", systemImage: "aspectratio") { aspectDrawer.toggle() }
                             .labelStyle(.iconOnly).buttonStyle(.plain)
@@ -357,16 +365,28 @@ struct MediaVideoEditor: View {
         .interactiveDismissDisabled(history.isDirty || isSaving)
         .persistentSystemOverlays(.hidden)
         .statusBarHidden()
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { editorWidth = $0 }
     }
 
     private var moreMenu: some View {
         Menu {
-            if tool == nil {
+            if movesCropTransformsToMenu {
+                PhotoCropTransformButtons(recipe: photo, onEditingChanged: history.editingChanged, isInMenu: true)
+                Divider()
+            }
+            if usesCompactCropToolbar {
+                Button("Aspect Ratio", systemImage: "aspectratio") {
+                    history.editingChanged(false)
+                    aspectDrawer.toggle()
+                }
+                Divider()
+            }
+            if tool == nil || movesHistoryToMenu {
                 Button("Undo", systemImage: "arrow.uturn.backward", action: history.undo)
                     .disabled(!history.canUndo || isSaving)
                 Button("Redo", systemImage: "arrow.uturn.forward", action: history.redo)
                     .disabled(!history.canRedo || isSaving)
-                if !isLivePhoto {
+                if tool == nil, !isLivePhoto {
                     Menu("Playback Speed", systemImage: "speedometer") {
                         ForEach([0.25, 0.5, 1, 2], id: \.self) { rate in
                             Button(String(format: "%g×", rate)) { var value = history.values; value.video.rate = rate; history.update(value) }
@@ -378,7 +398,7 @@ struct MediaVideoEditor: View {
             }
             Button("Revert to Original", role: .destructive) { revertConfirmation = true }
         } label: {
-            if tool == .crop {
+            if tool == .crop, !usesCompactCropToolbar {
                 Image(systemName: "ellipsis").frame(width: 44, height: 44)
             } else {
                 Image(systemName: "ellipsis").frame(width: 44, height: 44)

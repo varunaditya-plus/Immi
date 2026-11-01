@@ -20,6 +20,7 @@ struct PhotoCropEditor: View {
     @State private var error: ErrorEvent?
     @State private var saveTask: Task<Void, Never>?
     @State private var aspectDrawer = false
+    @State private var editorWidth: CGFloat = 0
 
     init(initialRecipe: PhotoEditRecipe, requiresSave: Bool = false, loadImage: @escaping @MainActor () async -> UIImage?,
          isAllowed: @escaping @MainActor () -> Bool,
@@ -36,6 +37,10 @@ struct PhotoCropEditor: View {
     private var recipe: Binding<PhotoEditRecipe> {
         Binding(get: { history.recipe }, set: { if !isSaving { history.update($0) } })
     }
+
+    private var usesCompactCropToolbar: Bool { tool == .crop && editorWidth < PhotoEditorMetrics.wideToolbarWidth }
+    private var movesCropTransformsToMenu: Bool { tool == .crop && editorWidth < PhotoEditorMetrics.narrowToolbarWidth }
+    private var movesHistoryToMenu: Bool { tool != .crop && editorWidth < PhotoEditorMetrics.narrowToolbarWidth }
 
     var body: some View {
         NavigationStack {
@@ -78,29 +83,32 @@ struct PhotoCropEditor: View {
                     .disabled(isSaving)
                 }
                 .sharedBackgroundVisibility(.hidden)
-                ToolbarItem(placement: .topBarLeading) {
-                    if tool == .crop {
-                        PhotoCropTransformButtons(recipe: recipe, onEditingChanged: history.editingChanged)
-                            .disabled(isSaving)
-                    } else {
-                        HStack(spacing: 8) {
-                            Button("Undo", systemImage: "arrow.uturn.backward", action: history.undo)
-                                .frame(width: 44, height: 44).disabled(!history.canUndo || isSaving)
-                            Button("Redo", systemImage: "arrow.uturn.forward", action: history.redo)
-                                .frame(width: 44, height: 44).disabled(!history.canRedo || isSaving)
+                if !movesCropTransformsToMenu, !movesHistoryToMenu {
+                    ToolbarItem(placement: .topBarLeading) {
+                        if tool == .crop {
+                            PhotoCropTransformButtons(recipe: recipe, onEditingChanged: history.editingChanged)
+                                .disabled(isSaving)
+                        } else {
+                            HStack(spacing: 8) {
+                                Button("Undo", systemImage: "arrow.uturn.backward", action: history.undo)
+                                    .frame(width: 44, height: 44).disabled(!history.canUndo || isSaving)
+                                Button("Redo", systemImage: "arrow.uturn.forward", action: history.redo)
+                                    .frame(width: 44, height: 44).disabled(!history.canRedo || isSaving)
+                            }
+                            .labelStyle(.iconOnly).buttonStyle(.plain)
+                            .glassEffect(.regular, in: .capsule)
                         }
-                        .labelStyle(.iconOnly).buttonStyle(.plain)
-                        .glassEffect(.regular, in: .capsule)
                     }
+                    .sharedBackgroundVisibility(.hidden)
                 }
-                .sharedBackgroundVisibility(.hidden)
-                if tool == .crop {
+                if tool == .crop, !usesCompactCropToolbar {
                     ToolbarItemGroup(placement: .topBarTrailing) {
                         Button("Aspect Ratio", systemImage: "aspectratio") {
                             history.editingChanged(false)
                             aspectDrawer.toggle()
                         }
                         .labelStyle(.iconOnly)
+                        .accessibilityLabel("Aspect Ratio")
                         .disabled(isSaving || image == nil)
                         moreMenu
                     }
@@ -158,6 +166,7 @@ struct PhotoCropEditor: View {
         .interactiveDismissDisabled(history.isDirty || isSaving)
         .persistentSystemOverlays(.hidden)
         .statusBarHidden()
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { editorWidth = $0 }
     }
 
     private var toolPicker: some View {
@@ -171,6 +180,24 @@ struct PhotoCropEditor: View {
 
     private var moreMenu: some View {
         Menu {
+            if movesHistoryToMenu {
+                Button("Undo", systemImage: "arrow.uturn.backward", action: history.undo)
+                    .disabled(!history.canUndo || isSaving)
+                Button("Redo", systemImage: "arrow.uturn.forward", action: history.redo)
+                    .disabled(!history.canRedo || isSaving)
+                Divider()
+            }
+            if movesCropTransformsToMenu {
+                PhotoCropTransformButtons(recipe: recipe, onEditingChanged: history.editingChanged, isInMenu: true)
+                Divider()
+            }
+            if usesCompactCropToolbar {
+                Button("Aspect Ratio", systemImage: "aspectratio") {
+                    history.editingChanged(false)
+                    aspectDrawer.toggle()
+                }
+                Divider()
+            }
             Text("Edits are saved on this device.")
             Button("Revert to Original", systemImage: "arrow.counterclockwise", role: .destructive) {
                 revertConfirmation = true
