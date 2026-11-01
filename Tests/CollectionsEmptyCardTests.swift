@@ -14,6 +14,7 @@ final class CollectionsEmptyCardTests: SimulatorHostedTestCase {
                 let geometry = EmptyCardGeometry()
                 let window = try await host(CollectionEmptyCard(state: state)
                     .environment(\.dynamicTypeSize, size)
+                    .fixedSize(horizontal: false, vertical: true)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { geometry.height = $0 }
                     .padding(20), style: style)
                 window.frame.size = CGSize(width: 320, height: 1400)
