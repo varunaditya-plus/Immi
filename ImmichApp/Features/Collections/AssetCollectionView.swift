@@ -215,23 +215,61 @@ struct AssetCollectionView: View {
 /// pernah dibuka sama sekali.
 struct AlbumPickerLoader: View {
     var onSelect: (AlbumResponseDTO) -> Void
+    var repository: AlbumRepository? = nil
 
     @Environment(SessionManager.self) private var session
-    @State private var albums: [AlbumResponseDTO] = []
-    @State private var isLoading = true
+    @Environment(\.dismiss) private var dismiss
+    @State private var phase: LoadingPhase<[AlbumResponseDTO]> = .idle
 
     var body: some View {
         Group {
-            if isLoading {
-                ProgressView()
-            } else {
+            if case .loaded(let albums) = phase {
                 AlbumPickerSheet(albums: albums, onSelect: onSelect)
+            } else {
+                NavigationStack {
+                    Group {
+                        if case .failed(let message) = phase {
+                            ContentUnavailableView {
+                                Label("Failed to Load", systemImage: "exclamationmark.triangle")
+                            } description: {
+                                Text(message)
+                            } actions: {
+                                Button("Retry") { Task { await load() } }
+                                    .buttonStyle(.borderedProminent)
+                            }
+                        } else {
+                            ProgressView()
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .navigationTitle("Add to Album")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") { dismiss() }
+                        }
+                    }
+                }
             }
         }
-        .task {
-            let repo = AlbumRepository(api: APIClient(session: session))
-            albums = (try? await repo.all()) ?? []
-            isLoading = false
+        .task { await load() }
+    }
+
+    private func load() async {
+        guard !phase.isLoading else { return }
+        let generation = LocalSnapshot.generation
+        phase = .loading
+        do {
+            let albums = try await (repository ?? AlbumRepository(api: APIClient(session: session))).all()
+            guard !Task.isCancelled, generation == LocalSnapshot.generation else { return }
+            phase = .loaded(albums)
+        } catch {
+            guard generation == LocalSnapshot.generation else { return }
+            if Task.isCancelled || error is CancellationError {
+                phase = .idle
+            } else {
+                phase = .failed((error as? APIError)?.errorDescription ?? String(localized: "Failed to load albums"))
+            }
         }
     }
 }
