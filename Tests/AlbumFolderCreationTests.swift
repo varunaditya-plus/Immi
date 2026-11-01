@@ -8,11 +8,13 @@ import XCTest
 final class AlbumFolderCreationTests: SimulatorHostedTestCase {
     private var previousAlbums: [AlbumResponseDTO]?
     private var previousLayout: Any?
+    private var previousCustomOrder: Any?
     private var suite: String?
 
     override func setUp() {
         previousAlbums = LocalSnapshot.load([AlbumResponseDTO].self, for: LocalSnapshot.Key.albumsList)
         previousLayout = UserDefaults.standard.object(forKey: "albumsLayout")
+        previousCustomOrder = UserDefaults.standard.object(forKey: "albumsCustomOrder")
         UserDefaults.standard.set("grid", forKey: "albumsLayout")
     }
 
@@ -22,6 +24,8 @@ final class AlbumFolderCreationTests: SimulatorHostedTestCase {
         else { LocalSnapshot.remove(LocalSnapshot.Key.albumsList) }
         if let previousLayout { UserDefaults.standard.set(previousLayout, forKey: "albumsLayout") }
         else { UserDefaults.standard.removeObject(forKey: "albumsLayout") }
+        if let previousCustomOrder { UserDefaults.standard.set(previousCustomOrder, forKey: "albumsCustomOrder") }
+        else { UserDefaults.standard.removeObject(forKey: "albumsCustomOrder") }
         if let suite { UserDefaults.standard.removePersistentDomain(forName: suite) }
     }
 
@@ -31,6 +35,71 @@ final class AlbumFolderCreationTests: SimulatorHostedTestCase {
 
     func testCreatingAnAlbumFromSharedScopeAtTheRootShowsTheNewPersonalAlbum() async throws {
         try await checkCreation(inFolder: false)
+    }
+
+    func testSharedGridKeepsAlbumsFromNestedPersonalFoldersVisible() async throws {
+        try await checkSharedFolderVisibility(customOrder: true, style: .light)
+    }
+
+    func testSortedSharedListKeepsAlbumsFromNestedPersonalFoldersVisibleInDarkMode() async throws {
+        UserDefaults.standard.set("list", forKey: "albumsLayout")
+        try await checkSharedFolderVisibility(customOrder: false, style: .dark)
+    }
+
+    func testCreatingFolderFromSharedScopeShowsTheFolderInPersonal() async throws {
+        let organization = try makeOrganization()
+        let repository = FolderCreationRepository(api: makeStubAPIClient())
+        let model = AlbumListViewModel(repo: repository)
+        let window = try await host(NavigationStack {
+            AlbumsListView(viewModel: model, initialScope: .shared, organizationStore: organization)
+        })
+        try await waitUntil("The real shared scope finishes loading") { model.hasLoadedAlbums }
+        try await activateAccessibilityButton(named: "Create", in: window)
+        try await activateAccessibilityButton(named: "New Folder", in: window)
+        var alert: UIAlertController?
+        try await waitUntil("The native folder-name alert is presented") {
+            alert = self.presentedController(from: window.rootViewController) as? UIAlertController
+            return alert?.textFields?.first != nil && alert?.transitionCoordinator == nil
+        }
+        let field = try XCTUnwrap(alert?.textFields?.first)
+        field.text = "Created folder"
+        field.sendActions(for: .editingChanged)
+        try await activateAccessibilityButton(named: "Create", in: window, within: try XCTUnwrap(alert?.view))
+        try await waitUntil("The newly created folder is saved") { organization.value.folders.count == 1 }
+        let text = try await renderedText(in: window, containing: ["Created folder"])
+        XCTAssertTrue(text.contains("Created folder"), "Folder creation must leave Shared so the saved folder is reachable: \(text)")
+    }
+
+    private func checkSharedFolderVisibility(customOrder: Bool, style: UIUserInterfaceStyle) async throws {
+        UserDefaults.standard.set(customOrder, forKey: "albumsCustomOrder")
+        let organization = try makeOrganization()
+        let parent = try XCTUnwrap(organization.createFolder(name: "Trips folder", parentID: nil))
+        let child = try XCTUnwrap(organization.createFolder(name: "Nested folder", parentID: parent.id))
+        let shared = AlbumResponseDTO(id: UUID().uuidString, albumName: "Shared mountain", description: nil,
+            assetCount: 0, albumThumbnailAssetId: nil, shared: true, createdAt: .distantPast, assets: nil)
+        let personal = AlbumResponseDTO(id: UUID().uuidString, albumName: "Personal beach", description: nil,
+            assetCount: 0, albumThumbnailAssetId: nil, shared: false, createdAt: .distantPast, assets: nil)
+        organization.moveAlbum(shared.id, to: child.id)
+        let repository = FolderCreationRepository(api: makeStubAPIClient())
+        repository.albums = [shared, personal]
+        let model = AlbumListViewModel(repo: repository)
+        let window = try await host(NavigationStack {
+            AlbumsListView(viewModel: model, initialScope: .shared, organizationStore: organization)
+        }, style: style)
+        try await waitUntil("The shared album browser loads the fixture") { model.hasLoadedAlbums }
+        let text = try await renderedText(in: window, containing: ["Shared mountain"])
+        XCTAssertTrue(text.contains("Shared mountain"), "Shared albums must remain reachable after a move: \(text)")
+        XCTAssertFalse(text.contains("Personal beach"), text)
+        XCTAssertFalse(text.contains("Trips folder"), text)
+        XCTAssertEqual(organization.value.albumFolders[shared.id], child.id,
+            "Showing Shared must preserve the user's Personal folder organization")
+    }
+
+    private func makeOrganization() throws -> AlbumsOrganizationStore {
+        let suite = "album-folder-creation.\(UUID().uuidString)"
+        self.suite = suite
+        return AlbumsOrganizationStore(owner: BackupQueueOwner(server: "https://synthetic.example/api", userID: "test"),
+            defaults: try XCTUnwrap(UserDefaults(suiteName: suite)))
     }
 
     private func checkCreation(inFolder: Bool) async throws {

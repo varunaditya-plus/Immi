@@ -46,9 +46,10 @@ struct AlbumOrganization: Codable, Equatable {
         }
     }
 
-    func orderedAlbums(_ albums: [AlbumResponseDTO], in folderID: String? = nil) -> [AlbumResponseDTO] {
+    func orderedAlbums(_ albums: [AlbumResponseDTO], in folderID: String? = nil,
+                       ignoringFolders: Bool = false) -> [AlbumResponseDTO] {
         let ranks = ranks(for: containerOrders[Self.container(folderID)] ?? [])
-        return self.albums(albums, in: folderID).sorted {
+        return (ignoringFolders ? albums : self.albums(albums, in: folderID)).sorted {
             let a = ranks[Self.albumEntry($0.id)] ?? Int.max
             let b = ranks[Self.albumEntry($1.id)] ?? Int.max
             if a != b { return a < b }

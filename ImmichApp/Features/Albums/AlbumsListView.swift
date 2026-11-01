@@ -125,7 +125,9 @@ struct AlbumsListView: View {
                 TextField("Folder Name", text: $folderName)
                 Button("Create") {
                     organization?.createFolder(name: folderName, parentID: folderID)
+                    scope = folderID == nil ? .personal : .all
                     kind = .all
+                    searchText = ""
                     folderName = ""
                 }.disabled(folderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 Button("Cancel", role: .cancel) { folderName = "" }
@@ -649,7 +651,10 @@ struct AlbumsListView: View {
         case .activity: filtered = []
         }
         if kind == .folders { return [] }
-        filtered = organization?.value.albums(filtered, in: folderID) ?? filtered
+        // Shared is a complete album scope; local folders only organize Personal.
+        if scope != .shared {
+            filtered = organization?.value.albums(filtered, in: folderID) ?? filtered
+        }
 
         let query = normalizedSearchText
         if !query.isEmpty {
@@ -659,7 +664,9 @@ struct AlbumsListView: View {
             }
         }
 
-        if usesCustomOrder { return organization?.orderedAlbums(filtered, in: folderID) ?? filtered }
+        if usesCustomOrder {
+            return organization?.value.orderedAlbums(filtered, in: folderID, ignoringFolders: scope == .shared) ?? filtered
+        }
         return filtered.sorted(by: sort)
     }
 
