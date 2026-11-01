@@ -527,7 +527,7 @@ struct SyncStatusView: View {
             } label: {
                 Label("Reset Sync Database", systemImage: "arrow.counterclockwise.circle")
             }
-            .disabled(vm.isResettingDatabase || vm.runningJob != nil)
+            .disabled(vm.isResettingDatabase || vm.runningJob != nil || appSync?.isSyncing == true)
         } header: {
             Text("Actions")
         } footer: {

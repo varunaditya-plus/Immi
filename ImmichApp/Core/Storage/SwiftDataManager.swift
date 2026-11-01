@@ -921,6 +921,7 @@ final class SwiftDataManager {
         try modelContext.delete(model: SyncState.self)
         try modelContext.delete(model: LocalAssetChecksum.self)
         try modelContext.save()
+        assetMutationRevision = UUID()
     }
 
     // MARK: - Backup-record protection

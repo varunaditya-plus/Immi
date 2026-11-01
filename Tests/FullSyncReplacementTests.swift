@@ -572,6 +572,66 @@ final class FullSyncReplacementTests: XCTestCase {
         XCTAssertEqual(fixture.transport.acknowledgmentCount, 1)
     }
 
+    func testDatabaseResetRejectsHeldDeltaAndFullStreamsBeforeAcknowledgmentAndAllowsAFreshFullSync() async throws {
+        for full in [false, true] {
+            let fixture = try FullSyncFixture()
+            defer { fixture.cleanup() }
+            try fixture.dataManager.upsertBackupRecord(assetID: "mapped", checksum: "checksum",
+                localIdentifier: "device-photo")
+            fixture.transport.responses = [.held(FullSyncTransport.assets(full ? 700 : 500))]
+            let started = expectation(description: "The old stream is held open")
+            fixture.transport.onStream = { [weak transport = fixture.transport] in
+                if transport?.streamRequestCount == 1 { started.fulfill() }
+            }
+            let old = Task {
+                if full { try await fixture.repository.fullSync() }
+                else { try await fixture.repository.deltaSync() }
+            }
+            await fulfillment(of: [started], timeout: 5)
+            if !full {
+                let deadline = Date().addingTimeInterval(5)
+                while fixture.dataManager.cachedAssetCount() < 502, Date() < deadline {
+                    try await Task.sleep(for: .milliseconds(10))
+                }
+                _ = try XCTUnwrap(fixture.dataManager.cachedAssetCount() == 502 ? true : nil,
+                    "The delta must have persisted its first complete chunk before reset")
+            }
+            let revision = fixture.dataManager.assetMutationRevision
+
+            try fixture.dataManager.resetSyncDatabase()
+            XCTAssertNotEqual(fixture.dataManager.assetMutationRevision, revision)
+            fixture.transport.finishStream(with: FullSyncTransport.asset("old-suffix") + FullSyncTransport.complete)
+            do {
+                try await old.value
+                XCTFail("A stream that predates database reset must not rebuild or acknowledge the cleared index")
+            } catch is CancellationError {}
+
+            for store in [fixture.dataManager, fixture.reopen()] {
+                XCTAssertEqual(store.cachedAssetCount(), 0)
+                XCTAssertNil(store.getSyncState().lastFullSyncAt)
+                XCTAssertNil(store.getSyncState().lastDeltaSyncAt)
+                XCTAssertEqual(store.getSyncState().totalAssets, 0)
+                XCTAssertEqual(store.serverAssetIDsByLocalIdentifier(), ["device-photo": "mapped"])
+            }
+            XCTAssertEqual(fixture.transport.acknowledgmentCount, 0)
+            fixture.transport.responses = [.body(FullSyncTransport.assets(700) + FullSyncTransport.complete)]
+
+            try await fixture.anotherRepository().fullSync()
+
+            for store in [fixture.dataManager, fixture.reopen()] {
+                XCTAssertEqual(store.cachedAssetCount(), 700)
+                XCTAssertNotNil(store.getCachedAsset(id: "download-0"))
+                XCTAssertNotNil(store.getCachedAsset(id: "download-699"))
+                XCTAssertNil(store.getCachedAsset(id: "old-suffix"))
+                XCTAssertNotNil(store.getSyncState().lastFullSyncAt)
+                XCTAssertNotNil(store.getSyncState().lastDeltaSyncAt)
+                XCTAssertEqual(store.getSyncState().totalAssets, 700)
+                XCTAssertEqual(store.serverAssetIDsByLocalIdentifier(), ["device-photo": "mapped"])
+            }
+            XCTAssertEqual(fixture.transport.acknowledgmentCount, 1)
+        }
+    }
+
     func testDeltaTracksItsOwnRevisionAcrossMultipleAcceptedBatches() async throws {
         let fixture = try FullSyncFixture()
         defer { fixture.cleanup() }
