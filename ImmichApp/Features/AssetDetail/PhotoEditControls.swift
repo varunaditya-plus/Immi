@@ -958,14 +958,24 @@ struct PhotoEditorToolPicker: View {
     }
 
     var body: some View {
+        ViewThatFits(in: .horizontal) {
+            tools.fixedSize(horizontal: true, vertical: false)
+            ScrollView(.horizontal, showsIndicators: false) {
+                tools
+            }
+            .frame(height: height)
+        }
+        .glassEffect(.regular, in: .capsule)
+        .disabled(!isEnabled)
+    }
+
+    private var tools: some View {
         HStack(spacing: 0) {
             if let primary { item(nil, title: primary.title, symbol: primary.symbol) }
             ForEach(PhotoEditorTool.allCases) { tool in item(tool, title: tool.title, symbol: tool.symbol) }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 2)
-        .glassEffect(.regular, in: .capsule)
-        .disabled(!isEnabled)
     }
 
     private func item(_ tool: PhotoEditorTool?, title: String, symbol: String) -> some View {
