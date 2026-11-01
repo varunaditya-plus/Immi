@@ -69,20 +69,7 @@ class SimulatorHostedTestCase: XCTestCase {
     func activateAccessibilityButton(named title: String, in window: UIWindow, within root: UIView? = nil) async throws {
         var candidate: NSObject?
         try await waitUntil("The actual enabled \(title) button is visible and accessible") {
-            var visited = Set<ObjectIdentifier>()
-            let buttons = self.accessibilityButtons(named: title, in: root ?? window, visited: &visited, depth: 0)
-            let visible = buttons.compactMap { button -> (NSObject, CGRect)? in
-                let frame: CGRect
-                if let view = button as? UIView {
-                    guard view.window === window else { return nil }
-                    frame = view.convert(view.bounds, to: window)
-                } else {
-                    frame = window.convert(button.accessibilityFrame, from: nil)
-                }
-                guard !frame.isEmpty, window.bounds.intersects(frame) else { return nil }
-                return (button, frame)
-            }
-            candidate = visible.min { $0.1.minY < $1.1.minY }?.0
+            candidate = self.accessibilityButton(named: title, in: window, within: root)
             return candidate != nil
         }
         let button = try XCTUnwrap(candidate, "The real \(title) action must be exposed; a direct model call is not a substitute")
@@ -93,6 +80,23 @@ class SimulatorHostedTestCase: XCTestCase {
             XCTAssertTrue(activated, "The real \(title) accessibility action must activate")
             guard activated else { throw URLError(.unsupportedURL) }
         }
+    }
+
+    func accessibilityButton(named title: String, in window: UIWindow, within root: UIView? = nil) -> NSObject? {
+        var visited = Set<ObjectIdentifier>()
+        let buttons = accessibilityButtons(named: title, in: root ?? window, visited: &visited, depth: 0)
+        let visible = buttons.compactMap { button -> (NSObject, CGRect)? in
+            let frame: CGRect
+            if let view = button as? UIView {
+                guard view.window === window else { return nil }
+                frame = view.convert(view.bounds, to: window)
+            } else {
+                frame = window.convert(button.accessibilityFrame, from: nil)
+            }
+            guard !frame.isEmpty, window.bounds.intersects(frame) else { return nil }
+            return (button, frame)
+        }
+        return visible.min { $0.1.minY < $1.1.minY }?.0
     }
 
     private func accessibilityButtons(named title: String, in object: NSObject,

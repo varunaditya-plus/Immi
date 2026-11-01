@@ -3,23 +3,31 @@ import SwiftUI
 struct SearchRecentsView: View {
     let store: RecentlyViewedStore
     let onOpen: () -> Void
+    @ScaledMetric(relativeTo: .caption) private var tileSide: CGFloat = 112
 
     var body: some View {
         if let cover = store.assets.first {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Recents").font(.title2.bold()).accessibilityAddTraits(.isHeader)
                 Button(action: onOpen) {
-                    AuthImage(assetId: cover.id, thumbhash: cover.thumbhash)
-                        .frame(width: 112, height: 112)
-                        .clipped()
+                    Color.clear
+                        .aspectRatio(1, contentMode: .fit)
+                        .frame(maxWidth: tileSide)
+                        .overlay {
+                            AuthImage(assetId: cover.id, thumbhash: cover.thumbhash)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .accessibilityHidden(true)
+                        }
                         .overlay(alignment: .bottomLeading) {
                             Text("Recently Viewed").font(.caption.weight(.semibold))
+                                .fixedSize(horizontal: false, vertical: true)
                                 .foregroundStyle(.white).padding(9)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .background(LinearGradient(colors: [.clear, .black.opacity(0.7)],
                                     startPoint: .top, endPoint: .bottom))
                         }
                         .clipShape(.rect(cornerRadius: 16))
+                        .contentShape([.interaction, .accessibility], .rect)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Recently Viewed")

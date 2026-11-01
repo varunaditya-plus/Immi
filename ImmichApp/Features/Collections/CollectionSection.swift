@@ -294,40 +294,26 @@ struct MemoryCard: View {
 
     var body: some View {
         Button(action: onOpen) {
-            ZStack(alignment: .bottomLeading) {
-                cover
-                caption
-            }
-            .frame(width: width, height: height)
-            .clipShape(RoundedRectangle(cornerRadius: 28))
+            Color.clear
+                .frame(width: width, height: height)
+                .overlay {
+                    cover
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .accessibilityHidden(true)
+                }
+                .overlay(alignment: .bottomLeading) { caption }
+                .clipShape(RoundedRectangle(cornerRadius: 28))
+                .contentShape([.interaction, .accessibility], .rect)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(Text(story.title))
+        .accessibilityValue(Text(story.subtitle))
     }
 
     @ViewBuilder
     private var cover: some View {
         if let asset = story.cover {
-            // `Color.clear.overlay`, bukan `AuthImage` langsung.
-            //
-            // `AuthImage` mengisi framenya (`contentMode: .fill`), dan view yang
-            // mengisi boleh melaporkan ukuran LEBIH BESAR dari yang ditawarkan
-            // padanya. Di baris mendatar lebarnya dipatok 180 jadi tidak
-            // kelihatan, tapi di grid — yang lebarnya ditawarkan kolom — kartu
-            // dengan foto berasio tertentu jadi lebih lebar dari tetangganya dan
-            // barisnya terlihat tidak rata. `Color.clear` mengambil tawaran itu
-            // apa adanya, lalu fotonya menyesuaikan.
-            Color.clear
-                .overlay {
-                    // 240pt pada layar 3x = 720px. Bawaan "preview" adalah
-                    // 2048px, yaitu bitmap ~12 MB untuk kartu sekecil ini.
-                    AuthImage(
-                        assetId: asset.id,
-                        size: "preview",
-                        thumbhash: asset.thumbhash,
-                        pixelSize: 800)
-                }
-                .frame(width: width, height: height)
-                .clipped()
+            AuthImage(assetId: asset.id, size: "preview", thumbhash: asset.thumbhash, pixelSize: 800)
         } else {
             Rectangle().fill(.fill.tertiary)
         }
