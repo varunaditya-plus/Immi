@@ -19,6 +19,7 @@ final class VideoControlsAccessibilityLayoutTests: ViewerAdaptiveLayoutTestCase 
     func testEnlargedScrubTimestampsAndSliderFitTheirActualBarWithoutClipping() async throws {
         for style in [UIUserInterfaceStyle.light, .dark] {
             let pager = PhotoPagerController(loader: PhotoPreviewLoader(session: MockSessionManager()))
+            pager.loadViewIfNeeded()
             pagers.append(pager)
             let window = try await host(VStack {
                 Spacer()
