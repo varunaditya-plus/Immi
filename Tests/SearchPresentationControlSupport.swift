@@ -46,7 +46,21 @@ extension SimulatorHostedTestCase {
             button.sendActions(for: .touchUpInside)
         } else {
             alert.preferredAction = action
-            let command = try XCTUnwrap(alert.keyCommands?.first { $0.input == "\r" },
+            var returnCommand: UIKeyCommand?
+            try await waitUntil("The native confirmation registers its public Return command") {
+                returnCommand = alert.keyCommands?.first { $0.input == "\r" }
+                return returnCommand != nil
+            }
+            if returnCommand == nil {
+                let fields = (alert.textFields ?? []).map {
+                    "firstResponder=\($0.isFirstResponder) hasText=\($0.hasText) delegate=\(String(describing: $0.delegate)) commands=\(($0.keyCommands ?? []).compactMap(\.input))"
+                }
+                let diagnostic = XCTAttachment(string: "keyWindow=\(alert.view.window?.isKeyWindow == true) enabled=\(action.isEnabled) fields=\(fields)")
+                diagnostic.name = "Native confirmation input readiness"
+                diagnostic.lifetime = .keepAlways
+                add(diagnostic)
+            }
+            let command = try XCTUnwrap(returnCommand,
                 "The native confirmation must expose its public Return command")
             XCTAssertTrue(UIApplication.shared.sendAction(try XCTUnwrap(command.action), to: alert, from: command, for: nil))
         }
