@@ -1639,7 +1639,9 @@ struct AssetDetailView: View {
                 owned.append(output)
             }
             guard editorIsCurrent(context), viewer.visit == readyVisit else { return }
-            guard await LocalPhotoLibrary.shared.saveDownloadedFile(output, isVideo: true) != nil else {
+            guard await saveDeviceFile(output, true, {
+                editorIsCurrent(context) && viewer.visit == readyVisit
+            }) != nil else {
                 throw PhotoEditRenderError.unavailable
             }
         } catch {

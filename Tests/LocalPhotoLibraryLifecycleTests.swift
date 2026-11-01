@@ -485,7 +485,7 @@ final class LocalPhotoLibraryLifecycleTests: XCTestCase {
     }
 
     func testDownloadDoesNotWriteAfterAuthorizationChangesDuringThePermissionPrompt() async {
-        for cancelled in [false, true] {
+        for (isVideo, cancelled) in [(false, false), (false, true), (true, false), (true, true)] {
             let access = Access(.notDetermined)
             let permission = heldPermission()
             var allowed = true, writes = 0
@@ -494,7 +494,7 @@ final class LocalPhotoLibraryLifecycleTests: XCTestCase {
                 return "unexpected-photo"
             })
             let pending = Task {
-                await library.saveDownloadedFile(URL(fileURLWithPath: "/fixture/photo.jpg"), isVideo: false,
+                await library.saveDownloadedFile(URL(fileURLWithPath: isVideo ? "/fixture/video.mov" : "/fixture/photo.jpg"), isVideo: isVideo,
                     isAllowed: { allowed })
             }
             await fulfillment(of: [permission.started], timeout: 2)
@@ -507,6 +507,61 @@ final class LocalPhotoLibraryLifecycleTests: XCTestCase {
             XCTAssertNil(result)
             XCTAssertEqual(writes, 0, "A permission callback cannot authorize a cancelled or newly private download")
         }
+    }
+
+    func testVideoSaveRechecksTheSameSourceAfterItsPermissionPromptAndWritesExactlyOnce() async {
+        let access = Access(.notDetermined)
+        let permission = heldPermission()
+        let file = URL(fileURLWithPath: "/fixture/edited-live-photo.mov")
+        var writes: [(URL, Bool)] = [], checks = 0
+        let library = library(access: access, request: { await permission.value() }, write: { url, isVideo in
+            writes.append((url, isVideo))
+            return "saved-video"
+        })
+        let pending = Task {
+            await library.saveDownloadedFile(file, isVideo: true, isAllowed: { checks += 1; return true })
+        }
+        await fulfillment(of: [permission.started], timeout: 2)
+        XCTAssertEqual(checks, 1)
+        XCTAssertTrue(writes.isEmpty)
+        access.status = .authorized
+        permission.complete(.authorized)
+
+        let result = await pending.value
+
+        XCTAssertEqual(result, "saved-video")
+        XCTAssertEqual(checks, 2)
+        XCTAssertEqual(writes.map(\.0), [file])
+        XCTAssertEqual(writes.map(\.1), [true])
+    }
+
+    func testVideoSaveNeverPromptsOrWritesWhenItsSourceIsAlreadyUnavailable() async {
+        let access = Access(.notDetermined)
+        let library = library(access: access)
+
+        let result = await library.saveDownloadedFile(URL(fileURLWithPath: "/fixture/video.mov"),
+            isVideo: true, isAllowed: { false })
+
+        XCTAssertNil(result)
+        XCTAssertEqual(access.status, .notDetermined)
+    }
+
+    func testDeniedVideoPermissionCannotWriteEvenWhenItsSourceRemainsAllowed() async {
+        let access = Access(.notDetermined)
+        let permission = heldPermission()
+        let library = library(access: access, request: { await permission.value() })
+        let pending = Task {
+            await library.saveDownloadedFile(URL(fileURLWithPath: "/fixture/video.mov"),
+                isVideo: true, isAllowed: { true })
+        }
+        await fulfillment(of: [permission.started], timeout: 2)
+        access.status = .denied
+        permission.complete(.denied)
+
+        let result = await pending.value
+
+        XCTAssertNil(result)
+        XCTAssertFalse(library.isAuthorized)
     }
 
     func testAuthorizedDownloadWritesTheRequestedFileAndMediaTypeExactlyOnce() async {
