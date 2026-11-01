@@ -127,6 +127,43 @@ final class SharedUploadServiceTests: XCTestCase {
         withExtendedLifetime(active.claim) {}
     }
 
+    func testRejectedSourcePathFailsVisiblyAndCanBeRemovedWithoutTouchingOutsideFiles() async throws {
+        var uploaded: [UUID] = []
+        let fixture = try fixture(upload: { _, item, file, _ in
+            XCTAssertEqual(try Data(contentsOf: file), Data("original media".utf8))
+            uploaded.append(item.id)
+        })
+        var batch = try await seed(fixture.store, states: [.queued, .queued])
+        let original = batch.items[0]
+        batch.items[0] = .init(id: original.id, filename: original.filename, relativePath: "../outside.jpg",
+            contentType: original.contentType, byteCount: original.byteCount, createdAt: original.createdAt,
+            modifiedAt: original.modifiedAt, state: .queued, lastError: nil)
+        try await fixture.store.save(batch)
+        let outside = fixture.root.appendingPathComponent("outside.jpg")
+        let outsideBytes = Data("This file is outside the claimed batch".utf8)
+        try outsideBytes.write(to: outside)
+        let directory = fixture.root.appendingPathComponent(batch.id.uuidString)
+
+        let work = try XCTUnwrap(fixture.service.processPending(session: fixture.session))
+        await work.value
+
+        XCTAssertEqual(uploaded, [batch.items[1].id])
+        let saved = try await fixture.store.batch(id: batch.id, owner: owner)
+        XCTAssertEqual(saved?.items.map(\.state), [.failed, .uploaded])
+        let entry = try XCTUnwrap(fixture.service.items.first)
+        XCTAssertEqual(entry.item.id, original.id)
+        XCTAssertEqual(entry.item.state, .failed)
+        XCTAssertFalse(entry.item.lastError?.isEmpty ?? true)
+        XCTAssertEqual(try Data(contentsOf: directory.appendingPathComponent(original.relativePath)), Data("original media".utf8))
+        XCTAssertEqual(try Data(contentsOf: outside), outsideBytes)
+
+        try await fixture.service.remove(entry, session: fixture.session)
+
+        XCTAssertTrue(fixture.service.items.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
+        XCTAssertEqual(try Data(contentsOf: outside), outsideBytes)
+    }
+
     func testCanceledCallersCannotClearRowsOrStartARecoveryWorker() async throws {
         let fixture = try fixture()
         let batch = try await seed(fixture.store, states: [.failed])

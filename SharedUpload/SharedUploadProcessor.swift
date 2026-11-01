@@ -52,17 +52,24 @@ final class SharedUploadProcessor {
             current += 1
             progress(current, total)
 
+            var sourceURL: URL?
             do {
                 let item = batch.items[index]
                 let fileURL = try await store.fileURL(for: item, batchID: batchID)
+                sourceURL = fileURL
                 guard let directory = try await store.existingBatchDirectory(id: batchID) else {
                     throw CocoaError(.fileNoSuchFile)
                 }
                 try Task.checkCancellation()
                 try await upload(item, fileURL, directory)
             } catch {
-                batch.items[index].state = (error as? SharedUploadClientError)?.requiresUserRetry == true
-                    ? .failed : .queued
+                let invalidSource: Bool
+                if case SharedUploadStoreError.invalidFilename = error { invalidSource = true }
+                else { invalidSource = false }
+                let missingSource = !Task.isCancelled && !(error is CancellationError)
+                    && sourceURL.map(Self.isMissingSource) == true
+                batch.items[index].state = invalidSource || missingSource
+                    || (error as? SharedUploadClientError)?.requiresUserRetry == true ? .failed : .queued
                 batch.items[index].lastError = error.localizedDescription
                 try await store.save(batch)
                 if Task.isCancelled || error is CancellationError {
@@ -87,5 +94,16 @@ final class SharedUploadProcessor {
             try await store.removeBatch(id: batchID)
         }
         return .finished(remaining: remaining)
+    }
+
+    private static func isMissingSource(_ url: URL) -> Bool {
+        do {
+            _ = try FileManager.default.attributesOfItem(atPath: url.path)
+            return false
+        } catch let error as CocoaError {
+            return error.code == .fileNoSuchFile || error.code == .fileReadNoSuchFile
+        } catch {
+            return false
+        }
     }
 }

@@ -128,6 +128,72 @@ final class SharedUploadFailureTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.directory.path))
     }
 
+    func testMissingSourceBecomesARemovableFailureWhileItsNeighborUploads() async throws {
+        let fixture = try await SharedFailureFixture(replies: [.success("neighbor-asset")], count: 2)
+        defer { fixture.close() }
+        try FileManager.default.removeItem(at: fixture.source(0))
+
+        let outcome = try await fixture.process()
+
+        XCTAssertEqual(outcome, .finished(remaining: 1))
+        let saved = try await fixture.reopenedBatch()
+        XCTAssertEqual(saved?.items.map(\.state), [.failed, .uploaded])
+        XCTAssertFalse(saved?.items[0].lastError?.isEmpty ?? true)
+        XCTAssertEqual(fixture.transport.captures.count, 1)
+        fixture.assertMultipart(try XCTUnwrap(fixture.transport.captures.first), item: 1)
+        let store = SharedUploadStore(rootURL: fixture.root)
+        let discarded = try await store.discardFailedItem(id: fixture.batch.items[0].id,
+            batchID: fixture.batch.id, owner: fixture.batch.owner)
+        XCTAssertTrue(discarded)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.directory.path))
+    }
+
+    func testMissingSourceRetriesOnlyWhenTheUserRequestsItAndCanRecoverAfterRestoration() async throws {
+        let fixture = try await SharedFailureFixture(replies: [.success("restored-source")])
+        defer { fixture.close() }
+        try FileManager.default.removeItem(at: fixture.source(0))
+        _ = try await fixture.process()
+        let failed = try await fixture.reopenedBatch()
+        XCTAssertEqual(failed?.items.first?.state, .failed)
+        XCTAssertEqual(fixture.transport.captures.count, 0)
+        let originalManifest = try Data(contentsOf: fixture.manifest)
+        _ = try await fixture.process()
+        XCTAssertEqual(try Data(contentsOf: fixture.manifest), originalManifest)
+        XCTAssertEqual(fixture.transport.captures.count, 0)
+        try fixture.bytes(0).write(to: fixture.source(0))
+        let retried = try await SharedUploadStore(rootURL: fixture.root).retryFailedItem(
+            id: fixture.batch.items[0].id, batchID: fixture.batch.id, owner: fixture.batch.owner)
+        XCTAssertTrue(retried)
+
+        let recovered = try await fixture.process()
+
+        XCTAssertEqual(recovered, .finished(remaining: 0))
+        XCTAssertEqual(fixture.transport.captures.count, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.directory.path))
+    }
+
+    func testTemporaryReadPermissionFailureStaysQueuedAndRetainsItsSource() async throws {
+        let fixture = try await SharedFailureFixture(replies: [.success("after-unlock")])
+        defer { fixture.close() }
+        let outcome = try await SharedUploadProcessor(store: SharedUploadStore(rootURL: fixture.root)).process(
+            batchID: fixture.batch.id, owner: fixture.batch.owner, upload: { _, file, _ in
+                XCTAssertEqual(try Data(contentsOf: file), fixture.bytes(0))
+                throw CocoaError(.fileReadNoPermission)
+            })
+
+        XCTAssertEqual(outcome, .finished(remaining: 1))
+        let saved = try await fixture.reopenedBatch()
+        XCTAssertEqual(saved?.items.first?.state, .queued)
+        XCTAssertFalse(saved?.items.first?.lastError?.isEmpty ?? true)
+        XCTAssertEqual(try Data(contentsOf: fixture.source(0)), fixture.bytes(0))
+        XCTAssertEqual(fixture.transport.captures.count, 0)
+
+        let recovered = try await fixture.process()
+
+        XCTAssertEqual(recovered, .finished(remaining: 0))
+        XCTAssertEqual(fixture.transport.captures.count, 1)
+    }
+
     func testSuccessfulResponseKeepsOpaqueNonemptyIdentifiersUnchanged() async throws {
         for id in ["opaque-server-asset", "CaseSensitiveID", " opaque-with-padding "] {
             let fixture = try await SharedFailureFixture(replies: [.success(id)])

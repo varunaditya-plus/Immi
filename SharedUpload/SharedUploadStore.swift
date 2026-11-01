@@ -313,11 +313,23 @@ actor SharedUploadStore {
         defer { withExtendedLifetime(claim) {} }
         guard var batch = try batch(id: batchID, owner: owner),
               let index = batch.items.firstIndex(where: { $0.id == id && $0.state == .failed }) else { return false }
-        batch.items[index].state = .discarded
-        batch.items[index].lastError = nil
+        let invalidSource: Bool
+        do {
+            _ = try fileURL(for: batch.items[index], batchID: batchID)
+            invalidSource = false
+        } catch SharedUploadStoreError.invalidFilename {
+            invalidSource = true
+        }
+        if invalidSource {
+            // A rejected path cannot identify a file this batch is allowed to delete.
+            batch.items.remove(at: index)
+        } else {
+            batch.items[index].state = .discarded
+            batch.items[index].lastError = nil
+        }
         // A durable removal receipt makes failed file cleanup safe to resume.
         try save(batch)
-        try removeFile(for: batch.items[index], batchID: batchID)
+        if !invalidSource { try removeFile(for: batch.items[index], batchID: batchID) }
         if batch.items.allSatisfy({ $0.state.isFinished }) { try removeBatch(id: batchID) }
         return true
     }
