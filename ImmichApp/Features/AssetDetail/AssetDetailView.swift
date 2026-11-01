@@ -1115,6 +1115,17 @@ struct AssetDetailView: View {
                     deleteButton
                 }
             }
+            if currentAsset.isVideo {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        videoPlaybackMenuItems
+                    } label: {
+                        Image(systemName: "ellipsis")
+                    }
+                    .accessibilityLabel("More")
+                    .disabled(pagerController == nil)
+                }
+            }
         } else if isEditingDescription {
             ToolbarItem(placement: .topBarLeading) { cancelEditButton }
             ToolbarItem(placement: .topBarTrailing) { saveEditButton }
@@ -1151,18 +1162,7 @@ struct AssetDetailView: View {
             Button("Copy", systemImage: "doc.on.doc") { copyCurrentMedia() }
                 .disabled(viewer.isPreparing(.copy))
 
-            if currentAsset.isVideo, let pagerController {
-                let options = pagerController.playbackOptions
-                Picker(selection: Binding(get: { options.rate }, set: { pagerController.setPlaybackRate($0) })) {
-                    ForEach(options.availableRates, id: \.self) { rate in
-                        Text(String(format: "%g×", rate)).tag(rate)
-                    }
-                } label: { Label("Playback Speed", systemImage: "speedometer") }
-                .pickerStyle(.menu)
-                Toggle(isOn: Binding(get: { options.isLooping }, set: { looping in
-                    if looping != options.isLooping { pagerController.toggleLooping() }
-                })) { Label("Loop Video", systemImage: "repeat") }
-            }
+            videoPlaybackMenuItems
 
             if currentAsset.isLivePhoto, trashActions == nil {
                 Menu("Live Photo", systemImage: "livephoto") {
@@ -1275,6 +1275,22 @@ struct AssetDetailView: View {
             }
         }
         .accessibilityLabel("More")
+    }
+
+    @ViewBuilder
+    private var videoPlaybackMenuItems: some View {
+        if currentAsset.isVideo, let pagerController {
+            let options = pagerController.playbackOptions
+            Picker(selection: Binding(get: { options.rate }, set: { pagerController.setPlaybackRate($0) })) {
+                ForEach(options.availableRates, id: \.self) { rate in
+                    Text(String(format: "%g×", rate)).tag(rate)
+                }
+            } label: { Label("Playback Speed", systemImage: "speedometer") }
+            .pickerStyle(.menu)
+            Toggle(isOn: Binding(get: { options.isLooping }, set: { looping in
+                if looping != options.isLooping { pagerController.toggleLooping() }
+            })) { Label("Loop Video", systemImage: "repeat") }
+        }
     }
 
     private func copyCurrentMedia() {
