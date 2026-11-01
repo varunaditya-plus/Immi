@@ -76,6 +76,64 @@ final class NativeConfirmationUITests: XCTestCase {
         XCTAssertEqual(Set(server.snapshot().albumNames), Set(["Personal Trip", LoopbackImmichServer.sharedAlbumName]))
     }
 
+    func testNativeDuplicateConfirmationsUseCurrentSurvivingAndFallbackKeepers() throws {
+        try openCollections()
+        try reveal(app.buttons["Duplicates"])
+        try tap(app.buttons["Duplicates"])
+        let keepAll = app.buttons["Keep All"].firstMatch
+        try tap(keepAll)
+        try confirm("Cancel")
+        XCTAssertTrue(server.snapshot().dismissedGroups.isEmpty)
+        XCTAssertTrue(server.snapshot().resolutions.isEmpty)
+        XCTAssertTrue(server.snapshot().trashedIDs.isEmpty)
+        try tap(keepAll)
+        try confirm("Keep All")
+        try wait("Keep All dismisses only its own duplicate group") {
+            self.server.snapshot().dismissedGroups == [LoopbackImmichServer.keepGroupID]
+        }
+        XCTAssertTrue(server.snapshot().trashedIDs.isEmpty)
+        XCTAssertTrue(server.snapshot().resolutions.isEmpty)
+
+        let third = app.buttons["Third.jpg"]
+        try revealPhoto(third, inStripContaining: "First.jpg")
+        try tap(third)
+        try wait("The user's additional Third keeper is selected") { third.exists && third.value as? String == "Keep" }
+        server.replaceMembers(in: LoopbackImmichServer.changingGroupID,
+            with: ["Second.jpg", "Third.jpg"], suggesting: ["Second.jpg"])
+        try refreshDuplicates()
+        try revealPhoto(third, inStripContaining: "Second.jpg")
+        try wait("Refreshing the same group preserves the user's surviving keeper") { third.exists && third.value as? String == "Keep" }
+        XCTAssertEqual(app.buttons["Second.jpg"].value as? String, "Move to Trash")
+        try tap(app.buttons["Trash 1"].firstMatch)
+        try confirm("Cancel")
+        XCTAssertTrue(server.snapshot().resolutions.isEmpty)
+        try tap(app.buttons["Trash 1"].firstMatch)
+        try confirm("Move to Trash")
+        let retained = LoopbackImmichServer.Resolution(groupID: LoopbackImmichServer.changingGroupID,
+            keepIDs: [LoopbackImmichServer.assetID("Third.jpg")], trashIDs: [LoopbackImmichServer.assetID("Second.jpg")])
+        try wait("The native action sends exactly the latest group partition") { self.server.snapshot().resolutions == [retained] }
+        XCTAssertEqual(server.snapshot().trashedIDs, retained.trashIDs)
+
+        let originalFallback = app.buttons["Fallback First.jpg"]
+        try revealPhoto(originalFallback, inStripContaining: "Fallback First.jpg")
+        try wait("The fallback group initially has only First selected") { originalFallback.exists && originalFallback.value as? String == "Keep" }
+        XCTAssertEqual(app.buttons["Fallback Second.jpg"].value as? String, "Move to Trash")
+        server.replaceMembers(in: LoopbackImmichServer.fallbackGroupID,
+            with: ["Fallback Second.jpg", "Fallback Third.jpg"], suggesting: ["Fallback Second.jpg"])
+        try refreshDuplicates()
+        let fallback = app.buttons["Fallback Second.jpg"]
+        try revealPhoto(fallback, inStripContaining: "Fallback Second.jpg")
+        try wait("Removing the only former keeper chooses an admitted fallback") { fallback.exists && fallback.value as? String == "Keep" }
+        try tap(fallback)
+        XCTAssertEqual(fallback.value as? String, "Keep", "A user cannot deselect the final current keeper")
+        try tap(app.buttons["Trash 1"].firstMatch)
+        try confirm("Move to Trash")
+        let replacement = LoopbackImmichServer.Resolution(groupID: LoopbackImmichServer.fallbackGroupID,
+            keepIDs: [LoopbackImmichServer.assetID("Fallback Second.jpg")], trashIDs: [LoopbackImmichServer.assetID("Fallback Third.jpg")])
+        try wait("The fallback action preserves exactly the new selected keeper") { self.server.snapshot().resolutions == [retained, replacement] }
+        XCTAssertEqual(server.snapshot().trashedIDs, retained.trashIDs.union(replacement.trashIDs))
+        XCTAssertTrue(app.staticTexts["No Duplicates"].waitForExistence(timeout: 5))
+    }
 
     func testNativeAlbumFailureAcknowledgementPreservesInputAndAllowsOneSuccessfulRetry() throws {
         try openAlbums()
@@ -219,7 +277,32 @@ final class NativeConfirmationUITests: XCTestCase {
         try wait("The requested control can be reached by normal scrolling") { element.exists && element.isHittable }
     }
 
+    private func revealPhoto(_ photo: XCUIElement, inStripContaining name: String) throws {
+        try reveal(app.buttons[name])
+        for _ in 0..<4 {
+            if photo.exists && photo.isHittable { return }
+            let strips = app.scrollViews.containing(.button, identifier: name).allElementsBoundByIndex
+            guard let strip = strips.last else { break }
+            strip.swipeLeft()
+        }
+        try wait("The actual photo choice can be reached in its horizontal strip") { photo.exists && photo.isHittable }
+    }
 
+    private func refreshDuplicates() throws {
+        let before = server.snapshot().duplicateReads
+        let outer = try XCTUnwrap(app.scrollViews.allElementsBoundByIndex.first {
+            $0.frame.height > app.frame.height * 0.5 && $0.frame.width > app.frame.width * 0.8
+        }, "The duplicate groups must have an outer vertical scroll view")
+        for _ in 0..<4 where server.snapshot().duplicateReads == before {
+            let start = outer.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.25))
+            let end = outer.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.85))
+            start.press(forDuration: 0.1, thenDragTo: end)
+        }
+        try wait("Normal pull-to-refresh reads the current server group") { self.server.snapshot().duplicateReads > before }
+        try wait("The updated two-member group is rendered") {
+            self.app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH '2 items'")).firstMatch.exists
+        }
+    }
 
     private func wait(_ message: String, timeout: TimeInterval = 10, _ condition: @escaping () -> Bool) throws {
         let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: nil)
