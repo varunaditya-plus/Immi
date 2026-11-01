@@ -9,6 +9,8 @@ struct SearchDiscoveryView: View {
     let onSuggestion: (SearchToken) -> Void
     let onRecent: () -> Void
     let onRetry: () -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .subheadline) private var personNameWidth: CGFloat = 90
 
     var body: some View {
         ScrollView {
@@ -24,7 +26,10 @@ struct SearchDiscoveryView: View {
                                         VStack(spacing: 8) {
                                             AuthImage(assetId: person.id, path: "/people/\(person.id)/thumbnail")
                                                 .frame(width: 80, height: 80).clipShape(.circle)
-                                            Text(person.name).font(.subheadline).lineLimit(2).frame(width: 90)
+                                            Text(person.name).font(.subheadline)
+                                                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                                .containerRelativeFrame(.horizontal) { width, _ in min(personNameWidth, width) }
                                         }
                                     }
                                     .buttonStyle(.plain).accessibilityLabel(person.name)
@@ -59,12 +64,19 @@ struct SearchDiscoveryView: View {
 private struct SearchPlaceSuggestions: View {
     let cities: [String]
     let onSelect: (String) -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), alignment: .leading)], alignment: .leading, spacing: 12) {
+        let columns = dynamicTypeSize.isAccessibilitySize
+            ? [GridItem(.flexible(minimum: 0), alignment: .leading)]
+            : [GridItem(.adaptive(minimum: 140), alignment: .leading)]
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
             ForEach(cities, id: \.self) { city in
                 Button { onSelect(city) } label: {
-                    Label(city, systemImage: "mappin.and.ellipse").lineLimit(1).font(.subheadline)
+                    Label(city, systemImage: "mappin.and.ellipse")
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .font(.subheadline)
                 }
                 .buttonStyle(.bordered).buttonBorderShape(.capsule)
             }
