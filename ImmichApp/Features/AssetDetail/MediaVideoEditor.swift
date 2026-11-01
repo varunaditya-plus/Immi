@@ -480,6 +480,12 @@ struct MediaVideoEditor: View {
             .accessibilityValue(Measurement(value: preview.sourceTime, unit: UnitDuration.seconds)
                 .formatted(.measurement(width: .abbreviated, usage: .asProvided,
                     numberFormatStyle: .number.precision(.fractionLength(2))).locale(locale)))
+            .accessibilityAdjustableAction { direction in
+                guard !isSaving, isAllowed() else { return }
+                preview.pause()
+                let delta = direction == .increment ? 1 / preview.frameRate : -1 / preview.frameRate
+                preview.seek(preview.sourceTime + delta)
+            }
             .accessibilityIdentifier("videoEditor.frames")
         }
     }

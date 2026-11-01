@@ -210,6 +210,33 @@ final class MediaVideoEditorPresentationTests: SimulatorHostedTestCase {
         XCTAssertEqual(try Data(contentsOf: fixture.url), original)
     }
 
+    func testAccessiblePlaybackPositionPausesAndSelectsTheActualLiveKeyFrame() async throws {
+        let (fixture, window) = try await show(isLive: true, makeMovie: makeTrimMovie)
+        let source = AVURLAsset(url: fixture.url)
+        let originalTime = try await MediaLiveRenderer.shared.photoTime(motionURL: fixture.url)
+        let tracks = try await source.loadTracks(withMediaType: .video)
+        let fps = Double(try await XCTUnwrap(tracks.first).load(.nominalFrameRate))
+        let position = try XCTUnwrap(trimControl("Playback Position", in: window))
+        let initialValue = try XCTUnwrap(position.accessibilityValue)
+
+        position.accessibilityIncrement()
+
+        try await waitUntil("One source frame updates the actual playback position announcement") {
+            self.trimControl("Playback Position", in: window)?.accessibilityValue != initialValue
+        }
+        try await activateAccessibilityButton(named: "Make Key Photo", in: window)
+        try await activateAccessibilityButton(named: "Play", in: window)
+        try await waitUntil("The Live draft plays before accessible scrubbing") { self.player(in: window)?.timeControlStatus == .playing }
+        try XCTUnwrap(trimControl("Playback Position", in: window)).accessibilityDecrement()
+        try await waitUntil("Accessible scrubbing pauses the actual motion player") { self.player(in: window)?.timeControlStatus == .paused }
+
+        try await activateAccessibilityButton(named: "Done", in: window)
+
+        try await waitUntil("Done saves the frame chosen with the real adjustable control") { fixture.saves.count == 1 && !fixture.isPresented }
+        XCTAssertEqual(try XCTUnwrap(fixture.saves.first?.live.keyPhotoTime), originalTime + 1 / fps, accuracy: 0.0001)
+        XCTAssertTrue(try XCTUnwrap(fixture.saves.first).video.isIdentity)
+    }
+
     private func show(isLive: Bool = false, live: LivePhotoEditRecipe = .init(), photo: PhotoEditRecipe = .init(),
                       makeMovie: @MainActor (URL) async throws -> URL = { try await makeVideoEditingFixture(in: $0) }) async throws -> (VideoEditorTestFixture, UIWindow) {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("video-editor-ui-\(UUID())")
