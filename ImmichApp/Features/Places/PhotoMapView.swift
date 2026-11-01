@@ -132,7 +132,7 @@ struct PhotoMapView: View {
             .overlay(alignment: .topTrailing) {
                 VStack(spacing: 0) {
                     Button { choosingMap = true } label: {
-                        Image(systemName: "map.fill").font(.title3)
+                        Image(systemName: "map.fill").font(.system(size: 20))
                             .frame(width: 48, height: 48)
                     }
                     .accessibilityLabel("Choose Map")
@@ -245,10 +245,11 @@ struct PhotoMapPin: View {
                 .overlay { RoundedRectangle(cornerRadius: 9).stroke(.white, lineWidth: 3) }
                 .overlay(alignment: .bottom) {
                     Text(cluster.count, format: .number)
-                        .font(.caption2.bold())
+                        .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
+                        .fixedSize()
                         .background(.black.opacity(0.65), in: .capsule)
                         .offset(y: 7)
                 }
