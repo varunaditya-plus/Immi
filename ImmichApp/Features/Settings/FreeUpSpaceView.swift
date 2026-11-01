@@ -117,6 +117,7 @@ struct FreeUpSpaceView: View {
         .formStyle(.grouped)
         .navigationTitle("Free Up Space")
         .navigationBarTitleDisplayMode(.inline)
+        .settingsSheetCloseButton()
         .task {
             if model == nil { configureModel() }
             await loadAlbums()

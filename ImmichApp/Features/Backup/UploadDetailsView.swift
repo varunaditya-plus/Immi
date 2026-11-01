@@ -43,6 +43,7 @@ struct UploadDetailsView: View {
         }
         .navigationTitle("Upload Details")
         .navigationBarTitleDisplayMode(.inline)
+        .settingsSheetCloseButton()
         .task { await sharedUploads.refreshPending(session: session) }
         .refreshable { await sharedUploads.refreshPending(session: session) }
         .errorToast($actionError)

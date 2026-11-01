@@ -17,6 +17,7 @@ struct BackupOptionsView: View {
         }
         .navigationTitle("Backup Options")
         .navigationBarTitleDisplayMode(.inline)
+        .settingsSheetCloseButton()
     }
 
     // MARK: - Jaringan

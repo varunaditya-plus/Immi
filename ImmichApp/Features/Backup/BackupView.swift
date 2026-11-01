@@ -34,6 +34,7 @@ struct BackupView: View {
         }
         .navigationTitle("Backup")
         .navigationBarTitleDisplayMode(.inline)
+        .settingsSheetCloseButton()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {

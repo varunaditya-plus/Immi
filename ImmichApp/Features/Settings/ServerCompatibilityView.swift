@@ -17,6 +17,7 @@ struct ServerCompatibilityView: View {
         .listStyle(.insetGrouped)
         .navigationTitle("Server Compatibility")
         .navigationBarTitleDisplayMode(.inline)
+        .settingsSheetCloseButton()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button { Task { await refresh() } } label: {

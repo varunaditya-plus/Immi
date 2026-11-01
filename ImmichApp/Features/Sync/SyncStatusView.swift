@@ -328,6 +328,7 @@ struct SyncStatusView: View {
         .listStyle(.insetGrouped)
         .navigationTitle("Sync Status")
         .navigationBarTitleDisplayMode(.inline)
+        .settingsSheetCloseButton()
         .task { await vm.loadIfNeeded() }
         .refreshable { await vm.refreshCounts() }
         .sensoryFeedback(.success, trigger: vm.completionFeedback)

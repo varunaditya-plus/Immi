@@ -24,6 +24,7 @@ struct DeviceAlbumsView: View {
         content
             .navigationTitle("Device Albums")
             .navigationBarTitleDisplayMode(.inline)
+            .settingsSheetCloseButton()
             // `.searchable`, bukan TextField di dalam List: yang ini menempel di
             // nav bar, ikut menyusut saat digulir, dan sudah membawa tombol
             // Cancel serta perilaku papan ketik yang benar tanpa diminta.
