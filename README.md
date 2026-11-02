@@ -2,16 +2,16 @@
 
 <div alt style="text-align: center; transform: scale(.25);">
 	<picture>
-		<img alt="Immi Logo" src="assets/immi-logo.svg" width="170" style="width: 170px;" />
+		<img alt="Immi Logo" src="assets/immi-logo.svg" width="100" style="width: 100px;" />
 	</picture>
 </div>
 
 # Immi
-![GitHub License](https://www.shieldcn.dev/github/license/varunaditya-plus/Immi.svg?variant=outline&size=sm)
+<!--![GitHub License](https://www.shieldcn.dev/github/license/varunaditya-plus/Immi.svg?variant=outline&size=sm)
 [![GitHub Downloads (all assets, all releases)](https://shieldcn.dev/github/downloads/varunaditya-plus/Immi.svg?variant=outline&size=sm)](https://github.com/varunaditya-plus/Immi/releases/latest)
 [![GitHub Release](https://shieldcn.dev/github/release/varunaditya-plus/Immi.svg?size=sm)](https://github.com/varunaditya-plus/Immi/releases/latest)
 ![Please star this repo](https://shieldcn.dev/badge/★%20please%20star-22c55e.svg?theme=amber&color=eab308&size=sm&variant=outline)
-
+-->
 Immi is a native iOS app for Immich that looks and works like Apple's Photos app, made for users who want the clean,</br>familiar Photos experience they already understand, while being able to back up their photo library to Immich.
 
 </div>
