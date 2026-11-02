@@ -4,6 +4,8 @@ import XCTest
 
 @MainActor
 final class AppBrandingTests: XCTestCase {
+    private let credit = "Based on SelfPhotos by rendiwijiatmoko"
+
     func testCompiledProductsUseImmiWhilePreservingInstalledBundleAndModelIdentities() throws {
         XCTAssertEqual(Bundle.main.bundleURL.lastPathComponent, "Immi.app")
         XCTAssertTrue(String(reflecting: CachedAsset.self).hasPrefix("ImmichApp."),
@@ -45,22 +47,38 @@ final class AppBrandingTests: XCTestCase {
         }
     }
 
-    func testCatalogsContainNoPreviousBrand() throws {
+    func testCatalogsContainTheOldNameOnlyInTheIntentionalUpstreamCredit() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         let paths = ["ImmichApp/Resources/Localizable.xcstrings", "ImmichApp/Resources/InfoPlist.xcstrings",
             "ImmichWidgets/Localizable.xcstrings", "ImmichWidgets/InfoPlist.xcstrings",
             "ImmiShareExtension/Localizable.xcstrings", "ImmiShareExtension/InfoPlist.xcstrings"]
+        var foundCredit = false
         for path in paths {
             let data = try Data(contentsOf: root.appendingPathComponent(path))
             let catalog = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
             let entries = try XCTUnwrap(catalog["strings"] as? [String: Any])
             XCTAssertFalse(entries.isEmpty, path)
             for (key, entry) in entries {
+                if path == paths[0], key == credit {
+                    foundCredit = true
+                    continue
+                }
                 XCTAssertFalse(containsOldBrand(key), "\(path): \(key)")
                 for value in stringValues(in: entry) {
                     XCTAssertFalse(containsOldBrand(value), "\(path): \(key): \(value)")
                 }
             }
+        }
+        XCTAssertTrue(foundCredit, "Rebranding must retain the explicit upstream credit")
+    }
+
+    func testUpstreamCreditIsCompiledInEverySupportedLanguage() throws {
+        for language in try supportedLanguages() {
+            let bundle = try localizedBundle(.main, language: language)
+            let message = bundle.localizedString(forKey: credit, value: "MISSING-CREDIT", table: nil)
+            XCTAssertNotEqual(message, "MISSING-CREDIT", language)
+            XCTAssertTrue(message.contains("SelfPhotos"), "\(language): \(message)")
+            XCTAssertTrue(message.contains("rendiwijiatmoko"), "\(language): \(message)")
         }
     }
 

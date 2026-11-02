@@ -550,8 +550,12 @@ struct SettingsView: View {
         Section {
             Button("Sign Out", role: .destructive) { showLogoutAlert = true }
         } footer: {
-            if let email = session.currentUser?.email {
-                Text(email)
+            VStack(alignment: .leading, spacing: 6) {
+                if let email = session.currentUser?.email {
+                    Text(email)
+                }
+                Link("Based on SelfPhotos by rendiwijiatmoko",
+                     destination: URL(string: "https://github.com/rendiwijiatmoko/iOS-SelfPhotos")!)
             }
         }
     }

@@ -242325,6 +242325,244 @@
           }
         }
       }
+    },
+    "Based on SelfPhotos by rendiwijiatmoko" : {
+      "localizations" : {
+        "ar" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "مبني على SelfPhotos من rendiwijiatmoko"
+          }
+        },
+        "bg" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Базирано на SelfPhotos от rendiwijiatmoko"
+          }
+        },
+        "bn" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "rendiwijiatmoko-এর SelfPhotos-এর ওপর ভিত্তি করে তৈরি"
+          }
+        },
+        "ca" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Basat en SelfPhotos de rendiwijiatmoko"
+          }
+        },
+        "cs" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Založeno na SelfPhotos od rendiwijiatmoko"
+          }
+        },
+        "da" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Baseret på SelfPhotos af rendiwijiatmoko"
+          }
+        },
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Basierend auf SelfPhotos von rendiwijiatmoko"
+          }
+        },
+        "el" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Βασισμένο στο SelfPhotos του rendiwijiatmoko"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Based on SelfPhotos by rendiwijiatmoko"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Basado en SelfPhotos de rendiwijiatmoko"
+          }
+        },
+        "fa" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "بر پایهٔ SelfPhotos از rendiwijiatmoko"
+          }
+        },
+        "fi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Perustuu SelfPhotos-sovellukseen, tekijä rendiwijiatmoko"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Basé sur SelfPhotos de rendiwijiatmoko"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "מבוסס על SelfPhotos מאת rendiwijiatmoko"
+          }
+        },
+        "hi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "rendiwijiatmoko के SelfPhotos पर आधारित"
+          }
+        },
+        "hr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Temeljeno na aplikaciji SelfPhotos autora rendiwijiatmoko"
+          }
+        },
+        "hu" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A rendiwijiatmoko által készített SelfPhotos alapján"
+          }
+        },
+        "id" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Berdasarkan SelfPhotos oleh rendiwijiatmoko"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Basato su SelfPhotos di rendiwijiatmoko"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "rendiwijiatmoko 作の SelfPhotos をベースにしています"
+          }
+        },
+        "kk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "rendiwijiatmoko жасаған SelfPhotos негізінде"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "rendiwijiatmoko의 SelfPhotos를 기반으로 제작"
+          }
+        },
+        "lt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sukurta remiantis „SelfPhotos“, autorius rendiwijiatmoko"
+          }
+        },
+        "ms" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Berdasarkan SelfPhotos oleh rendiwijiatmoko"
+          }
+        },
+        "nb" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Basert på SelfPhotos av rendiwijiatmoko"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gebaseerd op SelfPhotos van rendiwijiatmoko"
+          }
+        },
+        "pl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Na podstawie SelfPhotos autorstwa rendiwijiatmoko"
+          }
+        },
+        "pt" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Baseado em SelfPhotos, de rendiwijiatmoko"
+          }
+        },
+        "ro" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bazat pe SelfPhotos de rendiwijiatmoko"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "На основе SelfPhotos от rendiwijiatmoko"
+          }
+        },
+        "sk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Založené na SelfPhotos od rendiwijiatmoko"
+          }
+        },
+        "sl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Na osnovi SelfPhotos avtorja rendiwijiatmoko"
+          }
+        },
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Baserat på SelfPhotos av rendiwijiatmoko"
+          }
+        },
+        "th" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "พัฒนาจาก SelfPhotos โดย rendiwijiatmoko"
+          }
+        },
+        "tr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "rendiwijiatmoko tarafından geliştirilen SelfPhotos temel alınmıştır"
+          }
+        },
+        "uk" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "На основі SelfPhotos від rendiwijiatmoko"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dựa trên SelfPhotos của rendiwijiatmoko"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "基于 rendiwijiatmoko 开发的 SelfPhotos"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "以 rendiwijiatmoko 開發的 SelfPhotos 為基礎"
+          }
+        }
+      }
     }
   },
   "version" : "1.1"
