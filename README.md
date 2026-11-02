@@ -1,110 +1,118 @@
-# SelfPhotos
+<div align="center">
 
-SelfPhotos is a native, independent iOS and iPadOS client for [Immich](https://immich.app/). It connects directly to the Immich server you choose, giving you a familiar Apple-platform experience for browsing, organizing, and backing up your photo library.
+<div alt style="text-align: center; transform: scale(.25);">
+	<picture>
+		<img alt="Immi Logo" src="assets/immi-logo.svg" width="170" style="width: 170px;" />
+	</picture>
+</div>
 
-> [!IMPORTANT]
-> SelfPhotos is a community project and is not affiliated with or endorsed by the Immich team. You need access to a running Immich server to use the app.
+# Immi
+![GitHub License](https://www.shieldcn.dev/github/license/varunaditya-plus/Immi.svg?variant=outline&size=sm)
+[![GitHub Downloads (all assets, all releases)](https://shieldcn.dev/github/downloads/varunaditya-plus/Immi.svg?variant=outline&size=sm)](https://github.com/varunaditya-plus/Immi/releases/latest)
+[![GitHub Release](https://shieldcn.dev/github/release/varunaditya-plus/Immi.svg?size=sm)](https://github.com/varunaditya-plus/Immi/releases/latest)
+![Please star this repo](https://shieldcn.dev/badge/★%20please%20star-22c55e.svg?theme=amber&color=eab308&size=sm&variant=outline)
+
+Immi is a native iOS app for Immich that looks and works like Apple's Photos app, made for users who want the clean,</br>familiar Photos experience they already understand, while being able to back up their photo library to Immich.
+
+</div>
+
+---
 
 ## Features
+**Library and Collections**
+- Browse your library by Years, Months, or All Photos, and pinch to change the grid size.
+- Sort by capture date or recently added, and filter favorites, edited photos, videos, screenshots, and photos not in an album.
+- Customize Collections with pinned items, rearrangeable sections, and different card sizes.
+- Browse Recent Days, Memories, Featured Photos, favorites, archived photos, and Recently Deleted.
 
-- Browse photos and videos in a responsive timeline
-- View albums, memories, people, places, favorites, archived items, and trash
-- Search your library and filter results
-- Inspect and edit supported photo metadata
-- Create albums and add photos to them
-- Back up selected device albums, including Live Photos
-- Monitor sync and backup status, then free up verified device copies
-- Find duplicate photos reported by your Immich server
-- Sign in with email and password or your server's OAuth/OIDC provider
-- Share photos and videos to Immich from the iOS share sheet
-- Display selected albums and memories in Home Screen widgets
-- Use a dedicated experience in Apple Assistive Access
-- Continue browsing cached content during temporary connection failures
+**Albums, People, and Maps**
+- Create and edit albums, choose key photos, and add or remove photos.
+- Organize albums into folders and set custom photo ordering on this device.
+- Name, favorite, hide, and merge people recognized by Immich, or organize them into groups on this device.
+- Explore geotagged photos on a map, switch to satellite view, and browse photos near a selected place.
+
+**Search**
+- Search your Immich library by text, with suggestions for people, places, and dates.
+- Refine results by people, location, date range, media type, or album.
+- Revisit recent searches and recently viewed photos.
+
+**Viewing and Editing**
+- View photo information, edit captions, and adjust dates and locations.
+- Crop, straighten, rotate, and flip photos, with tonal adjustments, filters, undo, and redo.
+- Trim videos, change playback speed, and mute audio.
+- Choose a Live Photo key frame, turn Live off, or apply Loop, Bounce, and Long Exposure effects.
+- Keep edits reversible on this device, preserving the original files on Immich.
+
+**Sharing and Backup**
+- Share photos and videos with format options and control over included location data.
+- Create shared links and manage shared albums.
+- Upload through the iOS share sheet or the Photos upload action.
+- Back up selected device albums, including Live Photos, with separate cellular-data settings for photos and videos.
+- Monitor backup progress, review duplicates reported by Immich, and free up verified device copies.
+
+**Widgets and Accessibility**
+- Display albums and Memories in Home Screen widgets.
+- Use a simplified interface in Apple's Assistive Access.
+- Browse cached library and collection information during temporary connection failures.
+- Use light or dark mode on iPhone and iPad.
 
 ## Requirements
+- **iPhone or iPad** running iOS / iPadOS 26 or later.
+- **Immich server** running v2 or v3 that your device can reach. Use HTTPS if the server is accessible from outside your home network.
+- **Xcode 26.5 or later** on a Mac to build and install the app, with an Apple account for device signing.
 
-- Xcode 26 or newer
-- iOS or iPadOS 26 or newer
-- An Immich server that is reachable from your device
-- An Apple Developer team for signing and device installation
+## Setup
+1. Clone this repository and open `ImmichApp.xcodeproj` in Xcode.
+2. Select the **Immi** scheme.
+3. In **Signing & Capabilities**, select your development team for the app and all extensions. If you use a different team or bundle identifiers, align the shared App Group and Keychain groups across target entitlements and source configuration, including `SharedUpload/SharedSession.swift`; its `keychainAccessGroup` must use your signing prefix.
+4. Choose your iPhone or iPad, then build and run.
+5. Enter your Immich server URL and sign in with email and password or your server's OAuth/OIDC provider.
+6. To enable backup, grant photo-library access and select the device albums you want to upload.
 
-Using HTTPS with a valid certificate is strongly recommended, especially when the server is accessible outside your local network.
+No third-party package installation is required. Search, face recognition, Memories, and duplicate groups depend on the features and information available from your Immich server. Visual search within an album requires a stable Immich Server v3.2 or later.
 
-## Getting Started
+Immi connects directly to your chosen server. It is an independent project and is not affiliated with or endorsed by Apple or the Immich team.
 
-1. Clone this repository:
-
-   ```sh
-   git clone https://github.com/rendiwijiatmoko/iOS-SelfPhotos.git
-   cd iOS-SelfPhotos
-   ```
-
-2. Open `ImmichApp.xcodeproj` in Xcode.
-3. Select the **SelfPhotos** scheme.
-4. In **Signing & Capabilities**, select your development team for the app and all extensions.
-5. If you use your own bundle identifiers, update the App Group identifier in every target and in the related source configuration.
-6. Choose an iPhone or iPad running iOS 26 or later, then build and run.
-7. Enter your Immich server URL and sign in.
-
-No third-party package installation is required.
-
-## Single Sign-On
-
-SelfPhotos supports Immich's OAuth/OIDC mobile flow when OAuth is enabled on the server. The sign-in button appears automatically when the server reports that OAuth is available.
-
-For identity providers that require an HTTPS redirect, enable Immich's **Mobile Redirect URI Override** and configure:
-
-```text
-https://YOUR-IMMICH-DOMAIN/api/oauth/mobile-redirect
-```
-
-Add that exact URL to the identity provider's list of allowed redirect URLs. Immich completes the mobile flow through `app.immich:///oauth-callback`.
-
-## Running Tests
-
-Run the test suite from Xcode with **Product → Test**, or from the command line with an available iOS Simulator:
+## Development
+Run the tests in Xcode with **Product → Test**, or from the command line with any installed simulator:
 
 ```sh
 xcodebuild test \
   -project ImmichApp.xcodeproj \
-  -scheme SelfPhotos \
+  -scheme Immi \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
-Replace the simulator name with one installed on your Mac. The tests cover networking contracts, authentication, backup behavior, storage, migrations, timelines, albums, and media playback lifecycles.
+Replace the simulator name with one installed on your Mac. The tests cover authentication and account isolation, Immich API contracts, backup and storage recovery, library organization, search, sharing, editing, media playback, privacy, and UI layout. Native UI tests use a local mock Immich server to exercise album and duplicate actions.
 
-## Project Structure
+<details>
+<summary>Project layout</summary>
 
 ```text
 ImmichApp/                   Main SwiftUI application
-  App/                       App lifecycle and navigation
-  Core/                      Networking, storage, caching, and shared services
-  Features/                  Feature-focused views, models, and repositories
-  Models/                    Domain and API data models
+  App/                       App lifecycle, navigation, and appearance
+  Components/                Shared interface components
+  Core/                      Authentication, networking, storage, Photos access, and widgets
+  Features/                  Library, Collections, albums, people, maps, search, editing, and backup
+  Models/                    Domain models and Immich API data models
+  Resources/                 Assets, app configuration, and localization
+ImmichApp.xcodeproj/          Xcode project and shared schemes
 ImmichWidgets/               Home Screen widgets
-SelfPhotosShareExtension/    iOS share-sheet extension
-SelfPhotosUploadAction/      Photos upload action extension
-SharedUpload/                Upload code shared by the extensions
-Tests/                       Unit and contract tests
+ImmiShareExtension/           iOS share-sheet extension
+ImmiUploadAction/             Photos upload action extension
+SharedUpload/                Upload code shared by the extensions and app
+Tests/                       Unit, contract, lifecycle, and hosted interface tests
+UITests/                     Native interface tests and local mock Immich server
+assets/                      README logo
 ```
 
-## Privacy
-
-SelfPhotos communicates directly with the server URL you configure; the app does not route your library through a developer-operated intermediary server. Authentication tokens are stored in the iOS Keychain, while local indexes and caches stay in the app's sandbox and shared App Group container.
-
-Your Immich server and its administrator have their own data-handling responsibilities. Review that server's privacy, security, retention, and backup practices before connecting. You can revoke photo-library access at any time in iOS Settings.
+</details>
 
 ## Contributing
+If you have suggestions, features, or bug reports you want implemented, please open an issue. If you can code, please try to fix the issue you found and open a pull request. Please include any details in your issue that may be relevant (screen recording, screenshots, etc.)
 
-Issues, bug reports, and pull requests are welcome. Before opening a pull request:
+If you have a bug report, please include your Immi version, iOS version, Immich server version, and steps to reproduce your issue.
 
-1. Keep changes focused and consistent with the existing SwiftUI architecture.
-2. Add or update tests for behavior changes.
-3. Run the **SelfPhotos** test suite.
-4. Describe the user-visible impact and any Immich API assumptions in the pull request.
-
-When reporting a bug, include the SelfPhotos version, iOS version, Immich server version, reproduction steps, and relevant logs with secrets removed.
-
-## Acknowledgements
-
-SelfPhotos exists thanks to the open-source [Immich](https://github.com/immich-app/immich) project and its community.
+## Credits
+- [SelfPhotos](https://github.com/rendiwijiatmoko/iOS-SelfPhotos) by [rendiwijiatmoko](https://github.com/rendiwijiatmoko) acted as the base for it.
+- [Immich](https://github.com/immich-app/immich) and its community inspired this project.
