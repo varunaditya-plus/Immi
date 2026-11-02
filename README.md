@@ -12,7 +12,7 @@
 [![GitHub Release](https://shieldcn.dev/github/release/varunaditya-plus/Immi.svg?size=sm)](https://github.com/varunaditya-plus/Immi/releases/latest)
 ![Please star this repo](https://shieldcn.dev/badge/★%20please%20star-22c55e.svg?theme=amber&color=eab308&size=sm&variant=outline)
 -->
-Immi is a native iOS app for Immich that looks and works like Apple's Photos app, made for users who want the clean,</br>familiar Photos experience they already understand, while being able to back up their photo library to Immich.
+Immi is a native iOS app for Immich that looks and works like Apple's Photos app, made for users who want the clean, familiar Photos experience they already understand, while being able to back up their photo library to Immich.
 
 </div>
 
