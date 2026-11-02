@@ -10,8 +10,8 @@
 		AA0000000000000000000025 /* WidgetMemory.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000024 /* WidgetMemory.swift */; };
 		AA0000000000000000000023 /* WidgetCalendar.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000022 /* WidgetCalendar.swift */; };
 		BB0000000000000000000002 /* ImmichWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000001 /* ImmichWidgets.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
-		CC0000000000000000000002 /* SelfPhotosShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = CC0000000000000000000001 /* SelfPhotosShareExtension.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
-		EE0000000000000000000002 /* SelfPhotosUploadAction.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = EE0000000000000000000001 /* SelfPhotosUploadAction.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		CC0000000000000000000002 /* ImmiShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = CC0000000000000000000001 /* ImmiShareExtension.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		EE0000000000000000000002 /* ImmiUploadAction.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = EE0000000000000000000001 /* ImmiUploadAction.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -20,7 +20,7 @@
 			containerPortal = 242E7F0630206D79000F50F4 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 242E7F0D30206D79000F50F4;
-			remoteInfo = ImmichApp;
+			remoteInfo = Immi;
 		};
 		BB0000000000000000000009 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -34,21 +34,21 @@
 			containerPortal = 242E7F0630206D79000F50F4 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = CC000000000000000000000B;
-			remoteInfo = SelfPhotosShareExtension;
+			remoteInfo = ImmiShareExtension;
 		};
 		EE0000000000000000000009 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 242E7F0630206D79000F50F4 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = EE000000000000000000000B;
-			remoteInfo = SelfPhotosUploadAction;
+			remoteInfo = ImmiUploadAction;
 		};
 		FF0000000000000000000008 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 242E7F0630206D79000F50F4 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 242E7F0D30206D79000F50F4;
-			remoteInfo = ImmichApp;
+			remoteInfo = Immi;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -60,8 +60,8 @@
 			dstSubfolderSpec = 13;
 			files = (
 				BB0000000000000000000002 /* ImmichWidgets.appex in Embed Foundation Extensions */,
-				CC0000000000000000000002 /* SelfPhotosShareExtension.appex in Embed Foundation Extensions */,
-				EE0000000000000000000002 /* SelfPhotosUploadAction.appex in Embed Foundation Extensions */,
+				CC0000000000000000000002 /* ImmiShareExtension.appex in Embed Foundation Extensions */,
+				EE0000000000000000000002 /* ImmiUploadAction.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -71,21 +71,21 @@
 /* Begin PBXFileReference section */
 		AA0000000000000000000024 /* WidgetMemory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmichWidgets/WidgetMemory.swift; sourceTree = SOURCE_ROOT; };
 		AA0000000000000000000022 /* WidgetCalendar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImmichWidgets/WidgetCalendar.swift; sourceTree = SOURCE_ROOT; };
-		242E7F0E30206D79000F50F4 /* ImmichApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ImmichApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		242E7F0E30206D79000F50F4 /* Immi.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Immi.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA000000000000000000000E /* ImmichAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ImmichAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		BB0000000000000000000001 /* ImmichWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ImmichWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		CC0000000000000000000001 /* SelfPhotosShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = SelfPhotosShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
-		EE0000000000000000000001 /* SelfPhotosUploadAction.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = SelfPhotosUploadAction.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		CC0000000000000000000001 /* ImmiShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ImmiShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		EE0000000000000000000001 /* ImmiUploadAction.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ImmiUploadAction.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		FF0000000000000000000001 /* ImmichAppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ImmichAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		AA0000000000000000000021 /* Exceptions for "ImmichApp" folder in "ImmichApp" target */ = {
+		AA0000000000000000000021 /* Exceptions for "ImmichApp" folder in "Immi" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Resources/Info.plist,
 			);
-			target = 242E7F0D30206D79000F50F4 /* ImmichApp */;
+			target = 242E7F0D30206D79000F50F4 /* Immi */;
 		};
 		BB0000000000000000000003 /* Exceptions for "ImmichWidgets" folder in "ImmichWidgets" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
@@ -94,27 +94,27 @@
 			);
 			target = BB000000000000000000000B /* ImmichWidgets */;
 		};
-		CC0000000000000000000003 /* Exceptions for "SelfPhotosShareExtension" folder in "SelfPhotosShareExtension" target */ = {
+		CC0000000000000000000003 /* Exceptions for "ImmiShareExtension" folder in "ImmiShareExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 			);
-			target = CC000000000000000000000B /* SelfPhotosShareExtension */;
+			target = CC000000000000000000000B /* ImmiShareExtension */;
 		};
-		EE0000000000000000000003 /* Exceptions for "SelfPhotosUploadAction" folder in "SelfPhotosUploadAction" target */ = {
+		EE0000000000000000000003 /* Exceptions for "ImmiUploadAction" folder in "ImmiUploadAction" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 			);
-			target = EE000000000000000000000B /* SelfPhotosUploadAction */;
+			target = EE000000000000000000000B /* ImmiUploadAction */;
 		};
-		EE000000000000000000000F /* Exceptions for "SelfPhotosShareExtension" folder in "SelfPhotosUploadAction" target */ = {
+		EE000000000000000000000F /* Exceptions for "ImmiShareExtension" folder in "ImmiUploadAction" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 				InfoPlist.xcstrings,
 			);
-			target = EE000000000000000000000B /* SelfPhotosUploadAction */;
+			target = EE000000000000000000000B /* ImmiUploadAction */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -122,7 +122,7 @@
 		242E7F1030206D79000F50F4 /* ImmichApp */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				AA0000000000000000000021 /* Exceptions for "ImmichApp" folder in "ImmichApp" target */,
+				AA0000000000000000000021 /* Exceptions for "ImmichApp" folder in "Immi" target */,
 			);
 			path = ImmichApp;
 			sourceTree = "<group>";
@@ -140,13 +140,13 @@
 			path = ImmichWidgets;
 			sourceTree = "<group>";
 		};
-		CC0000000000000000000004 /* SelfPhotosShareExtension */ = {
+		CC0000000000000000000004 /* ImmiShareExtension */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				CC0000000000000000000003 /* Exceptions for "SelfPhotosShareExtension" folder in "SelfPhotosShareExtension" target */,
-				EE000000000000000000000F /* Exceptions for "SelfPhotosShareExtension" folder in "SelfPhotosUploadAction" target */,
+				CC0000000000000000000003 /* Exceptions for "ImmiShareExtension" folder in "ImmiShareExtension" target */,
+				EE000000000000000000000F /* Exceptions for "ImmiShareExtension" folder in "ImmiUploadAction" target */,
 			);
-			path = SelfPhotosShareExtension;
+			path = ImmiShareExtension;
 			sourceTree = "<group>";
 		};
 		DD0000000000000000000004 /* SharedUpload */ = {
@@ -154,12 +154,12 @@
 			path = SharedUpload;
 			sourceTree = "<group>";
 		};
-		EE0000000000000000000004 /* SelfPhotosUploadAction */ = {
+		EE0000000000000000000004 /* ImmiUploadAction */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				EE0000000000000000000003 /* Exceptions for "SelfPhotosUploadAction" folder in "SelfPhotosUploadAction" target */,
+				EE0000000000000000000003 /* Exceptions for "ImmiUploadAction" folder in "ImmiUploadAction" target */,
 			);
-			path = SelfPhotosUploadAction;
+			path = ImmiUploadAction;
 			sourceTree = "<group>";
 		};
 		FF0000000000000000000002 /* UITests */ = {
@@ -219,8 +219,8 @@
 			children = (
 				242E7F1030206D79000F50F4 /* ImmichApp */,
 				BB0000000000000000000004 /* ImmichWidgets */,
-				CC0000000000000000000004 /* SelfPhotosShareExtension */,
-				EE0000000000000000000004 /* SelfPhotosUploadAction */,
+				CC0000000000000000000004 /* ImmiShareExtension */,
+				EE0000000000000000000004 /* ImmiUploadAction */,
 				DD0000000000000000000004 /* SharedUpload */,
 				AA0000000000000000000010 /* Tests */,
 				FF0000000000000000000002 /* UITests */,
@@ -231,10 +231,10 @@
 		242E7F0F30206D79000F50F4 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				242E7F0E30206D79000F50F4 /* ImmichApp.app */,
+				242E7F0E30206D79000F50F4 /* Immi.app */,
 				BB0000000000000000000001 /* ImmichWidgets.appex */,
-				CC0000000000000000000001 /* SelfPhotosShareExtension.appex */,
-				EE0000000000000000000001 /* SelfPhotosUploadAction.appex */,
+				CC0000000000000000000001 /* ImmiShareExtension.appex */,
+				EE0000000000000000000001 /* ImmiUploadAction.appex */,
 				AA000000000000000000000E /* ImmichAppTests.xctest */,
 				FF0000000000000000000001 /* ImmichAppUITests.xctest */,
 			);
@@ -244,9 +244,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		242E7F0D30206D79000F50F4 /* ImmichApp */ = {
+		242E7F0D30206D79000F50F4 /* Immi */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 242E7F1930206D7B000F50F4 /* Build configuration list for PBXNativeTarget "ImmichApp" */;
+			buildConfigurationList = 242E7F1930206D7B000F50F4 /* Build configuration list for PBXNativeTarget "Immi" */;
 			buildPhases = (
 				242E7F0A30206D79000F50F4 /* Sources */,
 				242E7F0B30206D79000F50F4 /* Frameworks */,
@@ -264,11 +264,11 @@
 				242E7F1030206D79000F50F4 /* ImmichApp */,
 				DD0000000000000000000004 /* SharedUpload */,
 			);
-			name = ImmichApp;
+			name = Immi;
 			packageProductDependencies = (
 			);
-			productName = ImmichApp;
-			productReference = 242E7F0E30206D79000F50F4 /* ImmichApp.app */;
+			productName = Immi;
+			productReference = 242E7F0E30206D79000F50F4 /* Immi.app */;
 			productType = "com.apple.product-type.application";
 		};
 		AA000000000000000000000D /* ImmichAppTests */ = {
@@ -316,9 +316,9 @@
 			productReference = BB0000000000000000000001 /* ImmichWidgets.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
-		CC000000000000000000000B /* SelfPhotosShareExtension */ = {
+		CC000000000000000000000B /* ImmiShareExtension */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = CC000000000000000000000C /* Build configuration list for PBXNativeTarget "SelfPhotosShareExtension" */;
+			buildConfigurationList = CC000000000000000000000C /* Build configuration list for PBXNativeTarget "ImmiShareExtension" */;
 			buildPhases = (
 				CC0000000000000000000007 /* Sources */,
 				CC0000000000000000000005 /* Frameworks */,
@@ -329,19 +329,19 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				CC0000000000000000000004 /* SelfPhotosShareExtension */,
+				CC0000000000000000000004 /* ImmiShareExtension */,
 				DD0000000000000000000004 /* SharedUpload */,
 			);
-			name = SelfPhotosShareExtension;
+			name = ImmiShareExtension;
 			packageProductDependencies = (
 			);
-			productName = SelfPhotosShareExtension;
-			productReference = CC0000000000000000000001 /* SelfPhotosShareExtension.appex */;
+			productName = ImmiShareExtension;
+			productReference = CC0000000000000000000001 /* ImmiShareExtension.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
-		EE000000000000000000000B /* SelfPhotosUploadAction */ = {
+		EE000000000000000000000B /* ImmiUploadAction */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = EE000000000000000000000C /* Build configuration list for PBXNativeTarget "SelfPhotosUploadAction" */;
+			buildConfigurationList = EE000000000000000000000C /* Build configuration list for PBXNativeTarget "ImmiUploadAction" */;
 			buildPhases = (
 				EE0000000000000000000007 /* Sources */,
 				EE0000000000000000000005 /* Frameworks */,
@@ -352,15 +352,15 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				CC0000000000000000000004 /* SelfPhotosShareExtension */,
+				CC0000000000000000000004 /* ImmiShareExtension */,
 				DD0000000000000000000004 /* SharedUpload */,
-				EE0000000000000000000004 /* SelfPhotosUploadAction */,
+				EE0000000000000000000004 /* ImmiUploadAction */,
 			);
-			name = SelfPhotosUploadAction;
+			name = ImmiUploadAction;
 			packageProductDependencies = (
 			);
-			productName = SelfPhotosUploadAction;
-			productReference = EE0000000000000000000001 /* SelfPhotosUploadAction.appex */;
+			productName = ImmiUploadAction;
+			productReference = EE0000000000000000000001 /* ImmiUploadAction.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
 		FF0000000000000000000003 /* ImmichAppUITests */ = {
@@ -494,10 +494,10 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				242E7F0D30206D79000F50F4 /* ImmichApp */,
+				242E7F0D30206D79000F50F4 /* Immi */,
 				BB000000000000000000000B /* ImmichWidgets */,
-				CC000000000000000000000B /* SelfPhotosShareExtension */,
-				EE000000000000000000000B /* SelfPhotosUploadAction */,
+				CC000000000000000000000B /* ImmiShareExtension */,
+				EE000000000000000000000B /* ImmiUploadAction */,
 				AA000000000000000000000D /* ImmichAppTests */,
 				FF0000000000000000000003 /* ImmichAppUITests */,
 			);
@@ -597,7 +597,7 @@
 /* Begin PBXTargetDependency section */
 		AA0000000000000000000012 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 242E7F0D30206D79000F50F4 /* ImmichApp */;
+			target = 242E7F0D30206D79000F50F4 /* Immi */;
 			targetProxy = AA0000000000000000000011 /* PBXContainerItemProxy */;
 		};
 		BB000000000000000000000A /* PBXTargetDependency */ = {
@@ -607,17 +607,17 @@
 		};
 		CC000000000000000000000A /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = CC000000000000000000000B /* SelfPhotosShareExtension */;
+			target = CC000000000000000000000B /* ImmiShareExtension */;
 			targetProxy = CC0000000000000000000009 /* PBXContainerItemProxy */;
 		};
 		EE000000000000000000000A /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = EE000000000000000000000B /* SelfPhotosUploadAction */;
+			target = EE000000000000000000000B /* ImmiUploadAction */;
 			targetProxy = EE0000000000000000000009 /* PBXContainerItemProxy */;
 		};
 		FF0000000000000000000009 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 242E7F0D30206D79000F50F4 /* ImmichApp */;
+			target = 242E7F0D30206D79000F50F4 /* Immi */;
 			targetProxy = FF0000000000000000000008 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
@@ -761,10 +761,10 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ImmichApp/Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = SelfPhotos;
+				INFOPLIST_KEY_CFBundleDisplayName = Immi;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.photography";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "SelfPhotos shows the photos on this device alongside the ones on your Immich server, so you can see what is not backed up yet and upload it.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Immi shows the photos on this device alongside the ones on your Immich server, so you can see what is not backed up yet and upload it.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UIBackgroundModes = "fetch processing";
@@ -778,6 +778,7 @@
 				);
 				MARKETING_VERSION = 1.1.3;
 				PRODUCT_BUNDLE_IDENTIFIER = xyz.0xmwehehe.ImmichApp;
+				PRODUCT_MODULE_NAME = ImmichApp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -802,10 +803,10 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ImmichApp/Resources/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = SelfPhotos;
+				INFOPLIST_KEY_CFBundleDisplayName = Immi;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.photography";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "SelfPhotos shows the photos on this device alongside the ones on your Immich server, so you can see what is not backed up yet and upload it.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Immi shows the photos on this device alongside the ones on your Immich server, so you can see what is not backed up yet and upload it.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UIBackgroundModes = "fetch processing";
@@ -819,6 +820,7 @@
 				);
 				MARKETING_VERSION = 1.1.3;
 				PRODUCT_BUNDLE_IDENTIFIER = xyz.0xmwehehe.ImmichApp;
+				PRODUCT_MODULE_NAME = ImmichApp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -848,7 +850,7 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ImmichApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ImmichApp";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Immi.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Immi";
 			};
 			name = Debug;
 		};
@@ -870,7 +872,7 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ImmichApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ImmichApp";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Immi.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Immi";
 			};
 			name = Release;
 		};
@@ -884,7 +886,7 @@
 				DEVELOPMENT_TEAM = 5KQGTJX2K7;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ImmichWidgets/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "SelfPhotos Widgets";
+				INFOPLIST_KEY_CFBundleDisplayName = "Immi Widgets";
 				IPHONEOS_DEPLOYMENT_TARGET = 26;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -915,7 +917,7 @@
 				DEVELOPMENT_TEAM = 5KQGTJX2K7;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = ImmichWidgets/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "SelfPhotos Widgets";
+				INFOPLIST_KEY_CFBundleDisplayName = "Immi Widgets";
 				IPHONEOS_DEPLOYMENT_TARGET = 26;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -940,13 +942,13 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_ENTITLEMENTS = SelfPhotosShareExtension/SelfPhotosShareExtension.entitlements;
+				CODE_SIGN_ENTITLEMENTS = ImmiShareExtension/ImmiShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 5KQGTJX2K7;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = SelfPhotosShareExtension/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = SelfPhotos;
+				INFOPLIST_FILE = ImmiShareExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Immi;
 				IPHONEOS_DEPLOYMENT_TARGET = 26;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -971,13 +973,13 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_ENTITLEMENTS = SelfPhotosShareExtension/SelfPhotosShareExtension.entitlements;
+				CODE_SIGN_ENTITLEMENTS = ImmiShareExtension/ImmiShareExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 5KQGTJX2K7;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = SelfPhotosShareExtension/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = SelfPhotos;
+				INFOPLIST_FILE = ImmiShareExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Immi;
 				IPHONEOS_DEPLOYMENT_TARGET = 26;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1003,13 +1005,13 @@
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = ActionIcon;
-				CODE_SIGN_ENTITLEMENTS = SelfPhotosUploadAction/SelfPhotosUploadAction.entitlements;
+				CODE_SIGN_ENTITLEMENTS = ImmiUploadAction/ImmiUploadAction.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 5KQGTJX2K7;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = SelfPhotosUploadAction/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Upload to SelfPhotos";
+				INFOPLIST_FILE = ImmiUploadAction/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Upload to Immi";
 				IPHONEOS_DEPLOYMENT_TARGET = 26;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1035,13 +1037,13 @@
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = ActionIcon;
-				CODE_SIGN_ENTITLEMENTS = SelfPhotosUploadAction/SelfPhotosUploadAction.entitlements;
+				CODE_SIGN_ENTITLEMENTS = ImmiUploadAction/ImmiUploadAction.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 5KQGTJX2K7;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = SelfPhotosUploadAction/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Upload to SelfPhotos";
+				INFOPLIST_FILE = ImmiUploadAction/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Upload to Immi";
 				IPHONEOS_DEPLOYMENT_TARGET = 26;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1079,7 +1081,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_TARGET_NAME = ImmichApp;
+				TEST_TARGET_NAME = Immi;
 			};
 			name = Debug;
 		};
@@ -1100,7 +1102,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				TEST_TARGET_NAME = ImmichApp;
+				TEST_TARGET_NAME = Immi;
 			};
 			name = Release;
 		};
@@ -1116,7 +1118,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		242E7F1930206D7B000F50F4 /* Build configuration list for PBXNativeTarget "ImmichApp" */ = {
+		242E7F1930206D7B000F50F4 /* Build configuration list for PBXNativeTarget "Immi" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				242E7F1A30206D7B000F50F4 /* Debug */,
@@ -1143,7 +1145,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		CC000000000000000000000C /* Build configuration list for PBXNativeTarget "SelfPhotosShareExtension" */ = {
+		CC000000000000000000000C /* Build configuration list for PBXNativeTarget "ImmiShareExtension" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				CC000000000000000000000D /* Debug */,
@@ -1152,7 +1154,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		EE000000000000000000000C /* Build configuration list for PBXNativeTarget "SelfPhotosUploadAction" */ = {
+		EE000000000000000000000C /* Build configuration list for PBXNativeTarget "ImmiUploadAction" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				EE000000000000000000000D /* Debug */,

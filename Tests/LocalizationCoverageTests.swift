@@ -12,7 +12,7 @@ final class LocalizationCoverageTests: XCTestCase {
     func testEveryCatalogEntryHasAllSupportedTranslationsAndValidFormatArguments() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         for path in ["ImmichApp/Resources/Localizable.xcstrings", "ImmichApp/Resources/InfoPlist.xcstrings", "ImmichWidgets/Localizable.xcstrings",
-                     "SelfPhotosShareExtension/Localizable.xcstrings"] {
+                     "ImmiShareExtension/Localizable.xcstrings"] {
             let data = try Data(contentsOf: root.appendingPathComponent(path))
             let catalog = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
             let entries = try XCTUnwrap(catalog["strings"] as? [String: [String: Any]])
@@ -139,7 +139,7 @@ final class LocalizationCoverageTests: XCTestCase {
             let message = bundle.localizedString(forKey: key, value: "MISSING-PERMISSION", table: "InfoPlist")
             XCTAssertNotEqual(message, "MISSING-PERMISSION", "Missing \(language) location permission")
             XCTAssertFalse(message.isEmpty)
-            XCTAssertTrue(message.contains("SelfPhotos"), message)
+            XCTAssertTrue(message.contains("Immi"), message)
         }
         let french = try localizedBundle(Bundle.main, language: "fr")
         let message = french.localizedString(forKey: key, value: nil, table: "InfoPlist")
@@ -329,12 +329,12 @@ final class LocalizationCoverageTests: XCTestCase {
 
     func testBothShareExtensionsContainTheirOwnCompiledTranslations() throws {
         let plugins = try XCTUnwrap(Bundle.main.builtInPlugInsURL)
-        for name in ["SelfPhotosShareExtension.appex", "SelfPhotosUploadAction.appex"] {
+        for name in ["ImmiShareExtension.appex", "ImmiUploadAction.appex"] {
             let shared = try XCTUnwrap(Bundle(url: plugins.appendingPathComponent(name)))
             for language in languages {
                 let shareBundle = try localizedBundle(shared, language: language)
                 assertCompiled("No supported photos or videos were shared.", in: shareBundle)
-                assertCompiled("Open SelfPhotos to retry or remove failed uploads in Backup > View Details.", in: shareBundle)
+                assertCompiled("Open Immi to retry or remove failed uploads in Backup > View Details.", in: shareBundle)
             }
             let french = try localizedBundle(shared, language: "fr")
             let error = french.localizedString(forKey: "No supported photos or videos were shared.", value: nil, table: nil)

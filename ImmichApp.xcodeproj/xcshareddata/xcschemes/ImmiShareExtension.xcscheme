@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
    LastUpgradeVersion = "2660"
-   version = "1.7">
+   wasCreatedForAppExtension = "YES"
+   version = "2.0">
    <BuildAction
       parallelizeBuildables = "YES"
       buildImplicitDependencies = "YES"
@@ -15,9 +16,23 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
+               BlueprintIdentifier = "CC000000000000000000000B"
+               BuildableName = "ImmiShareExtension.appex"
+               BlueprintName = "ImmiShareExtension"
+               ReferencedContainer = "container:ImmichApp.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
                BlueprintIdentifier = "242E7F0D30206D79000F50F4"
-               BuildableName = "ImmichApp.app"
-               BlueprintName = "ImmichApp"
+               BuildableName = "Immi.app"
+               BlueprintName = "Immi"
                ReferencedContainer = "container:ImmichApp.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -29,61 +44,49 @@
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES"
       shouldAutocreateTestPlan = "YES">
-      <Testables>
-         <TestableReference skipped = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "AA000000000000000000000D"
-               BuildableName = "ImmichAppTests.xctest"
-               BlueprintName = "ImmichAppTests"
-               ReferencedContainer = "container:ImmichApp.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
-         <TestableReference skipped = "NO" parallelizable = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "FF0000000000000000000003"
-               BuildableName = "ImmichAppUITests.xctest"
-               BlueprintName = "ImmichAppUITests"
-               ReferencedContainer = "container:ImmichApp.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
-      </Testables>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"
-      selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
-      selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
+      selectedDebuggerIdentifier = ""
+      selectedLauncherIdentifier = "Xcode.IDEFoundation.Launcher.PosixSpawn"
       launchStyle = "0"
+      askForAppToLaunch = "Yes"
       useCustomWorkingDirectory = "NO"
       ignoresPersistentStateOnLaunch = "NO"
       debugDocumentVersioning = "YES"
       debugServiceExtension = "internal"
-      allowLocationSimulation = "YES">
-      <BuildableProductRunnable
-         runnableDebuggingMode = "0">
+      allowLocationSimulation = "YES"
+      launchAutomaticallySubstyle = "2">
+      <RemoteRunnable
+         runnableDebuggingMode = "0"
+         BundleIdentifier = "xyz.0xmwehehe.ImmichApp"
+         RemotePath = "/var/containers/Bundle/Application/6593024E-ED94-4EC9-B492-AE56BCC39736/Immi.app">
+      </RemoteRunnable>
+      <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "242E7F0D30206D79000F50F4"
-            BuildableName = "ImmichApp.app"
-            BlueprintName = "ImmichApp"
+            BuildableName = "Immi.app"
+            BlueprintName = "Immi"
             ReferencedContainer = "container:ImmichApp.xcodeproj">
          </BuildableReference>
-      </BuildableProductRunnable>
+      </MacroExpansion>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"
       shouldUseLaunchSchemeArgsEnv = "YES"
       savedToolIdentifier = ""
       useCustomWorkingDirectory = "NO"
-      debugDocumentVersioning = "YES">
+      debugDocumentVersioning = "YES"
+      askForAppToLaunch = "Yes"
+      launchAutomaticallySubstyle = "2">
       <BuildableProductRunnable
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "242E7F0D30206D79000F50F4"
-            BuildableName = "ImmichApp.app"
-            BlueprintName = "ImmichApp"
+            BuildableName = "Immi.app"
+            BlueprintName = "Immi"
             ReferencedContainer = "container:ImmichApp.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>

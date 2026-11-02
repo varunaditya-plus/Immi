@@ -1,5 +1,5 @@
 name: Test iOS app
-description: Build and run SelfPhotos tests on an available iPhone simulator.
+description: Build and run Immi tests on an available iPhone simulator.
 
 runs:
   using: composite
@@ -37,7 +37,7 @@ runs:
         }
         test_arguments=(
           -project ImmichApp.xcodeproj
-          -scheme SelfPhotos
+          -scheme Immi
           -configuration Debug
           -destination "platform=iOS Simulator,id=$SIMULATOR_ID"
           -parallel-testing-enabled NO
@@ -47,10 +47,10 @@ runs:
         )
         xcodebuild test "${test_arguments[@]}" \
           -testLanguage en -testRegion US \
-          -resultBundlePath "$RUNNER_TEMP/SelfPhotosTests.xcresult"
-        verify_results "$RUNNER_TEMP/SelfPhotosTests.xcresult"
+          -resultBundlePath "$RUNNER_TEMP/ImmiTests.xcresult"
+        verify_results "$RUNNER_TEMP/ImmiTests.xcresult"
         for suite in SyncStatusLocalizationTests AppFallbackLocalizationTests; do
-          result_bundle="$RUNNER_TEMP/SelfPhotosFrench-${suite}.xcresult"
+          result_bundle="$RUNNER_TEMP/ImmiFrench-${suite}.xcresult"
           xcodebuild test "${test_arguments[@]}" \
             -testLanguage fr -testRegion FR \
             -only-testing:"ImmichAppTests/$suite" \
@@ -62,9 +62,9 @@ runs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: SelfPhotos-test-results
+        name: Immi-test-results
         path: |
-          ${{ runner.temp }}/SelfPhotosTests.xcresult
-          ${{ runner.temp }}/SelfPhotosFrench-*.xcresult
+          ${{ runner.temp }}/ImmiTests.xcresult
+          ${{ runner.temp }}/ImmiFrench-*.xcresult
         if-no-files-found: ignore
         retention-days: 7

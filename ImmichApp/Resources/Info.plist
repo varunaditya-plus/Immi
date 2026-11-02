@@ -3,14 +3,14 @@
 <plist version="1.0">
 <dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>SelfPhotos uses your location only when you choose to center the photo map around you.</string>
+	<string>Immi uses your location only when you choose to center the photo map around you.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>SelfPhotos connects to your Immich server on the local network to view and upload photos and videos.</string>
+	<string>Immi connects to your Immich server on the local network to view and upload photos and videos.</string>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>app.immich.backup.refresh</string>
@@ -65,6 +65,7 @@
 			<string>xyz.0xmwehehe.ImmichApp.navigation</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
+				<string>immi</string>
 				<string>selfphotos</string>
 				<string>immiches</string>
 			</array>

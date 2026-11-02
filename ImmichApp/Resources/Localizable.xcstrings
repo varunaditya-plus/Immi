@@ -95133,234 +95133,234 @@
         }
       }
     },
-    "Photos in these albums appear in your timeline, marked as on-device. SelfPhotos reads each one once to check whether it is already on the server — photos stored only in iCloud are downloaded to do that." : {
+    "Photos in these albums appear in your timeline, marked as on-device. Immi reads each one once to check whether it is already on the server — photos stored only in iCloud are downloaded to do that." : {
       "localizations" : {
         "ar" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "تظهر الصور الموجودة في هذه الألبومات في مخططك الزمني مع الإشارة إلى وجودها على الجهاز. يقرأ SelfPhotos كل صورة مرة واحدة للتحقق مما إذا كانت موجودة على الخادم — ويتم تنزيل الصور المخزنة في iCloud فقط لإجراء ذلك."
+            "value" : "تظهر الصور الموجودة في هذه الألبومات في مخططك الزمني مع الإشارة إلى وجودها على الجهاز. يقرأ Immi كل صورة مرة واحدة للتحقق مما إذا كانت موجودة على الخادم — ويتم تنزيل الصور المخزنة في iCloud فقط لإجراء ذلك."
           }
         },
         "bg" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Снимките в тези албуми се показват във времевата линия, отбелязани като налични на устройството. SelfPhotos прочита всяка веднъж, за да провери дали вече е на сървъра — снимките, съхранявани само в iCloud, се изтеглят за тази проверка."
+            "value" : "Снимките в тези албуми се показват във времевата линия, отбелязани като налични на устройството. Immi прочита всяка веднъж, за да провери дали вече е на сървъра — снимките, съхранявани само в iCloud, се изтеглят за тази проверка."
           }
         },
         "bn" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "এই অ্যালবামগুলোর ছবি আপনার টাইমলাইনে ডিভাইসে আছে হিসেবে চিহ্নিত হয়ে দেখা যায়। SelfPhotos প্রতিটি ছবি একবার পড়ে দেখে সেটি সার্ভারে আগে থেকেই আছে কি না — শুধু iCloud-এ থাকা ছবি এই পরীক্ষার জন্য ডাউনলোড করা হয়।"
+            "value" : "এই অ্যালবামগুলোর ছবি আপনার টাইমলাইনে ডিভাইসে আছে হিসেবে চিহ্নিত হয়ে দেখা যায়। Immi প্রতিটি ছবি একবার পড়ে দেখে সেটি সার্ভারে আগে থেকেই আছে কি না — শুধু iCloud-এ থাকা ছবি এই পরীক্ষার জন্য ডাউনলোড করা হয়।"
           }
         },
         "ca" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Les fotos d'aquests àlbums apareixen a la cronologia marcades com a disponibles al dispositiu. SelfPhotos en llegeix cadascuna una vegada per comprovar si ja és al servidor — les fotos que només són a l'iCloud es baixen per fer aquesta comprovació."
+            "value" : "Les fotos d'aquests àlbums apareixen a la cronologia marcades com a disponibles al dispositiu. Immi en llegeix cadascuna una vegada per comprovar si ja és al servidor — les fotos que només són a l'iCloud es baixen per fer aquesta comprovació."
           }
         },
         "cs" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Fotky v těchto albech se zobrazí na časové ose jako uložené v zařízení. SelfPhotos každou z nich jednou načte, aby ověřil, zda již je na serveru – fotky uložené pouze na iCloudu se kvůli tomu stáhnou."
+            "value" : "Fotky v těchto albech se zobrazí na časové ose jako uložené v zařízení. Immi každou z nich jednou načte, aby ověřil, zda již je na serveru – fotky uložené pouze na iCloudu se kvůli tomu stáhnou."
           }
         },
         "da" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Fotos i disse album vises på din tidslinje markeret som værende på enheden. SelfPhotos læser hvert foto én gang for at kontrollere, om det allerede findes på serveren – fotos, der kun er gemt i iCloud, downloades for at gøre dette."
+            "value" : "Fotos i disse album vises på din tidslinje markeret som værende på enheden. Immi læser hvert foto én gang for at kontrollere, om det allerede findes på serveren – fotos, der kun er gemt i iCloud, downloades for at gøre dette."
           }
         },
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Fotos in diesen Alben werden in deiner Zeitleiste als auf dem Gerät vorhanden angezeigt. SelfPhotos liest jedes Foto einmal, um zu prüfen, ob es bereits auf dem Server vorhanden ist. Fotos, die nur in iCloud gespeichert sind, werden dafür heruntergeladen."
+            "value" : "Fotos in diesen Alben werden in deiner Zeitleiste als auf dem Gerät vorhanden angezeigt. Immi liest jedes Foto einmal, um zu prüfen, ob es bereits auf dem Server vorhanden ist. Fotos, die nur in iCloud gespeichert sind, werden dafür heruntergeladen."
           }
         },
         "el" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Οι φωτογραφίες σε αυτά τα άλμπουμ εμφανίζονται στη γραμμή χρόνου ως αποθηκευμένες στη συσκευή. Το SelfPhotos διαβάζει καθεμία μία φορά για να ελέγξει αν βρίσκεται ήδη στον διακομιστή. Οι φωτογραφίες που είναι αποθηκευμένες μόνο στο iCloud λαμβάνονται για αυτόν τον έλεγχο."
+            "value" : "Οι φωτογραφίες σε αυτά τα άλμπουμ εμφανίζονται στη γραμμή χρόνου ως αποθηκευμένες στη συσκευή. Το Immi διαβάζει καθεμία μία φορά για να ελέγξει αν βρίσκεται ήδη στον διακομιστή. Οι φωτογραφίες που είναι αποθηκευμένες μόνο στο iCloud λαμβάνονται για αυτόν τον έλεγχο."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Las fotos de estos álbumes aparecen en la línea de tiempo marcadas como presentes en el dispositivo. SelfPhotos lee cada una una vez para comprobar si ya está en el servidor; las fotos guardadas únicamente en iCloud se descargan para realizar esta comprobación."
+            "value" : "Las fotos de estos álbumes aparecen en la línea de tiempo marcadas como presentes en el dispositivo. Immi lee cada una una vez para comprobar si ya está en el servidor; las fotos guardadas únicamente en iCloud se descargan para realizar esta comprobación."
           }
         },
         "fa" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "عکس‌های این آلبوم‌ها در خط زمانی با نشان موجود در دستگاه نمایش داده می‌شوند. SelfPhotos هرکدام را یک‌بار می‌خواند تا بررسی کند آیا از قبل در سرور هستند یا نه — عکس‌هایی که فقط در iCloud ذخیره شده‌اند برای این کار دریافت می‌شوند."
+            "value" : "عکس‌های این آلبوم‌ها در خط زمانی با نشان موجود در دستگاه نمایش داده می‌شوند. Immi هرکدام را یک‌بار می‌خواند تا بررسی کند آیا از قبل در سرور هستند یا نه — عکس‌هایی که فقط در iCloud ذخیره شده‌اند برای این کار دریافت می‌شوند."
           }
         },
         "fi" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Näiden albumien kuvat näkyvät aikajanallasi laitteessa oleviksi merkittyinä. SelfPhotos lukee jokaisen kerran tarkistaakseen, onko se jo palvelimella. Vain iCloudiin tallennetut kuvat ladataan tätä varten."
+            "value" : "Näiden albumien kuvat näkyvät aikajanallasi laitteessa oleviksi merkittyinä. Immi lukee jokaisen kerran tarkistaakseen, onko se jo palvelimella. Vain iCloudiin tallennetut kuvat ladataan tätä varten."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Les photos de ces albums apparaissent dans votre chronologie comme présentes sur l’appareil. SelfPhotos lit chacune d’elles une fois pour vérifier si elle se trouve déjà sur le serveur. Les photos stockées uniquement dans iCloud sont téléchargées pour effectuer cette vérification."
+            "value" : "Les photos de ces albums apparaissent dans votre chronologie comme présentes sur l’appareil. Immi lit chacune d’elles une fois pour vérifier si elle se trouve déjà sur le serveur. Les photos stockées uniquement dans iCloud sont téléchargées pour effectuer cette vérification."
           }
         },
         "he" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "תמונות באלבומים האלה מופיעות בציר הזמן ומסומנות כקיימות במכשיר. SelfPhotos קורא כל אחת פעם אחת כדי לבדוק אם היא כבר נמצאת בשרת. תמונות השמורות רק ב-iCloud מורדות לצורך הבדיקה."
+            "value" : "תמונות באלבומים האלה מופיעות בציר הזמן ומסומנות כקיימות במכשיר. Immi קורא כל אחת פעם אחת כדי לבדוק אם היא כבר נמצאת בשרת. תמונות השמורות רק ב-iCloud מורדות לצורך הבדיקה."
           }
         },
         "hi" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "इन एल्बम की फ़ोटो आपकी टाइमलाइन में डिवाइस पर मौजूद के रूप में दिखाई देती हैं। SelfPhotos हर फ़ोटो को एक बार पढ़कर जाँचता है कि वह सर्वर पर पहले से है या नहीं। केवल iCloud में मौजूद फ़ोटो इस जाँच के लिए डाउनलोड की जाती हैं।"
+            "value" : "इन एल्बम की फ़ोटो आपकी टाइमलाइन में डिवाइस पर मौजूद के रूप में दिखाई देती हैं। Immi हर फ़ोटो को एक बार पढ़कर जाँचता है कि वह सर्वर पर पहले से है या नहीं। केवल iCloud में मौजूद फ़ोटो इस जाँच के लिए डाउनलोड की जाती हैं।"
           }
         },
         "hr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Fotografije u ovim albumima pojavljuju se na vremenskoj crti, označene kao dostupne na uređaju. SelfPhotos svaku pročita jednom kako bi provjerio postoji li već na poslužitelju — fotografije pohranjene samo u iCloudu preuzimaju se radi te provjere."
+            "value" : "Fotografije u ovim albumima pojavljuju se na vremenskoj crti, označene kao dostupne na uređaju. Immi svaku pročita jednom kako bi provjerio postoji li već na poslužitelju — fotografije pohranjene samo u iCloudu preuzimaju se radi te provjere."
           }
         },
         "hu" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Az ezekben az albumokban lévő fotók az idővonalon eszközön tároltként jelennek meg. A SelfPhotos mindegyiket egyszer beolvassa, hogy ellenőrizze, megtalálható-e már a szerveren — a csak az iCloud szolgáltatásban tárolt fotókat ehhez letölti."
+            "value" : "Az ezekben az albumokban lévő fotók az idővonalon eszközön tároltként jelennek meg. A Immi mindegyiket egyszer beolvassa, hogy ellenőrizze, megtalálható-e már a szerveren — a csak az iCloud szolgáltatásban tárolt fotókat ehhez letölti."
           }
         },
         "id" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Foto dalam album ini muncul di linimasa Anda dan ditandai sebagai berada di perangkat. SelfPhotos membaca setiap foto satu kali untuk memeriksa apakah sudah ada di server — foto yang hanya tersimpan di iCloud akan diunduh untuk melakukannya."
+            "value" : "Foto dalam album ini muncul di linimasa Anda dan ditandai sebagai berada di perangkat. Immi membaca setiap foto satu kali untuk memeriksa apakah sudah ada di server — foto yang hanya tersimpan di iCloud akan diunduh untuk melakukannya."
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Le foto di questi album vengono visualizzate nella cronologia come presenti sul dispositivo. SelfPhotos le legge una volta per verificare se sono già sul server; le foto archiviate solo in iCloud vengono scaricate per eseguire il controllo."
+            "value" : "Le foto di questi album vengono visualizzate nella cronologia come presenti sul dispositivo. Immi le legge una volta per verificare se sono già sul server; le foto archiviate solo in iCloud vengono scaricate per eseguire il controllo."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "これらのアルバムの写真は、デバイス上の項目としてタイムラインに表示されます。SelfPhotosはサーバー上にすでに存在するか確認するため各写真を一度読み込みます。その際、iCloudのみに保存されている写真はダウンロードされます。"
+            "value" : "これらのアルバムの写真は、デバイス上の項目としてタイムラインに表示されます。Immiはサーバー上にすでに存在するか確認するため各写真を一度読み込みます。その際、iCloudのみに保存されている写真はダウンロードされます。"
           }
         },
         "kk" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Бұл альбомдардағы фотосуреттер уақыт шкаласында құрылғыда бар деп белгіленіп көрсетіледі. SelfPhotos олардың серверде бар-жоғын тексеру үшін әрқайсысын бір рет оқиды — тек iCloud қызметінде сақталған фотосуреттер осы тексеріс үшін жүктеп алынады."
+            "value" : "Бұл альбомдардағы фотосуреттер уақыт шкаласында құрылғыда бар деп белгіленіп көрсетіледі. Immi олардың серверде бар-жоғын тексеру үшін әрқайсысын бір рет оқиды — тек iCloud қызметінде сақталған фотосуреттер осы тексеріс үшін жүктеп алынады."
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "이 앨범의 사진은 기기에 있는 항목으로 표시되어 타임라인에 나타납니다. SelfPhotos는 서버에 이미 있는지 확인하기 위해 각 사진을 한 번씩 읽으며, iCloud에만 저장된 사진은 이 확인을 위해 다운로드됩니다."
+            "value" : "이 앨범의 사진은 기기에 있는 항목으로 표시되어 타임라인에 나타납니다. Immi는 서버에 이미 있는지 확인하기 위해 각 사진을 한 번씩 읽으며, iCloud에만 저장된 사진은 이 확인을 위해 다운로드됩니다."
           }
         },
         "lt" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Šių albumų nuotraukos rodomos laiko juostoje kaip esančios įrenginyje. SelfPhotos kiekvieną jų perskaito vieną kartą, kad patikrintų, ar ji jau yra serveryje – tik iCloud saugomos nuotraukos tam atsisiunčiamos."
+            "value" : "Šių albumų nuotraukos rodomos laiko juostoje kaip esančios įrenginyje. Immi kiekvieną jų perskaito vieną kartą, kad patikrintų, ar ji jau yra serveryje – tik iCloud saugomos nuotraukos tam atsisiunčiamos."
           }
         },
         "ms" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Foto dalam album ini dipaparkan dalam garis masa anda dengan tanda berada pada peranti. SelfPhotos membaca setiap satu sekali untuk memeriksa sama ada ia sudah berada pada pelayan — foto yang hanya disimpan dalam iCloud dimuat turun untuk pemeriksaan itu."
+            "value" : "Foto dalam album ini dipaparkan dalam garis masa anda dengan tanda berada pada peranti. Immi membaca setiap satu sekali untuk memeriksa sama ada ia sudah berada pada pelayan — foto yang hanya disimpan dalam iCloud dimuat turun untuk pemeriksaan itu."
           }
         },
         "nb" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Bilder i disse albumene vises på tidslinjen og merkes som lagret på enheten. SelfPhotos leser hvert bilde én gang for å kontrollere om det allerede finnes på serveren – bilder som bare er lagret i iCloud, lastes ned for denne kontrollen."
+            "value" : "Bilder i disse albumene vises på tidslinjen og merkes som lagret på enheten. Immi leser hvert bilde én gang for å kontrollere om det allerede finnes på serveren – bilder som bare er lagret i iCloud, lastes ned for denne kontrollen."
           }
         },
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Foto's in deze albums verschijnen in je tijdlijn en worden gemarkeerd als aanwezig op het apparaat. SelfPhotos leest elke foto één keer om te controleren of deze al op de server staat. Foto's die alleen in iCloud zijn bewaard, worden hiervoor gedownload."
+            "value" : "Foto's in deze albums verschijnen in je tijdlijn en worden gemarkeerd als aanwezig op het apparaat. Immi leest elke foto één keer om te controleren of deze al op de server staat. Foto's die alleen in iCloud zijn bewaard, worden hiervoor gedownload."
           }
         },
         "pl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Zdjęcia z tych albumów pojawiają się na osi czasu jako zapisane na urządzeniu. SelfPhotos odczytuje każde z nich raz, aby sprawdzić, czy znajduje się już na serwerze — zdjęcia przechowywane tylko w iCloud są w tym celu pobierane."
+            "value" : "Zdjęcia z tych albumów pojawiają się na osi czasu jako zapisane na urządzeniu. Immi odczytuje każde z nich raz, aby sprawdzić, czy znajduje się już na serwerze — zdjęcia przechowywane tylko w iCloud są w tym celu pobierane."
           }
         },
         "pt" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "As fotos destes álbuns aparecem na cronologia, assinaladas como presentes no dispositivo. O SelfPhotos lê cada uma uma vez para verificar se já está no servidor — as fotos guardadas apenas no iCloud são transferidas para efetuar esta verificação."
+            "value" : "As fotos destes álbuns aparecem na cronologia, assinaladas como presentes no dispositivo. O Immi lê cada uma uma vez para verificar se já está no servidor — as fotos guardadas apenas no iCloud são transferidas para efetuar esta verificação."
           }
         },
         "ro" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Fotografiile din aceste albume apar în cronologie, marcate ca fiind pe dispozitiv. SelfPhotos citește fiecare fotografie o singură dată pentru a verifica dacă se află deja pe server — fotografiile stocate numai în iCloud sunt descărcate pentru această verificare."
+            "value" : "Fotografiile din aceste albume apar în cronologie, marcate ca fiind pe dispozitiv. Immi citește fiecare fotografie o singură dată pentru a verifica dacă se află deja pe server — fotografiile stocate numai în iCloud sunt descărcate pentru această verificare."
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Фотографии из этих альбомов отображаются на временной шкале с отметкой о наличии на устройстве. SelfPhotos один раз считывает каждую фотографию, чтобы проверить, есть ли она на сервере. Для этой проверки фотографии, хранящиеся только в iCloud, загружаются на устройство."
+            "value" : "Фотографии из этих альбомов отображаются на временной шкале с отметкой о наличии на устройстве. Immi один раз считывает каждую фотографию, чтобы проверить, есть ли она на сервере. Для этой проверки фотографии, хранящиеся только в iCloud, загружаются на устройство."
           }
         },
         "sk" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Fotografie v týchto albumoch sa zobrazia na časovej osi označené ako uložené v zariadení. SelfPhotos každú z nich raz načíta a overí, či už je na serveri. Fotografie uložené iba v službe iCloud sa na tento účel stiahnu."
+            "value" : "Fotografie v týchto albumoch sa zobrazia na časovej osi označené ako uložené v zariadení. Immi každú z nich raz načíta a overí, či už je na serveri. Fotografie uložené iba v službe iCloud sa na tento účel stiahnu."
           }
         },
         "sl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Fotografije iz teh albumov so prikazane na časovnici in označene kot shranjene v napravi. SelfPhotos vsako enkrat prebere, da preveri, ali je že v strežniku. Fotografije, shranjene samo v storitvi iCloud, se za to preverjanje prenesejo."
+            "value" : "Fotografije iz teh albumov so prikazane na časovnici in označene kot shranjene v napravi. Immi vsako enkrat prebere, da preveri, ali je že v strežniku. Fotografije, shranjene samo v storitvi iCloud, se za to preverjanje prenesejo."
           }
         },
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Foton i de här albumen visas på tidslinjen och markeras som sparade på enheten. SelfPhotos läser varje foto en gång för att kontrollera om det redan finns på servern. Foton som bara lagras i iCloud hämtas för kontrollen."
+            "value" : "Foton i de här albumen visas på tidslinjen och markeras som sparade på enheten. Immi läser varje foto en gång för att kontrollera om det redan finns på servern. Foton som bara lagras i iCloud hämtas för kontrollen."
           }
         },
         "th" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "รูปภาพในอัลบั้มเหล่านี้จะแสดงในไทม์ไลน์และทำเครื่องหมายว่าอยู่บนอุปกรณ์ SelfPhotos จะอ่านแต่ละรูปหนึ่งครั้งเพื่อตรวจสอบว่ามีอยู่บนเซิร์ฟเวอร์แล้วหรือไม่ โดยจะดาวน์โหลดรูปภาพที่เก็บไว้เฉพาะใน iCloud เพื่อทำการตรวจสอบนี้"
+            "value" : "รูปภาพในอัลบั้มเหล่านี้จะแสดงในไทม์ไลน์และทำเครื่องหมายว่าอยู่บนอุปกรณ์ Immi จะอ่านแต่ละรูปหนึ่งครั้งเพื่อตรวจสอบว่ามีอยู่บนเซิร์ฟเวอร์แล้วหรือไม่ โดยจะดาวน์โหลดรูปภาพที่เก็บไว้เฉพาะใน iCloud เพื่อทำการตรวจสอบนี้"
           }
         },
         "tr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Bu albümlerdeki fotoğraflar zaman çizelgenizde cihazda olarak işaretlenmiş şekilde görünür. SelfPhotos, sunucuda zaten bulunup bulunmadığını denetlemek için her birini bir kez okur; yalnızca iCloud'da saklanan fotoğraflar bunun için indirilir."
+            "value" : "Bu albümlerdeki fotoğraflar zaman çizelgenizde cihazda olarak işaretlenmiş şekilde görünür. Immi, sunucuda zaten bulunup bulunmadığını denetlemek için her birini bir kez okur; yalnızca iCloud'da saklanan fotoğraflar bunun için indirilir."
           }
         },
         "uk" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Фото із цих альбомів відображаються на часовій шкалі з позначкою, що вони є на пристрої. SelfPhotos один раз зчитує кожне з них, щоб перевірити наявність на сервері. Фото, що зберігаються лише в iCloud, завантажуються для цієї перевірки."
+            "value" : "Фото із цих альбомів відображаються на часовій шкалі з позначкою, що вони є на пристрої. Immi один раз зчитує кожне з них, щоб перевірити наявність на сервері. Фото, що зберігаються лише в iCloud, завантажуються для цієї перевірки."
           }
         },
         "vi" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Ảnh trong các album này xuất hiện trên dòng thời gian và được đánh dấu là có trên thiết bị. SelfPhotos đọc mỗi ảnh một lần để kiểm tra xem ảnh đã có trên máy chủ chưa — ảnh chỉ lưu trong iCloud sẽ được tải xuống để thực hiện việc này."
+            "value" : "Ảnh trong các album này xuất hiện trên dòng thời gian và được đánh dấu là có trên thiết bị. Immi đọc mỗi ảnh một lần để kiểm tra xem ảnh đã có trên máy chủ chưa — ảnh chỉ lưu trong iCloud sẽ được tải xuống để thực hiện việc này."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "这些相册中的照片会显示在时间线中，并标记为位于设备上。SelfPhotos 会读取每张照片一次，以检查服务器上是否已有该照片；仅存储在 iCloud 中的照片将下载到设备以进行检查。"
+            "value" : "这些相册中的照片会显示在时间线中，并标记为位于设备上。Immi 会读取每张照片一次，以检查服务器上是否已有该照片；仅存储在 iCloud 中的照片将下载到设备以进行检查。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "這些相簿中的相片會顯示在時間軸中，並標示為位於裝置上。SelfPhotos 會讀取每張相片一次，以檢查伺服器上是否已有該相片；僅儲存在 iCloud 中的相片將下載到裝置以進行檢查。"
+            "value" : "這些相簿中的相片會顯示在時間軸中，並標示為位於裝置上。Immi 會讀取每張相片一次，以檢查伺服器上是否已有該相片；僅儲存在 iCloud 中的相片將下載到裝置以進行檢查。"
           }
         }
       }
@@ -107989,1162 +107989,1162 @@
         }
       }
     },
-    "SelfPhotos" : {
+    "Immi" : {
       "localizations" : {
         "ar" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "bg" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "bn" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "ca" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "cs" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "da" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "el" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "fa" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "fi" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "he" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "hi" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "hr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "hu" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "id" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "kk" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "lt" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "ms" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "nb" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "pl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "pt" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "ro" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "sk" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "sl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "th" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "tr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "uk" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "vi" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos"
+            "value" : "Immi"
           }
         }
       }
     },
-    "SelfPhotos could not access its shared upload storage." : {
+    "Immi could not access its shared upload storage." : {
       "localizations" : {
         "ar" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "تعذر على SelfPhotos الوصول إلى مساحة تخزين الرفع المشتركة."
+            "value" : "تعذر على Immi الوصول إلى مساحة تخزين الرفع المشتركة."
           }
         },
         "bg" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos не можа да получи достъп до споделеното си хранилище за качване."
+            "value" : "Immi не можа да получи достъп до споделеното си хранилище за качване."
           }
         },
         "bn" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos তার শেয়ার করা আপলোড স্টোরেজে অ্যাক্সেস করতে পারেনি।"
+            "value" : "Immi তার শেয়ার করা আপলোড স্টোরেজে অ্যাক্সেস করতে পারেনি।"
           }
         },
         "ca" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos no ha pogut accedir al seu espai d'emmagatzematge compartit per a pujades."
+            "value" : "Immi no ha pogut accedir al seu espai d'emmagatzematge compartit per a pujades."
           }
         },
         "cs" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos nemá přístup ke sdílenému úložišti pro nahrávání."
+            "value" : "Immi nemá přístup ke sdílenému úložišti pro nahrávání."
           }
         },
         "da" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos kunne ikke få adgang til det delte uploadlager."
+            "value" : "Immi kunne ikke få adgang til det delte uploadlager."
           }
         },
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos konnte nicht auf den gemeinsamen Upload-Speicher zugreifen."
+            "value" : "Immi konnte nicht auf den gemeinsamen Upload-Speicher zugreifen."
           }
         },
         "el" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Το SelfPhotos δεν μπόρεσε να αποκτήσει πρόσβαση στον κοινόχρηστο χώρο μεταφορτώσεων."
+            "value" : "Το Immi δεν μπόρεσε να αποκτήσει πρόσβαση στον κοινόχρηστο χώρο μεταφορτώσεων."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos no ha podido acceder al almacenamiento compartido de cargas."
+            "value" : "Immi no ha podido acceder al almacenamiento compartido de cargas."
           }
         },
         "fa" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos نتوانست به فضای ذخیره‌سازی مشترک بارگذاری دسترسی پیدا کند."
+            "value" : "Immi نتوانست به فضای ذخیره‌سازی مشترک بارگذاری دسترسی پیدا کند."
           }
         },
         "fi" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos ei saanut yhteyttä jaettuun lataustallennustilaansa."
+            "value" : "Immi ei saanut yhteyttä jaettuun lataustallennustilaansa."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos n’a pas pu accéder à son espace de stockage partagé pour les envois."
+            "value" : "Immi n’a pas pu accéder à son espace de stockage partagé pour les envois."
           }
         },
         "he" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos לא הצליח לגשת לאחסון ההעלאות המשותף שלו."
+            "value" : "Immi לא הצליח לגשת לאחסון ההעלאות המשותף שלו."
           }
         },
         "hi" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos अपने साझा अपलोड स्टोरेज को एक्सेस नहीं कर सका।"
+            "value" : "Immi अपने साझा अपलोड स्टोरेज को एक्सेस नहीं कर सका।"
           }
         },
         "hr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos nije mogao pristupiti zajedničkom prostoru za prijenos."
+            "value" : "Immi nije mogao pristupiti zajedničkom prostoru za prijenos."
           }
         },
         "hu" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "A SelfPhotos nem tudott hozzáférni a megosztott feltöltési tárhelyéhez."
+            "value" : "A Immi nem tudott hozzáférni a megosztott feltöltési tárhelyéhez."
           }
         },
         "id" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos tidak dapat mengakses penyimpanan unggahan bersamanya."
+            "value" : "Immi tidak dapat mengakses penyimpanan unggahan bersamanya."
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos non è riuscito ad accedere allo spazio condiviso per i caricamenti."
+            "value" : "Immi non è riuscito ad accedere allo spazio condiviso per i caricamenti."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotosは共有アップロードストレージにアクセスできませんでした。"
+            "value" : "Immiは共有アップロードストレージにアクセスできませんでした。"
           }
         },
         "kk" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos ортақ жүктеп салу жадына қатынай алмады."
+            "value" : "Immi ортақ жүктеп салу жадына қатынай алмады."
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos가 공유 업로드 저장 공간에 접근할 수 없습니다."
+            "value" : "Immi가 공유 업로드 저장 공간에 접근할 수 없습니다."
           }
         },
         "lt" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos nepavyko pasiekti bendrinamos įkėlimo saugyklos."
+            "value" : "Immi nepavyko pasiekti bendrinamos įkėlimo saugyklos."
           }
         },
         "ms" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos tidak dapat mengakses storan muat naik kongsinya."
+            "value" : "Immi tidak dapat mengakses storan muat naik kongsinya."
           }
         },
         "nb" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos fikk ikke tilgang til den delte opplastingslagringen."
+            "value" : "Immi fikk ikke tilgang til den delte opplastingslagringen."
           }
         },
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos heeft geen toegang tot de gedeelde uploadopslag."
+            "value" : "Immi heeft geen toegang tot de gedeelde uploadopslag."
           }
         },
         "pl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos nie może uzyskać dostępu do współdzielonej przestrzeni przesyłania."
+            "value" : "Immi nie może uzyskać dostępu do współdzielonej przestrzeni przesyłania."
           }
         },
         "pt" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "O SelfPhotos não conseguiu aceder ao armazenamento partilhado de envios."
+            "value" : "O Immi não conseguiu aceder ao armazenamento partilhado de envios."
           }
         },
         "ro" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos nu a putut accesa spațiul de stocare partajat pentru încărcări."
+            "value" : "Immi nu a putut accesa spațiul de stocare partajat pentru încărcări."
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos не удалось получить доступ к общему хранилищу загрузок."
+            "value" : "Immi не удалось получить доступ к общему хранилищу загрузок."
           }
         },
         "sk" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos nemá prístup k zdieľanému úložisku nahrávania."
+            "value" : "Immi nemá prístup k zdieľanému úložisku nahrávania."
           }
         },
         "sl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos ni mogel dostopati do deljenega prostora za nalaganje."
+            "value" : "Immi ni mogel dostopati do deljenega prostora za nalaganje."
           }
         },
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos kunde inte komma åt det delade uppladdningsutrymmet."
+            "value" : "Immi kunde inte komma åt det delade uppladdningsutrymmet."
           }
         },
         "th" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos ไม่สามารถเข้าถึงพื้นที่จัดเก็บข้อมูลการอัปโหลดที่แชร์ได้"
+            "value" : "Immi ไม่สามารถเข้าถึงพื้นที่จัดเก็บข้อมูลการอัปโหลดที่แชร์ได้"
           }
         },
         "tr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos, paylaşılan yükleme depolama alanına erişemedi."
+            "value" : "Immi, paylaşılan yükleme depolama alanına erişemedi."
           }
         },
         "uk" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos не вдалося отримати доступ до спільного сховища вивантажень."
+            "value" : "Immi не вдалося отримати доступ до спільного сховища вивантажень."
           }
         },
         "vi" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos không thể truy cập bộ nhớ tải lên dùng chung."
+            "value" : "Immi không thể truy cập bộ nhớ tải lên dùng chung."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos 无法访问其共享上传存储空间。"
+            "value" : "Immi 无法访问其共享上传存储空间。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos 無法取用其共享上傳儲存空間。"
+            "value" : "Immi 無法取用其共享上傳儲存空間。"
           }
         }
       }
     },
-    "SelfPhotos needs access to your photos to show what is on this device." : {
+    "Immi needs access to your photos to show what is on this device." : {
       "localizations" : {
         "ar" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "يحتاج SelfPhotos إلى الوصول إلى صورك لعرض ما هو موجود على هذا الجهاز."
+            "value" : "يحتاج Immi إلى الوصول إلى صورك لعرض ما هو موجود على هذا الجهاز."
           }
         },
         "bg" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos се нуждае от достъп до снимките ви, за да покаже какво има на това устройство."
+            "value" : "Immi се нуждае от достъп до снимките ви, за да покаже какво има на това устройство."
           }
         },
         "bn" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "এই ডিভাইসে কী আছে তা দেখাতে SelfPhotos-এর আপনার ছবিতে অ্যাক্সেস প্রয়োজন।"
+            "value" : "এই ডিভাইসে কী আছে তা দেখাতে Immi-এর আপনার ছবিতে অ্যাক্সেস প্রয়োজন।"
           }
         },
         "ca" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos necessita accedir a les teves fotos per mostrar què hi ha en aquest dispositiu."
+            "value" : "Immi necessita accedir a les teves fotos per mostrar què hi ha en aquest dispositiu."
           }
         },
         "cs" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos potřebuje přístup k vašim fotkám, aby mohl zobrazit obsah tohoto zařízení."
+            "value" : "Immi potřebuje přístup k vašim fotkám, aby mohl zobrazit obsah tohoto zařízení."
           }
         },
         "da" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos skal have adgang til dine fotos for at vise, hvad der findes på denne enhed."
+            "value" : "Immi skal have adgang til dine fotos for at vise, hvad der findes på denne enhed."
           }
         },
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos benötigt Zugriff auf deine Fotos, um den Inhalt dieses Geräts anzuzeigen."
+            "value" : "Immi benötigt Zugriff auf deine Fotos, um den Inhalt dieses Geräts anzuzeigen."
           }
         },
         "el" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Το SelfPhotos χρειάζεται πρόσβαση στις φωτογραφίες σας για να εμφανίσει ό,τι βρίσκεται σε αυτή τη συσκευή."
+            "value" : "Το Immi χρειάζεται πρόσβαση στις φωτογραφίες σας για να εμφανίσει ό,τι βρίσκεται σε αυτή τη συσκευή."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos necesita acceso a tus fotos para mostrar lo que hay en este dispositivo."
+            "value" : "Immi necesita acceso a tus fotos para mostrar lo que hay en este dispositivo."
           }
         },
         "fa" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos برای نمایش محتوای این دستگاه به عکس‌های شما نیاز دارد."
+            "value" : "Immi برای نمایش محتوای این دستگاه به عکس‌های شما نیاز دارد."
           }
         },
         "fi" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos tarvitsee kuviesi käyttöoikeuden näyttääkseen, mitä tällä laitteella on."
+            "value" : "Immi tarvitsee kuviesi käyttöoikeuden näyttääkseen, mitä tällä laitteella on."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos doit accéder à vos photos pour afficher le contenu de cet appareil."
+            "value" : "Immi doit accéder à vos photos pour afficher le contenu de cet appareil."
           }
         },
         "he" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos זקוק לגישה לתמונות שלכם כדי להציג את תוכן המכשיר הזה."
+            "value" : "Immi זקוק לגישה לתמונות שלכם כדי להציג את תוכן המכשיר הזה."
           }
         },
         "hi" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "इस डिवाइस का कंटेंट दिखाने के लिए SelfPhotos को आपकी फ़ोटो की एक्सेस चाहिए।"
+            "value" : "इस डिवाइस का कंटेंट दिखाने के लिए Immi को आपकी फ़ोटो की एक्सेस चाहिए।"
           }
         },
         "hr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos treba pristup vašim fotografijama kako bi prikazao što se nalazi na ovom uređaju."
+            "value" : "Immi treba pristup vašim fotografijama kako bi prikazao što se nalazi na ovom uređaju."
           }
         },
         "hu" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "A SelfPhotos számára hozzáférés szükséges a fotóihoz, hogy megjeleníthesse az eszköz tartalmát."
+            "value" : "A Immi számára hozzáférés szükséges a fotóihoz, hogy megjeleníthesse az eszköz tartalmát."
           }
         },
         "id" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos memerlukan akses ke foto Anda untuk menampilkan apa yang ada di perangkat ini."
+            "value" : "Immi memerlukan akses ke foto Anda untuk menampilkan apa yang ada di perangkat ini."
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos deve accedere alle tue foto per mostrare i contenuti presenti su questo dispositivo."
+            "value" : "Immi deve accedere alle tue foto per mostrare i contenuti presenti su questo dispositivo."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "このデバイス上の項目を表示するには、SelfPhotosに写真へのアクセスを許可する必要があります。"
+            "value" : "このデバイス上の項目を表示するには、Immiに写真へのアクセスを許可する必要があります。"
           }
         },
         "kk" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Осы құрылғыдағы элементтерді көрсету үшін SelfPhotos қолданбасына фотосуреттерге қатынас қажет."
+            "value" : "Осы құрылғыдағы элементтерді көрсету үшін Immi қолданбасына фотосуреттерге қатынас қажет."
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "이 기기에 있는 항목을 표시하려면 SelfPhotos에 사진 접근 권한이 필요합니다."
+            "value" : "이 기기에 있는 항목을 표시하려면 Immi에 사진 접근 권한이 필요합니다."
           }
         },
         "lt" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos reikia prieigos prie jūsų nuotraukų, kad galėtų parodyti, kas yra šiame įrenginyje."
+            "value" : "Immi reikia prieigos prie jūsų nuotraukų, kad galėtų parodyti, kas yra šiame įrenginyje."
           }
         },
         "ms" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos memerlukan akses kepada foto anda untuk menunjukkan kandungan pada peranti ini."
+            "value" : "Immi memerlukan akses kepada foto anda untuk menunjukkan kandungan pada peranti ini."
           }
         },
         "nb" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos trenger tilgang til bildene dine for å vise hva som finnes på denne enheten."
+            "value" : "Immi trenger tilgang til bildene dine for å vise hva som finnes på denne enheten."
           }
         },
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos heeft toegang tot je foto's nodig om te laten zien wat er op dit apparaat staat."
+            "value" : "Immi heeft toegang tot je foto's nodig om te laten zien wat er op dit apparaat staat."
           }
         },
         "pl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos potrzebuje dostępu do zdjęć, aby pokazać zawartość tego urządzenia."
+            "value" : "Immi potrzebuje dostępu do zdjęć, aby pokazać zawartość tego urządzenia."
           }
         },
         "pt" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "O SelfPhotos precisa de acesso às suas fotos para mostrar o que existe neste dispositivo."
+            "value" : "O Immi precisa de acesso às suas fotos para mostrar o que existe neste dispositivo."
           }
         },
         "ro" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos are nevoie de acces la fotografii pentru a afișa conținutul acestui dispozitiv."
+            "value" : "Immi are nevoie de acces la fotografii pentru a afișa conținutul acestui dispozitiv."
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos требуется доступ к фотографиям, чтобы показать содержимое этого устройства."
+            "value" : "Immi требуется доступ к фотографиям, чтобы показать содержимое этого устройства."
           }
         },
         "sk" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos potrebuje prístup k fotografiám, aby mohol zobraziť obsah tohto zariadenia."
+            "value" : "Immi potrebuje prístup k fotografiám, aby mohol zobraziť obsah tohto zariadenia."
           }
         },
         "sl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos potrebuje dostop do fotografij, da lahko prikaže vsebino te naprave."
+            "value" : "Immi potrebuje dostop do fotografij, da lahko prikaže vsebino te naprave."
           }
         },
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos behöver åtkomst till dina foton för att visa vad som finns på den här enheten."
+            "value" : "Immi behöver åtkomst till dina foton för att visa vad som finns på den här enheten."
           }
         },
         "th" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos ต้องการสิทธิ์เข้าถึงรูปภาพเพื่อแสดงสิ่งที่อยู่บนอุปกรณ์นี้"
+            "value" : "Immi ต้องการสิทธิ์เข้าถึงรูปภาพเพื่อแสดงสิ่งที่อยู่บนอุปกรณ์นี้"
           }
         },
         "tr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos'un bu cihazdakileri gösterebilmesi için fotoğraflarınıza erişmesi gerekir."
+            "value" : "Immi'un bu cihazdakileri gösterebilmesi için fotoğraflarınıza erişmesi gerekir."
           }
         },
         "uk" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos потрібен доступ до ваших фото, щоб показати вміст цього пристрою."
+            "value" : "Immi потрібен доступ до ваших фото, щоб показати вміст цього пристрою."
           }
         },
         "vi" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos cần quyền truy cập ảnh để hiển thị nội dung có trên thiết bị này."
+            "value" : "Immi cần quyền truy cập ảnh để hiển thị nội dung có trên thiết bị này."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos 需要照片访问权限才能显示此设备上的内容。"
+            "value" : "Immi 需要照片访问权限才能显示此设备上的内容。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos 需要相片取用權限才能顯示此裝置上的內容。"
+            "value" : "Immi 需要相片取用權限才能顯示此裝置上的內容。"
           }
         }
       }
     },
-    "SelfPhotos opens Photos directly. Favorites and the selected album stay saved for later." : {
+    "Immi opens Photos directly. Favorites and the selected album stay saved for later." : {
       "localizations" : {
         "ar" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "يفتح SelfPhotos تطبيق الصور مباشرة. تظل المفضلة والألبوم المحدد محفوظين للاستخدام لاحقًا."
+            "value" : "يفتح Immi تطبيق الصور مباشرة. تظل المفضلة والألبوم المحدد محفوظين للاستخدام لاحقًا."
           }
         },
         "bg" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos отваря директно „Снимки“. Любимите и избраният албум остават запазени за по-късно."
+            "value" : "Immi отваря директно „Снимки“. Любимите и избраният албум остават запазени за по-късно."
           }
         },
         "bn" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos সরাসরি Photos খোলে। পছন্দেরগুলো ও নির্বাচিত অ্যালবাম পরে ব্যবহারের জন্য সংরক্ষিত থাকে।"
+            "value" : "Immi সরাসরি Photos খোলে। পছন্দেরগুলো ও নির্বাচিত অ্যালবাম পরে ব্যবহারের জন্য সংরক্ষিত থাকে।"
           }
         },
         "ca" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos obre Fotos directament. Els Favorits i l'àlbum seleccionat es desen per a més endavant."
+            "value" : "Immi obre Fotos directament. Els Favorits i l'àlbum seleccionat es desen per a més endavant."
           }
         },
         "cs" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos otevře přímo Fotky. Oblíbené a vybrané album zůstanou uložené na později."
+            "value" : "Immi otevře přímo Fotky. Oblíbené a vybrané album zůstanou uložené na později."
           }
         },
         "da" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos åbner Fotos direkte. Favoritter og det valgte album forbliver gemt til senere."
+            "value" : "Immi åbner Fotos direkte. Favoritter og det valgte album forbliver gemt til senere."
           }
         },
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos öffnet Fotos direkt. Favoriten und das ausgewählte Album bleiben für später gespeichert."
+            "value" : "Immi öffnet Fotos direkt. Favoriten und das ausgewählte Album bleiben für später gespeichert."
           }
         },
         "el" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Το SelfPhotos ανοίγει απευθείας τις Φωτογραφίες. Τα Αγαπημένα και το επιλεγμένο άλμπουμ παραμένουν αποθηκευμένα για αργότερα."
+            "value" : "Το Immi ανοίγει απευθείας τις Φωτογραφίες. Τα Αγαπημένα και το επιλεγμένο άλμπουμ παραμένουν αποθηκευμένα για αργότερα."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos abre Fotos directamente. Favoritos y el álbum seleccionado se guardan para más adelante."
+            "value" : "Immi abre Fotos directamente. Favoritos y el álbum seleccionado se guardan para más adelante."
           }
         },
         "fa" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos مستقیماً Photos را باز می‌کند. علاقه‌مندی‌ها و آلبوم انتخاب‌شده برای بعد ذخیره می‌مانند."
+            "value" : "Immi مستقیماً Photos را باز می‌کند. علاقه‌مندی‌ها و آلبوم انتخاب‌شده برای بعد ذخیره می‌مانند."
           }
         },
         "fi" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos avaa Kuvat-sovelluksen suoraan. Suosikit ja valittu albumi säilyvät myöhempää käyttöä varten."
+            "value" : "Immi avaa Kuvat-sovelluksen suoraan. Suosikit ja valittu albumi säilyvät myöhempää käyttöä varten."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos ouvre directement Photos. Les favoris et l’album sélectionné restent enregistrés pour plus tard."
+            "value" : "Immi ouvre directement Photos. Les favoris et l’album sélectionné restent enregistrés pour plus tard."
           }
         },
         "he" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos פותח את תמונות ישירות. המועדפים והאלבום שנבחר נשמרים לשימוש מאוחר יותר."
+            "value" : "Immi פותח את תמונות ישירות. המועדפים והאלבום שנבחר נשמרים לשימוש מאוחר יותר."
           }
         },
         "hi" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos सीधे Photos खोलता है। पसंदीदा और चुना गया एल्बम बाद के लिए सहेजे रहते हैं।"
+            "value" : "Immi सीधे Photos खोलता है। पसंदीदा और चुना गया एल्बम बाद के लिए सहेजे रहते हैं।"
           }
         },
         "hr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos izravno otvara Fotografije. Favoriti i odabrani album ostaju spremljeni za kasnije."
+            "value" : "Immi izravno otvara Fotografije. Favoriti i odabrani album ostaju spremljeni za kasnije."
           }
         },
         "hu" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "A SelfPhotos közvetlenül a Fotók alkalmazást nyitja meg. A Kedvencek és a kiválasztott album későbbre mentve marad."
+            "value" : "A Immi közvetlenül a Fotók alkalmazást nyitja meg. A Kedvencek és a kiválasztott album későbbre mentve marad."
           }
         },
         "id" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos membuka Foto secara langsung. Favorit dan album terpilih tetap disimpan untuk nanti."
+            "value" : "Immi membuka Foto secara langsung. Favorit dan album terpilih tetap disimpan untuk nanti."
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos apre direttamente Foto. I Preferiti e l'album selezionato restano salvati per un secondo momento."
+            "value" : "Immi apre direttamente Foto. I Preferiti e l'album selezionato restano salvati per un secondo momento."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotosは「写真」を直接開きます。お気に入りと選択したアルバムは次回のために保存されます。"
+            "value" : "Immiは「写真」を直接開きます。お気に入りと選択したアルバムは次回のために保存されます。"
           }
         },
         "kk" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos Фотосуреттерді тікелей ашады. Таңдаулылар мен таңдалған альбом кейінге сақталады."
+            "value" : "Immi Фотосуреттерді тікелей ашады. Таңдаулылар мен таңдалған альбом кейінге сақталады."
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos가 사진 앱을 바로 엽니다. 즐겨찾기와 선택한 앨범은 나중을 위해 저장됩니다."
+            "value" : "Immi가 사진 앱을 바로 엽니다. 즐겨찾기와 선택한 앨범은 나중을 위해 저장됩니다."
           }
         },
         "lt" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos tiesiogiai atidaro programą „Nuotraukos“. Mėgstamiausi ir pasirinktas albumas išsaugomi vėlesniam laikui."
+            "value" : "Immi tiesiogiai atidaro programą „Nuotraukos“. Mėgstamiausi ir pasirinktas albumas išsaugomi vėlesniam laikui."
           }
         },
         "ms" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos membuka Foto secara terus. Kegemaran dan album yang dipilih kekal disimpan untuk kemudian."
+            "value" : "Immi membuka Foto secara terus. Kegemaran dan album yang dipilih kekal disimpan untuk kemudian."
           }
         },
         "nb" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos åpner Bilder direkte. Favoritter og det valgte albumet lagres til senere."
+            "value" : "Immi åpner Bilder direkte. Favoritter og det valgte albumet lagres til senere."
           }
         },
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos opent Foto's rechtstreeks. Favorieten en het geselecteerde album blijven voor later bewaard."
+            "value" : "Immi opent Foto's rechtstreeks. Favorieten en het geselecteerde album blijven voor later bewaard."
           }
         },
         "pl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos otwiera Zdjęcia bezpośrednio. Ulubione i wybrany album pozostają zapisane na później."
+            "value" : "Immi otwiera Zdjęcia bezpośrednio. Ulubione i wybrany album pozostają zapisane na później."
           }
         },
         "pt" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "O SelfPhotos abre diretamente a aplicação Fotos. Os Favoritos e o álbum selecionado ficam guardados para mais tarde."
+            "value" : "O Immi abre diretamente a aplicação Fotos. Os Favoritos e o álbum selecionado ficam guardados para mais tarde."
           }
         },
         "ro" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos deschide direct aplicația Poze. Favoritele și albumul selectat rămân salvate pentru mai târziu."
+            "value" : "Immi deschide direct aplicația Poze. Favoritele și albumul selectat rămân salvate pentru mai târziu."
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos открывает приложение «Фото» напрямую. Избранные и выбранный альбом сохраняются для дальнейшего использования."
+            "value" : "Immi открывает приложение «Фото» напрямую. Избранные и выбранный альбом сохраняются для дальнейшего использования."
           }
         },
         "sk" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos otvorí priamo aplikáciu Fotky. Obľúbené a vybraný album zostanú uložené na neskôr."
+            "value" : "Immi otvorí priamo aplikáciu Fotky. Obľúbené a vybraný album zostanú uložené na neskôr."
           }
         },
         "sl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos neposredno odpre Fotografije. Priljubljeno in izbrani album ostaneta shranjena za pozneje."
+            "value" : "Immi neposredno odpre Fotografije. Priljubljeno in izbrani album ostaneta shranjena za pozneje."
           }
         },
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos öppnar Bilder direkt. Favoriter och det valda albumet sparas till senare."
+            "value" : "Immi öppnar Bilder direkt. Favoriter och det valda albumet sparas till senare."
           }
         },
         "th" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos จะเปิดแอปรูปภาพโดยตรง รายการโปรดและอัลบั้มที่เลือกจะถูกบันทึกไว้ใช้ภายหลัง"
+            "value" : "Immi จะเปิดแอปรูปภาพโดยตรง รายการโปรดและอัลบั้มที่เลือกจะถูกบันทึกไว้ใช้ภายหลัง"
           }
         },
         "tr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos, Fotoğraflar'ı doğrudan açar. Favoriler ve seçili albüm daha sonrası için kayıtlı kalır."
+            "value" : "Immi, Fotoğraflar'ı doğrudan açar. Favoriler ve seçili albüm daha sonrası için kayıtlı kalır."
           }
         },
         "uk" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos відкриває «Фото» безпосередньо. Улюблені та вибраний альбом зберігаються на майбутнє."
+            "value" : "Immi відкриває «Фото» безпосередньо. Улюблені та вибраний альбом зберігаються на майбутнє."
           }
         },
         "vi" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos mở trực tiếp ứng dụng Ảnh. Mục ưa thích và album đã chọn vẫn được lưu để dùng sau."
+            "value" : "Immi mở trực tiếp ứng dụng Ảnh. Mục ưa thích và album đã chọn vẫn được lưu để dùng sau."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos 会直接打开“照片”。个人收藏和所选相册会保留以供以后使用。"
+            "value" : "Immi 会直接打开“照片”。个人收藏和所选相册会保留以供以后使用。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos 會直接開啟「照片」。喜好項目和所選相簿會保留以供日後使用。"
+            "value" : "Immi 會直接開啟「照片」。喜好項目和所選相簿會保留以供日後使用。"
           }
         }
       }
     },
-    "SelfPhotos opens with a menu for the content enabled below." : {
+    "Immi opens with a menu for the content enabled below." : {
       "localizations" : {
         "ar" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "يفتح SelfPhotos بقائمة للمحتوى المفعّل أدناه."
+            "value" : "يفتح Immi بقائمة للمحتوى المفعّل أدناه."
           }
         },
         "bg" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos се отваря с меню за съдържанието, активирано по-долу."
+            "value" : "Immi се отваря с меню за съдържанието, активирано по-долу."
           }
         },
         "bn" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos নিচে সক্রিয় করা কনটেন্টের একটি মেনু দিয়ে খোলে।"
+            "value" : "Immi নিচে সক্রিয় করা কনটেন্টের একটি মেনু দিয়ে খোলে।"
           }
         },
         "ca" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos s'obre amb un menú per al contingut activat a continuació."
+            "value" : "Immi s'obre amb un menú per al contingut activat a continuació."
           }
         },
         "cs" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos se otevře s nabídkou obsahu povoleného níže."
+            "value" : "Immi se otevře s nabídkou obsahu povoleného níže."
           }
         },
         "da" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos åbner med en menu for det indhold, der er aktiveret nedenfor."
+            "value" : "Immi åbner med en menu for det indhold, der er aktiveret nedenfor."
           }
         },
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos wird mit einem Menü für die unten aktivierten Inhalte geöffnet."
+            "value" : "Immi wird mit einem Menü für die unten aktivierten Inhalte geöffnet."
           }
         },
         "el" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Το SelfPhotos ανοίγει με ένα μενού για το περιεχόμενο που είναι ενεργοποιημένο παρακάτω."
+            "value" : "Το Immi ανοίγει με ένα μενού για το περιεχόμενο που είναι ενεργοποιημένο παρακάτω."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos se abre con un menú para el contenido activado a continuación."
+            "value" : "Immi se abre con un menú para el contenido activado a continuación."
           }
         },
         "fa" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos با منوی محتوای فعال‌شده در پایین باز می‌شود."
+            "value" : "Immi با منوی محتوای فعال‌شده در پایین باز می‌شود."
           }
         },
         "fi" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos avautuu valikolla, jossa on alla käyttöön otettu sisältö."
+            "value" : "Immi avautuu valikolla, jossa on alla käyttöön otettu sisältö."
           }
         },
         "fr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos s’ouvre avec un menu pour le contenu activé ci-dessous."
+            "value" : "Immi s’ouvre avec un menu pour le contenu activé ci-dessous."
           }
         },
         "he" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos נפתח עם תפריט עבור התוכן שמופעל למטה."
+            "value" : "Immi נפתח עם תפריט עבור התוכן שמופעל למטה."
           }
         },
         "hi" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos नीचे चालू किए गए कंटेंट के मेनू के साथ खुलता है।"
+            "value" : "Immi नीचे चालू किए गए कंटेंट के मेनू के साथ खुलता है।"
           }
         },
         "hr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos se otvara s izbornikom za sadržaj omogućen u nastavku."
+            "value" : "Immi se otvara s izbornikom za sadržaj omogućen u nastavku."
           }
         },
         "hu" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "A SelfPhotos az alább engedélyezett tartalmak menüjével nyílik meg."
+            "value" : "A Immi az alább engedélyezett tartalmak menüjével nyílik meg."
           }
         },
         "id" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos dibuka dengan menu untuk konten yang diaktifkan di bawah."
+            "value" : "Immi dibuka dengan menu untuk konten yang diaktifkan di bawah."
           }
         },
         "it" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos si apre con un menu per i contenuti abilitati qui sotto."
+            "value" : "Immi si apre con un menu per i contenuti abilitati qui sotto."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotosは、以下で有効にしたコンテンツのメニューを表示して開きます。"
+            "value" : "Immiは、以下で有効にしたコンテンツのメニューを表示して開きます。"
           }
         },
         "kk" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos төменде қосылған мазмұн мәзірімен ашылады."
+            "value" : "Immi төменде қосылған мазмұн мәзірімен ашылады."
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos는 아래에서 활성화한 콘텐츠의 메뉴와 함께 열립니다."
+            "value" : "Immi는 아래에서 활성화한 콘텐츠의 메뉴와 함께 열립니다."
           }
         },
         "lt" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos atidaroma su toliau įjungto turinio meniu."
+            "value" : "Immi atidaroma su toliau įjungto turinio meniu."
           }
         },
         "ms" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos dibuka dengan menu untuk kandungan yang didayakan di bawah."
+            "value" : "Immi dibuka dengan menu untuk kandungan yang didayakan di bawah."
           }
         },
         "nb" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos åpnes med en meny for innholdet som er aktivert nedenfor."
+            "value" : "Immi åpnes med en meny for innholdet som er aktivert nedenfor."
           }
         },
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos wordt geopend met een menu voor de hieronder ingeschakelde inhoud."
+            "value" : "Immi wordt geopend met een menu voor de hieronder ingeschakelde inhoud."
           }
         },
         "pl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos otwiera się z menu treści włączonych poniżej."
+            "value" : "Immi otwiera się z menu treści włączonych poniżej."
           }
         },
         "pt" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "O SelfPhotos abre com um menu para o conteúdo ativado abaixo."
+            "value" : "O Immi abre com um menu para o conteúdo ativado abaixo."
           }
         },
         "ro" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos se deschide cu un meniu pentru conținutul activat mai jos."
+            "value" : "Immi se deschide cu un meniu pentru conținutul activat mai jos."
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos открывается с меню для содержимого, включенного ниже."
+            "value" : "Immi открывается с меню для содержимого, включенного ниже."
           }
         },
         "sk" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos sa otvorí s ponukou pre obsah povolený nižšie."
+            "value" : "Immi sa otvorí s ponukou pre obsah povolený nižšie."
           }
         },
         "sl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos se odpre z menijem za spodaj omogočeno vsebino."
+            "value" : "Immi se odpre z menijem za spodaj omogočeno vsebino."
           }
         },
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos öppnas med en meny för innehållet som är aktiverat nedan."
+            "value" : "Immi öppnas med en meny för innehållet som är aktiverat nedan."
           }
         },
         "th" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos จะเปิดพร้อมเมนูสำหรับเนื้อหาที่เปิดใช้งานด้านล่าง"
+            "value" : "Immi จะเปิดพร้อมเมนูสำหรับเนื้อหาที่เปิดใช้งานด้านล่าง"
           }
         },
         "tr" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos, aşağıda etkinleştirilen içerik için bir menüyle açılır."
+            "value" : "Immi, aşağıda etkinleştirilen içerik için bir menüyle açılır."
           }
         },
         "uk" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos відкривається з меню для вмісту, увімкненого нижче."
+            "value" : "Immi відкривається з меню для вмісту, увімкненого нижче."
           }
         },
         "vi" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos mở bằng menu dành cho nội dung được bật bên dưới."
+            "value" : "Immi mở bằng menu dành cho nội dung được bật bên dưới."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos 打开时会显示一个菜单，其中包含下方启用的内容。"
+            "value" : "Immi 打开时会显示一个菜单，其中包含下方启用的内容。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "SelfPhotos 開啟時會顯示一個選單，其中包含下方啟用的內容。"
+            "value" : "Immi 開啟時會顯示一個選單，其中包含下方啟用的內容。"
           }
         }
       }

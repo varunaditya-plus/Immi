@@ -50,7 +50,7 @@ enum SharedUploadStoreError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .appGroupUnavailable:
-            String(localized: "SelfPhotos could not access its shared upload storage.")
+            String(localized: "Immi could not access its shared upload storage.")
         case .invalidFilename:
             String(localized: "One of the shared files has an invalid name.")
         }
@@ -84,7 +84,7 @@ actor SharedUploadStore {
     private let decoder: JSONDecoder
 
     init(rootURL: URL? = nil, fileManager: FileManager = .default) {
-        self.rootURL = rootURL ?? SelfPhotosSharedContainer.rootURL?
+        self.rootURL = rootURL ?? ImmiSharedContainer.rootURL?
             .appendingPathComponent("ShareUploadInbox", isDirectory: true)
         self.fileManager = fileManager
         encoder = JSONEncoder()

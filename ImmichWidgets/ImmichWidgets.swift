@@ -248,8 +248,8 @@ private struct AlbumWidgetView: View {
 
     private var albumURL: URL? {
         let id = entry.album.id
-        if id == widgetFavoritesID { return URL(string: "selfphotos://favorites") }
-        return URL(string: "selfphotos://album/\(id)")
+        if id == widgetFavoritesID { return URL(string: "immi://favorites") }
+        return URL(string: "immi://album/\(id)")
     }
 }
 
@@ -325,7 +325,7 @@ private struct MemoriesWidgetView: View {
             .padding()
         }
         .containerBackground(.black, for: .widget)
-        .widgetURL(URL(string: "selfphotos://memories"))
+        .widgetURL(URL(string: "immi://memories"))
     }
 }
 

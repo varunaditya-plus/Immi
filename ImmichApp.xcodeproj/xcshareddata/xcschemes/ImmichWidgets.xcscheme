@@ -31,8 +31,8 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "242E7F0D30206D79000F50F4"
-               BuildableName = "ImmichApp.app"
-               BlueprintName = "ImmichApp"
+               BuildableName = "Immi.app"
+               BlueprintName = "Immi"
                ReferencedContainer = "container:ImmichApp.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -62,8 +62,8 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "242E7F0D30206D79000F50F4"
-            BuildableName = "ImmichApp.app"
-            BlueprintName = "ImmichApp"
+            BuildableName = "Immi.app"
+            BlueprintName = "Immi"
             ReferencedContainer = "container:ImmichApp.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
@@ -98,8 +98,8 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "242E7F0D30206D79000F50F4"
-            BuildableName = "ImmichApp.app"
-            BlueprintName = "ImmichApp"
+            BuildableName = "Immi.app"
+            BlueprintName = "Immi"
             ReferencedContainer = "container:ImmichApp.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>

@@ -1,4 +1,4 @@
-name: SelfPhotos PR Build
+name: Immi PR Build
 
 on:
   pull_request:
@@ -17,5 +17,5 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
-      - name: Build and test SelfPhotos
+      - name: Build and test Immi
         uses: ./.github/actions/test-ios

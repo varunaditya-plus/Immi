@@ -38,7 +38,7 @@ struct OnboardingView: View {
 
         return loginScroll {
             masthead(
-                title: "SelfPhotos",
+                title: "Immi",
                 subtitle: "Connect to your Immich server.")
 
             if let message = vm.sessionErrorMessage {

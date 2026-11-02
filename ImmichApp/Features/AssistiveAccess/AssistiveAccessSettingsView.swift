@@ -32,8 +32,8 @@ struct AssistiveAccessSettingsView: View {
                 Toggle("Show Home", isOn: $showsHome)
             } footer: {
                 Text(showsHome
-                     ? "SelfPhotos opens with a menu for the content enabled below."
-                     : "SelfPhotos opens Photos directly. Favorites and the selected album stay saved for later.")
+                     ? "Immi opens with a menu for the content enabled below."
+                     : "Immi opens Photos directly. Favorites and the selected album stay saved for later.")
             }
 
             Section("Home Menu") {

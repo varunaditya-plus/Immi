@@ -1,7 +1,7 @@
 {
   "sourceLanguage": "en",
   "strings": {
-    "%lld item(s) will retry when SelfPhotos opens.": {
+    "%lld item(s) will retry when Immi opens.": {
       "localizations": {
         "id": {
           "variations": {
@@ -9,7 +9,7 @@
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld item akan dicoba lagi ketika SelfPhotos terbuka."
+                  "value": "%lld item akan dicoba lagi ketika Immi terbuka."
                 }
               }
             }
@@ -21,37 +21,37 @@
               "zero": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "ستتم إعادة محاولة %lld عنصر عند فتح SelfPhotos."
+                  "value": "ستتم إعادة محاولة %lld عنصر عند فتح Immi."
                 }
               },
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "ستتم إعادة محاولة عنصر واحد عند فتح SelfPhotos."
+                  "value": "ستتم إعادة محاولة عنصر واحد عند فتح Immi."
                 }
               },
               "two": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "ستتم إعادة محاولة عنصرين عند فتح SelfPhotos."
+                  "value": "ستتم إعادة محاولة عنصرين عند فتح Immi."
                 }
               },
               "few": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "ستتم إعادة محاولة %lld عناصر عند فتح SelfPhotos."
+                  "value": "ستتم إعادة محاولة %lld عناصر عند فتح Immi."
                 }
               },
               "many": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "ستتم إعادة محاولة %lld عنصرًا عند فتح SelfPhotos."
+                  "value": "ستتم إعادة محاولة %lld عنصرًا عند فتح Immi."
                 }
               },
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "ستتم إعادة محاولة %lld عنصر عند فتح SelfPhotos."
+                  "value": "ستتم إعادة محاولة %lld عنصر عند فتح Immi."
                 }
               }
             }
@@ -63,13 +63,13 @@
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "SelfPhotos খুললে %lldটি আইটেম আবার চেষ্টা করবে।"
+                  "value": "Immi খুললে %lldটি আইটেম আবার চেষ্টা করবে।"
                 }
               },
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "SelfPhotos খুললে %lldটি আইটেম পুনরায় চেষ্টা করবে৷"
+                  "value": "Immi খুললে %lldটি আইটেম পুনরায় চেষ্টা করবে৷"
                 }
               }
             }
@@ -81,13 +81,13 @@
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld елемента ще опитат отново, когато SelfPhotos се отвори."
+                  "value": "%lld елемента ще опитат отново, когато Immi се отвори."
                 }
               },
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld елемент ще направи повторен опит, когато SelfPhotos се отвори."
+                  "value": "%lld елемент ще направи повторен опит, когато Immi се отвори."
                 }
               }
             }
@@ -99,19 +99,19 @@
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld elements es tornaran a intentar quan s'obri SelfPhotos."
+                  "value": "%lld elements es tornaran a intentar quan s'obri Immi."
                 }
               },
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld element es tornarà a provar quan s'obri SelfPhotos."
+                  "value": "%lld element es tornarà a provar quan s'obri Immi."
                 }
               },
               "many": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld elements es tornaran a intentar quan s'obri SelfPhotos."
+                  "value": "%lld elements es tornaran a intentar quan s'obri Immi."
                 }
               }
             }
@@ -123,19 +123,19 @@
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld stavki će pokušati ponovno kada se otvori SelfPhotos."
+                  "value": "%lld stavki će pokušati ponovno kada se otvori Immi."
                 }
               },
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld stavka će pokušati ponovno kada se otvori SelfPhotos."
+                  "value": "%lld stavka će pokušati ponovno kada se otvori Immi."
                 }
               },
               "few": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld stavke će pokušati ponovno kada se otvori SelfPhotos."
+                  "value": "%lld stavke će pokušati ponovno kada se otvori Immi."
                 }
               }
             }
@@ -147,19 +147,19 @@
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld položek se pokusí znovu, když se otevře SelfPhotos."
+                  "value": "%lld položek se pokusí znovu, když se otevře Immi."
                 }
               },
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld položka se pokusí znovu, když se otevře SelfPhotos."
+                  "value": "%lld položka se pokusí znovu, když se otevře Immi."
                 }
               },
               "few": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld položky se pokusí znovu, když se otevře SelfPhotos."
+                  "value": "%lld položky se pokusí znovu, když se otevře Immi."
                 }
               }
             }
@@ -171,13 +171,13 @@
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld elementer vil prøve igen, når SelfPhotos åbner."
+                  "value": "%lld elementer vil prøve igen, når Immi åbner."
                 }
               },
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld element vil prøve igen, når SelfPhotos åbner."
+                  "value": "%lld element vil prøve igen, når Immi åbner."
                 }
               }
             }
@@ -189,13 +189,13 @@
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld items zullen opnieuw proberen wanneer SelfPhotos wordt geopend."
+                  "value": "%lld items zullen opnieuw proberen wanneer Immi wordt geopend."
                 }
               },
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld item wordt opnieuw geprobeerd wanneer SelfPhotos wordt geopend."
+                  "value": "%lld item wordt opnieuw geprobeerd wanneer Immi wordt geopend."
                 }
               }
             }
@@ -207,13 +207,13 @@
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld kohdetta yrittää uudelleen, kun SelfPhotos avautuu."
+                  "value": "%lld kohdetta yrittää uudelleen, kun Immi avautuu."
                 }
               },
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld kohde yrittää uudelleen, kun SelfPhotos avautuu."
+                  "value": "%lld kohde yrittää uudelleen, kun Immi avautuu."
                 }
               }
             }
@@ -225,19 +225,19 @@
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld élément sera réessayé à l'ouverture de SelfPhotos."
+                  "value": "%lld élément sera réessayé à l'ouverture de Immi."
                 }
               },
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld éléments seront réessayés à l'ouverture de SelfPhotos."
+                  "value": "%lld éléments seront réessayés à l'ouverture de Immi."
                 }
               },
               "many": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld éléments seront réessayés à l'ouverture de SelfPhotos."
+                  "value": "%lld éléments seront réessayés à l'ouverture de Immi."
                 }
               }
             }
@@ -249,13 +249,13 @@
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld Elemente werden erneut versucht, wenn SelfPhotos geöffnet wird."
+                  "value": "%lld Elemente werden erneut versucht, wenn Immi geöffnet wird."
                 }
               },
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld Element wird erneut versucht, wenn SelfPhotos geöffnet wird."
+                  "value": "%lld Element wird erneut versucht, wenn Immi geöffnet wird."
                 }
               }
             }
@@ -267,13 +267,13 @@
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld στοιχεία θα προσπαθήσουν ξανά όταν ανοίξει το SelfPhotos."
+                  "value": "%lld στοιχεία θα προσπαθήσουν ξανά όταν ανοίξει το Immi."
                 }
               },
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld στοιχείο θα προσπαθήσει ξανά όταν ανοίξει το SelfPhotos."
+                  "value": "%lld στοιχείο θα προσπαθήσει ξανά όταν ανοίξει το Immi."
                 }
               }
             }
@@ -285,19 +285,19 @@
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld פריטים ינסו שוב כאשר SelfPhotos ייפתח."
+                  "value": "%lld פריטים ינסו שוב כאשר Immi ייפתח."
                 }
               },
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "פריט אחד ינסה שוב כאשר SelfPhotos ייפתח."
+                  "value": "פריט אחד ינסה שוב כאשר Immi ייפתח."
                 }
               },
               "two": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld פריטים ינסו שוב כאשר SelfPhotos ייפתח."
+                  "value": "%lld פריטים ינסו שוב כאשר Immi ייפתח."
                 }
               }
             }
@@ -309,13 +309,13 @@
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "SelfPhotos खुलने पर %lld आइटम पुनः प्रयास करेगा।"
+                  "value": "Immi खुलने पर %lld आइटम पुनः प्रयास करेगा।"
                 }
               },
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "SelfPhotos खुलने पर %lld आइटम पुनः प्रयास करेंगे।"
+                  "value": "Immi खुलने पर %lld आइटम पुनः प्रयास करेंगे।"
                 }
               }
             }
@@ -327,13 +327,13 @@
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld elem fog újra próbálkozni, amikor a SelfPhotos megnyílik."
+                  "value": "%lld elem fog újra próbálkozni, amikor a Immi megnyílik."
                 }
               },
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld elem újra próbálkozik, amikor a SelfPhotos megnyílik."
+                  "value": "%lld elem újra próbálkozik, amikor a Immi megnyílik."
                 }
               }
             }
@@ -345,19 +345,19 @@
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld elementi verranno ritentati all'apertura di SelfPhotos."
+                  "value": "%lld elementi verranno ritentati all'apertura di Immi."
                 }
               },
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld elemento verrà riprovato all'apertura di SelfPhotos."
+                  "value": "%lld elemento verrà riprovato all'apertura di Immi."
                 }
               },
               "many": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld elementi verranno ritentati all'apertura di SelfPhotos."
+                  "value": "%lld elementi verranno ritentati all'apertura di Immi."
                 }
               }
             }
@@ -369,7 +369,7 @@
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "SelfPhotos が開くと、%lld 個の項目が再試行されます。"
+                  "value": "Immi が開くと、%lld 個の項目が再試行されます。"
                 }
               }
             }
@@ -381,13 +381,13 @@
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "SelfPhotos ашылғанда %lld элемент қайта әрекет етеді."
+                  "value": "Immi ашылғанда %lld элемент қайта әрекет етеді."
                 }
               },
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "SelfPhotos ашылғанда, %lld элемент әрекетті қайталайды."
+                  "value": "Immi ашылғанда, %lld элемент әрекетті қайталайды."
                 }
               }
             }
@@ -399,7 +399,7 @@
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "SelfPhotos이 열리면 %lld개 항목이 다시 시도됩니다."
+                  "value": "Immi이 열리면 %lld개 항목이 다시 시도됩니다."
                 }
               }
             }
@@ -411,19 +411,19 @@
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld elementų bus bandoma dar kartą, kai atsidarys SelfPhotos."
+                  "value": "%lld elementų bus bandoma dar kartą, kai atsidarys Immi."
                 }
               },
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld elementas bus bandomas dar kartą, kai atsidarys SelfPhotos."
+                  "value": "%lld elementas bus bandomas dar kartą, kai atsidarys Immi."
                 }
               },
               "few": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld elementai bus bandomi dar kartą, kai atsidarys SelfPhotos."
+                  "value": "%lld elementai bus bandomi dar kartą, kai atsidarys Immi."
                 }
               }
             }
@@ -435,7 +435,7 @@
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld item akan mencuba semula apabila SelfPhotos dibuka."
+                  "value": "%lld item akan mencuba semula apabila Immi dibuka."
                 }
               }
             }
@@ -447,13 +447,13 @@
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld elementer vil prøve på nytt når SelfPhotos åpnes."
+                  "value": "%lld elementer vil prøve på nytt når Immi åpnes."
                 }
               },
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld element vil prøve på nytt når SelfPhotos åpnes."
+                  "value": "%lld element vil prøve på nytt når Immi åpnes."
                 }
               }
             }
@@ -465,13 +465,13 @@
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "وقتی SelfPhotos باز شد، %lld مورد دوباره امتحان خواهد شد."
+                  "value": "وقتی Immi باز شد، %lld مورد دوباره امتحان خواهد شد."
                 }
               },
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "وقتی SelfPhotos باز شد، %lld مورد دوباره امتحان خواهند شد."
+                  "value": "وقتی Immi باز شد، %lld مورد دوباره امتحان خواهند شد."
                 }
               }
             }
@@ -483,25 +483,25 @@
               "many": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld elementów zostanie ponowionych po otwarciu SelfPhotos."
+                  "value": "%lld elementów zostanie ponowionych po otwarciu Immi."
                 }
               },
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld element zostanie ponowiony po otwarciu SelfPhotos."
+                  "value": "%lld element zostanie ponowiony po otwarciu Immi."
                 }
               },
               "few": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld elementy zostaną ponowione po otwarciu SelfPhotos."
+                  "value": "%lld elementy zostaną ponowione po otwarciu Immi."
                 }
               },
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld elementów zostanie ponowionych po otwarciu SelfPhotos."
+                  "value": "%lld elementów zostanie ponowionych po otwarciu Immi."
                 }
               }
             }
@@ -513,19 +513,19 @@
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld item tentará novamente quando SelfPhotos abrir."
+                  "value": "%lld item tentará novamente quando Immi abrir."
                 }
               },
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld itens tentarão novamente quando SelfPhotos for aberto."
+                  "value": "%lld itens tentarão novamente quando Immi for aberto."
                 }
               },
               "many": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld itens tentarão novamente quando SelfPhotos for aberto."
+                  "value": "%lld itens tentarão novamente quando Immi for aberto."
                 }
               }
             }
@@ -537,19 +537,19 @@
               "few": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld elemente vor reîncerca când se deschide SelfPhotos."
+                  "value": "%lld elemente vor reîncerca când se deschide Immi."
                 }
               },
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld articol va reîncerca când se deschide SelfPhotos."
+                  "value": "%lld articol va reîncerca când se deschide Immi."
                 }
               },
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld de articole vor încerca din nou când SelfPhotos se deschide."
+                  "value": "%lld de articole vor încerca din nou când Immi se deschide."
                 }
               }
             }
@@ -561,25 +561,25 @@
               "many": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld элементов повторят попытку, когда откроется SelfPhotos."
+                  "value": "%lld элементов повторят попытку, когда откроется Immi."
                 }
               },
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld элемент повторит попытку, когда откроется SelfPhotos."
+                  "value": "%lld элемент повторит попытку, когда откроется Immi."
                 }
               },
               "few": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld элемента повторят попытку, когда откроется SelfPhotos."
+                  "value": "%lld элемента повторят попытку, когда откроется Immi."
                 }
               },
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld элементов повторят попытку, когда откроется SelfPhotos."
+                  "value": "%lld элементов повторят попытку, когда откроется Immi."
                 }
               }
             }
@@ -591,7 +591,7 @@
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "当 SelfPhotos 打开时，%lld 个项目将重试。"
+                  "value": "当 Immi 打开时，%lld 个项目将重试。"
                 }
               }
             }
@@ -603,19 +603,19 @@
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld položiek sa pokúsi znova, keď sa otvorí SelfPhotos."
+                  "value": "%lld položiek sa pokúsi znova, keď sa otvorí Immi."
                 }
               },
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "Po otvorení SelfPhotos sa zopakuje %lld položka."
+                  "value": "Po otvorení Immi sa zopakuje %lld položka."
                 }
               },
               "few": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "Po otvorení SelfPhotos sa zopakujú %lld položky."
+                  "value": "Po otvorení Immi sa zopakujú %lld položky."
                 }
               }
             }
@@ -627,25 +627,25 @@
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld elementov bo znova poskusil, ko se odpre SelfPhotos."
+                  "value": "%lld elementov bo znova poskusil, ko se odpre Immi."
                 }
               },
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld element bo znova poskusil, ko se odpre SelfPhotos."
+                  "value": "%lld element bo znova poskusil, ko se odpre Immi."
                 }
               },
               "two": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld elementa bosta znova poskusila, ko se odpre SelfPhotos."
+                  "value": "%lld elementa bosta znova poskusila, ko se odpre Immi."
                 }
               },
               "few": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld elementi bodo znova poskusili, ko se odpre SelfPhotos."
+                  "value": "%lld elementi bodo znova poskusili, ko se odpre Immi."
                 }
               }
             }
@@ -657,19 +657,19 @@
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld elementos se volverán a intentar cuando se abra SelfPhotos."
+                  "value": "%lld elementos se volverán a intentar cuando se abra Immi."
                 }
               },
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld elemento se reintentará cuando se abra SelfPhotos."
+                  "value": "%lld elemento se reintentará cuando se abra Immi."
                 }
               },
               "many": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld elementos se volverán a intentar cuando se abra SelfPhotos."
+                  "value": "%lld elementos se volverán a intentar cuando se abra Immi."
                 }
               }
             }
@@ -681,13 +681,13 @@
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld objekt kommer att försöka igen när SelfPhotos öppnas."
+                  "value": "%lld objekt kommer att försöka igen när Immi öppnas."
                 }
               },
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld objekt kommer att försöka igen när SelfPhotos öppnas."
+                  "value": "%lld objekt kommer att försöka igen när Immi öppnas."
                 }
               }
             }
@@ -699,7 +699,7 @@
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld รายการจะลองอีกครั้งเมื่อ SelfPhotos เปิดขึ้น"
+                  "value": "%lld รายการจะลองอีกครั้งเมื่อ Immi เปิดขึ้น"
                 }
               }
             }
@@ -711,7 +711,7 @@
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "當 SelfPhotos 開啟時，%lld 個項目將重試。"
+                  "value": "當 Immi 開啟時，%lld 個項目將重試。"
                 }
               }
             }
@@ -723,13 +723,13 @@
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "SelfPhotos açıldığında %lld öğe yeniden denenecek."
+                  "value": "Immi açıldığında %lld öğe yeniden denenecek."
                 }
               },
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "SelfPhotos açıldığında %lld öğe yeniden denenecek."
+                  "value": "Immi açıldığında %lld öğe yeniden denenecek."
                 }
               }
             }
@@ -741,25 +741,25 @@
               "many": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld елементів буде повторено, коли відкриється SelfPhotos."
+                  "value": "%lld елементів буде повторено, коли відкриється Immi."
                 }
               },
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld елемент буде повторено, коли відкриється SelfPhotos."
+                  "value": "%lld елемент буде повторено, коли відкриється Immi."
                 }
               },
               "few": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld елементи повторять спробу, коли відкриється SelfPhotos."
+                  "value": "%lld елементи повторять спробу, коли відкриється Immi."
                 }
               },
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld елементів буде повторено, коли відкриється SelfPhotos."
+                  "value": "%lld елементів буде повторено, коли відкриється Immi."
                 }
               }
             }
@@ -771,7 +771,7 @@
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld mục sẽ thử lại khi SelfPhotos mở."
+                  "value": "%lld mục sẽ thử lại khi Immi mở."
                 }
               }
             }
@@ -783,13 +783,13 @@
               "other": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld items will retry when SelfPhotos opens."
+                  "value": "%lld items will retry when Immi opens."
                 }
               },
               "one": {
                 "stringUnit": {
                   "state": "translated",
-                  "value": "%lld item will retry when SelfPhotos opens."
+                  "value": "%lld item will retry when Immi opens."
                 }
               }
             }
@@ -1963,234 +1963,234 @@
         }
       }
     },
-    "Open SelfPhotos and sign in before uploading.": {
+    "Open Immi and sign in before uploading.": {
       "localizations": {
         "id": {
           "stringUnit": {
             "state": "translated",
-            "value": "Buka SelfPhotos dan masuk sebelum mengunggah."
+            "value": "Buka Immi dan masuk sebelum mengunggah."
           }
         },
         "ar": {
           "stringUnit": {
             "state": "translated",
-            "value": "افتح SelfPhotos وسجّل الدخول قبل الرفع."
+            "value": "افتح Immi وسجّل الدخول قبل الرفع."
           }
         },
         "bn": {
           "stringUnit": {
             "state": "translated",
-            "value": "আপলোডের আগে SelfPhotos খুলে সাইন ইন করুন।"
+            "value": "আপলোডের আগে Immi খুলে সাইন ইন করুন।"
           }
         },
         "bg": {
           "stringUnit": {
             "state": "translated",
-            "value": "Отворете SelfPhotos и влезте преди качване."
+            "value": "Отворете Immi и влезте преди качване."
           }
         },
         "ca": {
           "stringUnit": {
             "state": "translated",
-            "value": "Obre SelfPhotos i inicia sessió abans de pujar contingut."
+            "value": "Obre Immi i inicia sessió abans de pujar contingut."
           }
         },
         "hr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Otvorite SelfPhotos i prijavite se prije prijenosa."
+            "value": "Otvorite Immi i prijavite se prije prijenosa."
           }
         },
         "cs": {
           "stringUnit": {
             "state": "translated",
-            "value": "Před nahráváním otevřete SelfPhotos a přihlaste se."
+            "value": "Před nahráváním otevřete Immi a přihlaste se."
           }
         },
         "da": {
           "stringUnit": {
             "state": "translated",
-            "value": "Åbn SelfPhotos, og log ind før upload."
+            "value": "Åbn Immi, og log ind før upload."
           }
         },
         "nl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Open SelfPhotos en meld je aan voordat je uploadt."
+            "value": "Open Immi en meld je aan voordat je uploadt."
           }
         },
         "fi": {
           "stringUnit": {
             "state": "translated",
-            "value": "Avaa SelfPhotos ja kirjaudu sisään ennen lataamista."
+            "value": "Avaa Immi ja kirjaudu sisään ennen lataamista."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ouvrez SelfPhotos et connectez-vous avant l’envoi."
+            "value": "Ouvrez Immi et connectez-vous avant l’envoi."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Öffne SelfPhotos und melde dich vor dem Hochladen an."
+            "value": "Öffne Immi und melde dich vor dem Hochladen an."
           }
         },
         "el": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ανοίξτε το SelfPhotos και συνδεθείτε πριν από τη μεταφόρτωση."
+            "value": "Ανοίξτε το Immi και συνδεθείτε πριν από τη μεταφόρτωση."
           }
         },
         "he": {
           "stringUnit": {
             "state": "translated",
-            "value": "פתחו את SelfPhotos והתחברו לפני ההעלאה."
+            "value": "פתחו את Immi והתחברו לפני ההעלאה."
           }
         },
         "hi": {
           "stringUnit": {
             "state": "translated",
-            "value": "अपलोड करने से पहले SelfPhotos खोलें और साइन इन करें।"
+            "value": "अपलोड करने से पहले Immi खोलें और साइन इन करें।"
           }
         },
         "hu": {
           "stringUnit": {
             "state": "translated",
-            "value": "A feltöltés előtt nyissa meg a SelfPhotos alkalmazást, és jelentkezzen be."
+            "value": "A feltöltés előtt nyissa meg a Immi alkalmazást, és jelentkezzen be."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Apri SelfPhotos ed esegui l'accesso prima di caricare."
+            "value": "Apri Immi ed esegui l'accesso prima di caricare."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "アップロードする前にSelfPhotosを開いてサインインしてください。"
+            "value": "アップロードする前にImmiを開いてサインインしてください。"
           }
         },
         "kk": {
           "stringUnit": {
             "state": "translated",
-            "value": "Жүктеп салмас бұрын SelfPhotos қолданбасын ашып, жүйеге кіріңіз."
+            "value": "Жүктеп салмас бұрын Immi қолданбасын ашып, жүйеге кіріңіз."
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "업로드하기 전에 SelfPhotos를 열고 로그인하세요."
+            "value": "업로드하기 전에 Immi를 열고 로그인하세요."
           }
         },
         "lt": {
           "stringUnit": {
             "state": "translated",
-            "value": "Prieš įkeldami atidarykite SelfPhotos ir prisijunkite."
+            "value": "Prieš įkeldami atidarykite Immi ir prisijunkite."
           }
         },
         "ms": {
           "stringUnit": {
             "state": "translated",
-            "value": "Buka SelfPhotos dan log masuk sebelum memuat naik."
+            "value": "Buka Immi dan log masuk sebelum memuat naik."
           }
         },
         "nb": {
           "stringUnit": {
             "state": "translated",
-            "value": "Åpne SelfPhotos og logg på før opplasting."
+            "value": "Åpne Immi og logg på før opplasting."
           }
         },
         "fa": {
           "stringUnit": {
             "state": "translated",
-            "value": "پیش از بارگذاری، SelfPhotos را باز کنید و وارد شوید."
+            "value": "پیش از بارگذاری، Immi را باز کنید و وارد شوید."
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Przed przesłaniem otwórz SelfPhotos i zaloguj się."
+            "value": "Przed przesłaniem otwórz Immi i zaloguj się."
           }
         },
         "pt": {
           "stringUnit": {
             "state": "translated",
-            "value": "Abra o SelfPhotos e inicie sessão antes de enviar."
+            "value": "Abra o Immi e inicie sessão antes de enviar."
           }
         },
         "ro": {
           "stringUnit": {
             "state": "translated",
-            "value": "Deschideți SelfPhotos și autentificați-vă înainte de încărcare."
+            "value": "Deschideți Immi și autentificați-vă înainte de încărcare."
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Откройте SelfPhotos и войдите перед загрузкой."
+            "value": "Откройте Immi и войдите перед загрузкой."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "上传前请打开 SelfPhotos 并登录。"
+            "value": "上传前请打开 Immi 并登录。"
           }
         },
         "sk": {
           "stringUnit": {
             "state": "translated",
-            "value": "Pred nahrávaním otvorte SelfPhotos a prihláste sa."
+            "value": "Pred nahrávaním otvorte Immi a prihláste sa."
           }
         },
         "sl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Pred nalaganjem odprite SelfPhotos in se prijavite."
+            "value": "Pred nalaganjem odprite Immi in se prijavite."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Abre SelfPhotos e inicia sesión antes de subir archivos."
+            "value": "Abre Immi e inicia sesión antes de subir archivos."
           }
         },
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Öppna SelfPhotos och logga in innan du laddar upp."
+            "value": "Öppna Immi och logga in innan du laddar upp."
           }
         },
         "th": {
           "stringUnit": {
             "state": "translated",
-            "value": "เปิด SelfPhotos และเข้าสู่ระบบก่อนอัปโหลด"
+            "value": "เปิด Immi และเข้าสู่ระบบก่อนอัปโหลด"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "上傳前請開啟 SelfPhotos 並登入。"
+            "value": "上傳前請開啟 Immi 並登入。"
           }
         },
         "tr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Yüklemeden önce SelfPhotos'u açın ve oturum açın."
+            "value": "Yüklemeden önce Immi'u açın ve oturum açın."
           }
         },
         "uk": {
           "stringUnit": {
             "state": "translated",
-            "value": "Перед вивантаженням відкрийте SelfPhotos і ввійдіть."
+            "value": "Перед вивантаженням відкрийте Immi і ввійдіть."
           }
         },
         "vi": {
           "stringUnit": {
             "state": "translated",
-            "value": "Mở SelfPhotos và đăng nhập trước khi tải lên."
+            "value": "Mở Immi và đăng nhập trước khi tải lên."
           }
         }
       }
@@ -2659,466 +2659,466 @@
         }
       }
     },
-    "SelfPhotos could not access its shared upload storage.": {
+    "Immi could not access its shared upload storage.": {
       "localizations": {
         "id": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos tidak dapat mengakses penyimpanan unggahan bersamanya."
+            "value": "Immi tidak dapat mengakses penyimpanan unggahan bersamanya."
           }
         },
         "ar": {
           "stringUnit": {
             "state": "translated",
-            "value": "تعذر على SelfPhotos الوصول إلى مساحة تخزين الرفع المشتركة."
+            "value": "تعذر على Immi الوصول إلى مساحة تخزين الرفع المشتركة."
           }
         },
         "bn": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos তার শেয়ার করা আপলোড স্টোরেজে অ্যাক্সেস করতে পারেনি।"
+            "value": "Immi তার শেয়ার করা আপলোড স্টোরেজে অ্যাক্সেস করতে পারেনি।"
           }
         },
         "bg": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos не можа да получи достъп до споделеното си хранилище за качване."
+            "value": "Immi не можа да получи достъп до споделеното си хранилище за качване."
           }
         },
         "ca": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos no ha pogut accedir al seu espai d'emmagatzematge compartit per a pujades."
+            "value": "Immi no ha pogut accedir al seu espai d'emmagatzematge compartit per a pujades."
           }
         },
         "hr": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos nije mogao pristupiti zajedničkom prostoru za prijenos."
+            "value": "Immi nije mogao pristupiti zajedničkom prostoru za prijenos."
           }
         },
         "cs": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos nemá přístup ke sdílenému úložišti pro nahrávání."
+            "value": "Immi nemá přístup ke sdílenému úložišti pro nahrávání."
           }
         },
         "da": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos kunne ikke få adgang til det delte uploadlager."
+            "value": "Immi kunne ikke få adgang til det delte uploadlager."
           }
         },
         "nl": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos heeft geen toegang tot de gedeelde uploadopslag."
+            "value": "Immi heeft geen toegang tot de gedeelde uploadopslag."
           }
         },
         "fi": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos ei saanut yhteyttä jaettuun lataustallennustilaansa."
+            "value": "Immi ei saanut yhteyttä jaettuun lataustallennustilaansa."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos n’a pas pu accéder à son espace de stockage partagé pour les envois."
+            "value": "Immi n’a pas pu accéder à son espace de stockage partagé pour les envois."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos konnte nicht auf den gemeinsamen Upload-Speicher zugreifen."
+            "value": "Immi konnte nicht auf den gemeinsamen Upload-Speicher zugreifen."
           }
         },
         "el": {
           "stringUnit": {
             "state": "translated",
-            "value": "Το SelfPhotos δεν μπόρεσε να αποκτήσει πρόσβαση στον κοινόχρηστο χώρο μεταφορτώσεων."
+            "value": "Το Immi δεν μπόρεσε να αποκτήσει πρόσβαση στον κοινόχρηστο χώρο μεταφορτώσεων."
           }
         },
         "he": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos לא הצליח לגשת לאחסון ההעלאות המשותף שלו."
+            "value": "Immi לא הצליח לגשת לאחסון ההעלאות המשותף שלו."
           }
         },
         "hi": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos अपने साझा अपलोड स्टोरेज को एक्सेस नहीं कर सका।"
+            "value": "Immi अपने साझा अपलोड स्टोरेज को एक्सेस नहीं कर सका।"
           }
         },
         "hu": {
           "stringUnit": {
             "state": "translated",
-            "value": "A SelfPhotos nem tudott hozzáférni a megosztott feltöltési tárhelyéhez."
+            "value": "A Immi nem tudott hozzáférni a megosztott feltöltési tárhelyéhez."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos non è riuscito ad accedere allo spazio condiviso per i caricamenti."
+            "value": "Immi non è riuscito ad accedere allo spazio condiviso per i caricamenti."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotosは共有アップロードストレージにアクセスできませんでした。"
+            "value": "Immiは共有アップロードストレージにアクセスできませんでした。"
           }
         },
         "kk": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos ортақ жүктеп салу жадына қатынай алмады."
+            "value": "Immi ортақ жүктеп салу жадына қатынай алмады."
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos가 공유 업로드 저장 공간에 접근할 수 없습니다."
+            "value": "Immi가 공유 업로드 저장 공간에 접근할 수 없습니다."
           }
         },
         "lt": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos nepavyko pasiekti bendrinamos įkėlimo saugyklos."
+            "value": "Immi nepavyko pasiekti bendrinamos įkėlimo saugyklos."
           }
         },
         "ms": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos tidak dapat mengakses storan muat naik kongsinya."
+            "value": "Immi tidak dapat mengakses storan muat naik kongsinya."
           }
         },
         "nb": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos fikk ikke tilgang til den delte opplastingslagringen."
+            "value": "Immi fikk ikke tilgang til den delte opplastingslagringen."
           }
         },
         "fa": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos نتوانست به فضای ذخیره‌سازی مشترک بارگذاری دسترسی پیدا کند."
+            "value": "Immi نتوانست به فضای ذخیره‌سازی مشترک بارگذاری دسترسی پیدا کند."
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos nie może uzyskać dostępu do współdzielonej przestrzeni przesyłania."
+            "value": "Immi nie może uzyskać dostępu do współdzielonej przestrzeni przesyłania."
           }
         },
         "pt": {
           "stringUnit": {
             "state": "translated",
-            "value": "O SelfPhotos não conseguiu aceder ao armazenamento partilhado de envios."
+            "value": "O Immi não conseguiu aceder ao armazenamento partilhado de envios."
           }
         },
         "ro": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos nu a putut accesa spațiul de stocare partajat pentru încărcări."
+            "value": "Immi nu a putut accesa spațiul de stocare partajat pentru încărcări."
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos не удалось получить доступ к общему хранилищу загрузок."
+            "value": "Immi не удалось получить доступ к общему хранилищу загрузок."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos 无法访问其共享上传存储空间。"
+            "value": "Immi 无法访问其共享上传存储空间。"
           }
         },
         "sk": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos nemá prístup k zdieľanému úložisku nahrávania."
+            "value": "Immi nemá prístup k zdieľanému úložisku nahrávania."
           }
         },
         "sl": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos ni mogel dostopati do deljenega prostora za nalaganje."
+            "value": "Immi ni mogel dostopati do deljenega prostora za nalaganje."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos no ha podido acceder al almacenamiento compartido de cargas."
+            "value": "Immi no ha podido acceder al almacenamiento compartido de cargas."
           }
         },
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos kunde inte komma åt det delade uppladdningsutrymmet."
+            "value": "Immi kunde inte komma åt det delade uppladdningsutrymmet."
           }
         },
         "th": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos ไม่สามารถเข้าถึงพื้นที่จัดเก็บข้อมูลการอัปโหลดที่แชร์ได้"
+            "value": "Immi ไม่สามารถเข้าถึงพื้นที่จัดเก็บข้อมูลการอัปโหลดที่แชร์ได้"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos 無法取用其共享上傳儲存空間。"
+            "value": "Immi 無法取用其共享上傳儲存空間。"
           }
         },
         "tr": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos, paylaşılan yükleme depolama alanına erişemedi."
+            "value": "Immi, paylaşılan yükleme depolama alanına erişemedi."
           }
         },
         "uk": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos не вдалося отримати доступ до спільного сховища вивантажень."
+            "value": "Immi не вдалося отримати доступ до спільного сховища вивантажень."
           }
         },
         "vi": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos không thể truy cập bộ nhớ tải lên dùng chung."
+            "value": "Immi không thể truy cập bộ nhớ tải lên dùng chung."
           }
         }
       }
     },
-    "Sign in to SelfPhotos first": {
+    "Sign in to Immi first": {
       "localizations": {
         "id": {
           "stringUnit": {
             "state": "translated",
-            "value": "Masuk ke SelfPhotos terlebih dahulu"
+            "value": "Masuk ke Immi terlebih dahulu"
           }
         },
         "ar": {
           "stringUnit": {
             "state": "translated",
-            "value": "سجّل الدخول إلى SelfPhotos أولًا"
+            "value": "سجّل الدخول إلى Immi أولًا"
           }
         },
         "bn": {
           "stringUnit": {
             "state": "translated",
-            "value": "প্রথমে SelfPhotos-এ সাইন ইন করুন"
+            "value": "প্রথমে Immi-এ সাইন ইন করুন"
           }
         },
         "bg": {
           "stringUnit": {
             "state": "translated",
-            "value": "Първо влезте в SelfPhotos"
+            "value": "Първо влезте в Immi"
           }
         },
         "ca": {
           "stringUnit": {
             "state": "translated",
-            "value": "Primer inicia sessió a SelfPhotos"
+            "value": "Primer inicia sessió a Immi"
           }
         },
         "hr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Najprije se prijavite u SelfPhotos"
+            "value": "Najprije se prijavite u Immi"
           }
         },
         "cs": {
           "stringUnit": {
             "state": "translated",
-            "value": "Nejprve se přihlaste k SelfPhotos"
+            "value": "Nejprve se přihlaste k Immi"
           }
         },
         "da": {
           "stringUnit": {
             "state": "translated",
-            "value": "Log først ind på SelfPhotos"
+            "value": "Log først ind på Immi"
           }
         },
         "nl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Meld je eerst aan bij SelfPhotos"
+            "value": "Meld je eerst aan bij Immi"
           }
         },
         "fi": {
           "stringUnit": {
             "state": "translated",
-            "value": "Kirjaudu ensin SelfPhotosiin"
+            "value": "Kirjaudu ensin Immiiin"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Connectez-vous d’abord à SelfPhotos"
+            "value": "Connectez-vous d’abord à Immi"
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Zuerst bei SelfPhotos anmelden"
+            "value": "Zuerst bei Immi anmelden"
           }
         },
         "el": {
           "stringUnit": {
             "state": "translated",
-            "value": "Συνδεθείτε πρώτα στο SelfPhotos"
+            "value": "Συνδεθείτε πρώτα στο Immi"
           }
         },
         "he": {
           "stringUnit": {
             "state": "translated",
-            "value": "תחילה יש להתחבר ל-SelfPhotos"
+            "value": "תחילה יש להתחבר ל-Immi"
           }
         },
         "hi": {
           "stringUnit": {
             "state": "translated",
-            "value": "पहले SelfPhotos में साइन इन करें"
+            "value": "पहले Immi में साइन इन करें"
           }
         },
         "hu": {
           "stringUnit": {
             "state": "translated",
-            "value": "Először jelentkezzen be a SelfPhotos alkalmazásba"
+            "value": "Először jelentkezzen be a Immi alkalmazásba"
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Prima accedi a SelfPhotos"
+            "value": "Prima accedi a Immi"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "先にSelfPhotosにサインインしてください"
+            "value": "先にImmiにサインインしてください"
           }
         },
         "kk": {
           "stringUnit": {
             "state": "translated",
-            "value": "Алдымен SelfPhotos жүйесіне кіріңіз"
+            "value": "Алдымен Immi жүйесіне кіріңіз"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "먼저 SelfPhotos에 로그인하세요"
+            "value": "먼저 Immi에 로그인하세요"
           }
         },
         "lt": {
           "stringUnit": {
             "state": "translated",
-            "value": "Pirmiausia prisijunkite prie SelfPhotos"
+            "value": "Pirmiausia prisijunkite prie Immi"
           }
         },
         "ms": {
           "stringUnit": {
             "state": "translated",
-            "value": "Log masuk ke SelfPhotos dahulu"
+            "value": "Log masuk ke Immi dahulu"
           }
         },
         "nb": {
           "stringUnit": {
             "state": "translated",
-            "value": "Logg på SelfPhotos først"
+            "value": "Logg på Immi først"
           }
         },
         "fa": {
           "stringUnit": {
             "state": "translated",
-            "value": "ابتدا وارد SelfPhotos شوید"
+            "value": "ابتدا وارد Immi شوید"
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Najpierw zaloguj się do SelfPhotos"
+            "value": "Najpierw zaloguj się do Immi"
           }
         },
         "pt": {
           "stringUnit": {
             "state": "translated",
-            "value": "Inicie primeiro sessão no SelfPhotos"
+            "value": "Inicie primeiro sessão no Immi"
           }
         },
         "ro": {
           "stringUnit": {
             "state": "translated",
-            "value": "Autentificați-vă mai întâi în SelfPhotos"
+            "value": "Autentificați-vă mai întâi în Immi"
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Сначала войдите в SelfPhotos"
+            "value": "Сначала войдите в Immi"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "请先登录 SelfPhotos"
+            "value": "请先登录 Immi"
           }
         },
         "sk": {
           "stringUnit": {
             "state": "translated",
-            "value": "Najskôr sa prihláste do aplikácie SelfPhotos"
+            "value": "Najskôr sa prihláste do aplikácie Immi"
           }
         },
         "sl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Najprej se prijavite v SelfPhotos"
+            "value": "Najprej se prijavite v Immi"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Inicia sesión en SelfPhotos primero"
+            "value": "Inicia sesión en Immi primero"
           }
         },
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Logga in på SelfPhotos först"
+            "value": "Logga in på Immi först"
           }
         },
         "th": {
           "stringUnit": {
             "state": "translated",
-            "value": "เข้าสู่ระบบ SelfPhotos ก่อน"
+            "value": "เข้าสู่ระบบ Immi ก่อน"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "請先登入 SelfPhotos"
+            "value": "請先登入 Immi"
           }
         },
         "tr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Önce SelfPhotos'ta oturum açın"
+            "value": "Önce Immi'ta oturum açın"
           }
         },
         "uk": {
           "stringUnit": {
             "state": "translated",
-            "value": "Спочатку ввійдіть до SelfPhotos"
+            "value": "Спочатку ввійдіть до Immi"
           }
         },
         "vi": {
           "stringUnit": {
             "state": "translated",
-            "value": "Trước tiên, hãy đăng nhập vào SelfPhotos"
+            "value": "Trước tiên, hãy đăng nhập vào Immi"
           }
         }
       }
@@ -3819,234 +3819,234 @@
         }
       }
     },
-    "Upload to SelfPhotos (%lld)": {
+    "Upload to Immi (%lld)": {
       "localizations": {
         "id": {
           "stringUnit": {
             "state": "translated",
-            "value": "Unggah ke SelfPhotos (%lld)"
+            "value": "Unggah ke Immi (%lld)"
           }
         },
         "ar": {
           "stringUnit": {
             "state": "translated",
-            "value": "الرفع إلى SelfPhotos (%lld)"
+            "value": "الرفع إلى Immi (%lld)"
           }
         },
         "bn": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos-এ আপলোড করুন (%lld)"
+            "value": "Immi-এ আপলোড করুন (%lld)"
           }
         },
         "bg": {
           "stringUnit": {
             "state": "translated",
-            "value": "Качване в SelfPhotos (%lld)"
+            "value": "Качване в Immi (%lld)"
           }
         },
         "ca": {
           "stringUnit": {
             "state": "translated",
-            "value": "Puja a SelfPhotos (%lld)"
+            "value": "Puja a Immi (%lld)"
           }
         },
         "hr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Prenesi u SelfPhotos (%lld)"
+            "value": "Prenesi u Immi (%lld)"
           }
         },
         "cs": {
           "stringUnit": {
             "state": "translated",
-            "value": "Nahrát do SelfPhotos (%lld)"
+            "value": "Nahrát do Immi (%lld)"
           }
         },
         "da": {
           "stringUnit": {
             "state": "translated",
-            "value": "Upload til SelfPhotos (%lld)"
+            "value": "Upload til Immi (%lld)"
           }
         },
         "nl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Uploaden naar SelfPhotos (%lld)"
+            "value": "Uploaden naar Immi (%lld)"
           }
         },
         "fi": {
           "stringUnit": {
             "state": "translated",
-            "value": "Lataa SelfPhotosiin (%lld)"
+            "value": "Lataa Immiiin (%lld)"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Envoyer vers SelfPhotos (%lld)"
+            "value": "Envoyer vers Immi (%lld)"
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "In SelfPhotos hochladen (%lld)"
+            "value": "In Immi hochladen (%lld)"
           }
         },
         "el": {
           "stringUnit": {
             "state": "translated",
-            "value": "Μεταφόρτωση στο SelfPhotos (%lld)"
+            "value": "Μεταφόρτωση στο Immi (%lld)"
           }
         },
         "he": {
           "stringUnit": {
             "state": "translated",
-            "value": "העלאה ל-SelfPhotos (%lld)"
+            "value": "העלאה ל-Immi (%lld)"
           }
         },
         "hi": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos पर अपलोड करें (%lld)"
+            "value": "Immi पर अपलोड करें (%lld)"
           }
         },
         "hu": {
           "stringUnit": {
             "state": "translated",
-            "value": "Feltöltés a SelfPhotos alkalmazásba (%lld)"
+            "value": "Feltöltés a Immi alkalmazásba (%lld)"
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Carica su SelfPhotos (%lld)"
+            "value": "Carica su Immi (%lld)"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotosにアップロード（%lld）"
+            "value": "Immiにアップロード（%lld）"
           }
         },
         "kk": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos қызметіне жүктеп салу (%lld)"
+            "value": "Immi қызметіне жүктеп салу (%lld)"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos에 업로드(%lld)"
+            "value": "Immi에 업로드(%lld)"
           }
         },
         "lt": {
           "stringUnit": {
             "state": "translated",
-            "value": "Įkelti į SelfPhotos (%lld)"
+            "value": "Įkelti į Immi (%lld)"
           }
         },
         "ms": {
           "stringUnit": {
             "state": "translated",
-            "value": "Muat naik ke SelfPhotos (%lld)"
+            "value": "Muat naik ke Immi (%lld)"
           }
         },
         "nb": {
           "stringUnit": {
             "state": "translated",
-            "value": "Last opp til SelfPhotos (%lld)"
+            "value": "Last opp til Immi (%lld)"
           }
         },
         "fa": {
           "stringUnit": {
             "state": "translated",
-            "value": "بارگذاری در SelfPhotos (%lld)"
+            "value": "بارگذاری در Immi (%lld)"
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Prześlij do SelfPhotos (%lld)"
+            "value": "Prześlij do Immi (%lld)"
           }
         },
         "pt": {
           "stringUnit": {
             "state": "translated",
-            "value": "Enviar para o SelfPhotos (%lld)"
+            "value": "Enviar para o Immi (%lld)"
           }
         },
         "ro": {
           "stringUnit": {
             "state": "translated",
-            "value": "Încărcați în SelfPhotos (%lld)"
+            "value": "Încărcați în Immi (%lld)"
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Загрузить в SelfPhotos (%lld)"
+            "value": "Загрузить в Immi (%lld)"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "上传到 SelfPhotos（%lld）"
+            "value": "上传到 Immi（%lld）"
           }
         },
         "sk": {
           "stringUnit": {
             "state": "translated",
-            "value": "Nahrať do SelfPhotos (%lld)"
+            "value": "Nahrať do Immi (%lld)"
           }
         },
         "sl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Naloži v SelfPhotos (%lld)"
+            "value": "Naloži v Immi (%lld)"
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Subir a SelfPhotos (%lld)"
+            "value": "Subir a Immi (%lld)"
           }
         },
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ladda upp till SelfPhotos (%lld)"
+            "value": "Ladda upp till Immi (%lld)"
           }
         },
         "th": {
           "stringUnit": {
             "state": "translated",
-            "value": "อัปโหลดไปยัง SelfPhotos (%lld)"
+            "value": "อัปโหลดไปยัง Immi (%lld)"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "上傳到 SelfPhotos（%lld）"
+            "value": "上傳到 Immi（%lld）"
           }
         },
         "tr": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos'a Yükle (%lld)"
+            "value": "Immi'a Yükle (%lld)"
           }
         },
         "uk": {
           "stringUnit": {
             "state": "translated",
-            "value": "Вивантажити до SelfPhotos (%lld)"
+            "value": "Вивантажити до Immi (%lld)"
           }
         },
         "vi": {
           "stringUnit": {
             "state": "translated",
-            "value": "Tải lên SelfPhotos (%lld)"
+            "value": "Tải lên Immi (%lld)"
           }
         }
       }
@@ -4529,240 +4529,240 @@
         }
       }
     },
-    "Open SelfPhotos to retry or remove failed uploads in Backup > View Details.": {
+    "Open Immi to retry or remove failed uploads in Backup > View Details.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Open SelfPhotos to retry or remove failed uploads in Backup > View Details."
+            "value": "Open Immi to retry or remove failed uploads in Backup > View Details."
           }
         },
         "ar": {
           "stringUnit": {
             "state": "translated",
-            "value": "افتح SelfPhotos لإعادة محاولة التحميلات الفاشلة أو إزالتها في النسخ الاحتياطي > عرض التفاصيل."
+            "value": "افتح Immi لإعادة محاولة التحميلات الفاشلة أو إزالتها في النسخ الاحتياطي > عرض التفاصيل."
           }
         },
         "bg": {
           "stringUnit": {
             "state": "translated",
-            "value": "Отворете SelfPhotos, за да опитате отново или да премахнете неуспешните качвания в Backup > View Details."
+            "value": "Отворете Immi, за да опитате отново или да премахнете неуспешните качвания в Backup > View Details."
           }
         },
         "bn": {
           "stringUnit": {
             "state": "translated",
-            "value": "ব্যাকআপে ব্যর্থ আপলোডগুলি পুনরায় চেষ্টা করতে বা সরাতে SelfPhotos খুলুন > বিবরণ দেখুন৷"
+            "value": "ব্যাকআপে ব্যর্থ আপলোডগুলি পুনরায় চেষ্টা করতে বা সরাতে Immi খুলুন > বিবরণ দেখুন৷"
           }
         },
         "ca": {
           "stringUnit": {
             "state": "translated",
-            "value": "Obriu SelfPhotos per tornar a provar o eliminar les càrregues fallides a Còpia de seguretat > Mostra detalls."
+            "value": "Obriu Immi per tornar a provar o eliminar les càrregues fallides a Còpia de seguretat > Mostra detalls."
           }
         },
         "cs": {
           "stringUnit": {
             "state": "translated",
-            "value": "Otevřete SelfPhotos a zkuste to znovu nebo odstraňte neúspěšné nahrávání v Zálohování > Zobrazit podrobnosti."
+            "value": "Otevřete Immi a zkuste to znovu nebo odstraňte neúspěšné nahrávání v Zálohování > Zobrazit podrobnosti."
           }
         },
         "da": {
           "stringUnit": {
             "state": "translated",
-            "value": "Åbn SelfPhotos for at prøve igen eller fjerne mislykkede uploads i Sikkerhedskopiering > Vis detaljer."
+            "value": "Åbn Immi for at prøve igen eller fjerne mislykkede uploads i Sikkerhedskopiering > Vis detaljer."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Öffnen Sie SelfPhotos, um fehlgeschlagene Uploads unter „Sichern“ > „Details anzeigen“ erneut zu versuchen oder zu entfernen."
+            "value": "Öffnen Sie Immi, um fehlgeschlagene Uploads unter „Sichern“ > „Details anzeigen“ erneut zu versuchen oder zu entfernen."
           }
         },
         "el": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ανοίξτε το SelfPhotos για να προσπαθήσετε ξανά ή να καταργήσετε αποτυχημένες μεταφορτώσεις στο Backup > Προβολή λεπτομερειών."
+            "value": "Ανοίξτε το Immi για να προσπαθήσετε ξανά ή να καταργήσετε αποτυχημένες μεταφορτώσεις στο Backup > Προβολή λεπτομερειών."
           }
         },
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Abra SelfPhotos para volver a intentar o eliminar cargas fallidas en Copia de seguridad > Ver detalles."
+            "value": "Abra Immi para volver a intentar o eliminar cargas fallidas en Copia de seguridad > Ver detalles."
           }
         },
         "fa": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos را باز کنید تا بارگذاری‌های ناموفق را دوباره امتحان کنید یا حذف کنید در پشتیبان‌گیری > مشاهده جزئیات."
+            "value": "Immi را باز کنید تا بارگذاری‌های ناموفق را دوباره امتحان کنید یا حذف کنید در پشتیبان‌گیری > مشاهده جزئیات."
           }
         },
         "fi": {
           "stringUnit": {
             "state": "translated",
-            "value": "Avaa SelfPhotos ja yritä uudelleen tai poistaa epäonnistuneet lataukset kohdassa Varmuuskopiointi > Näytä tiedot."
+            "value": "Avaa Immi ja yritä uudelleen tai poistaa epäonnistuneet lataukset kohdassa Varmuuskopiointi > Näytä tiedot."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ouvrez SelfPhotos pour réessayer ou supprimer les envois ayant échoué dans Sauvegarde > Voir les détails."
+            "value": "Ouvrez Immi pour réessayer ou supprimer les envois ayant échoué dans Sauvegarde > Voir les détails."
           }
         },
         "he": {
           "stringUnit": {
             "state": "translated",
-            "value": "פתח את SelfPhotos כדי לנסות שוב או להסיר העלאות שנכשלו בגיבוי > הצג פרטים."
+            "value": "פתח את Immi כדי לנסות שוב או להסיר העלאות שנכשלו בגיבוי > הצג פרטים."
           }
         },
         "hi": {
           "stringUnit": {
             "state": "translated",
-            "value": "बैकअप > विवरण देखें में विफल अपलोड को पुनः प्रयास करने या हटाने के लिए SelfPhotos खोलें।"
+            "value": "बैकअप > विवरण देखें में विफल अपलोड को पुनः प्रयास करने या हटाने के लिए Immi खोलें।"
           }
         },
         "hr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Otvorite SelfPhotos za ponovni pokušaj ili uklanjanje neuspjelih prijenosa u Backup > View Details."
+            "value": "Otvorite Immi za ponovni pokušaj ili uklanjanje neuspjelih prijenosa u Backup > View Details."
           }
         },
         "hu": {
           "stringUnit": {
             "state": "translated",
-            "value": "Nyissa meg a SelfPhotos alkalmazást a sikertelen feltöltések újrapróbálásához vagy eltávolításához a Biztonsági mentés > Részletek megtekintése menüpontban."
+            "value": "Nyissa meg a Immi alkalmazást a sikertelen feltöltések újrapróbálásához vagy eltávolításához a Biztonsági mentés > Részletek megtekintése menüpontban."
           }
         },
         "id": {
           "stringUnit": {
             "state": "translated",
-            "value": "Buka SelfPhotos untuk mencoba lagi atau menghapus unggahan yang gagal di Cadangan > Lihat Detail."
+            "value": "Buka Immi untuk mencoba lagi atau menghapus unggahan yang gagal di Cadangan > Lihat Detail."
           }
         },
         "it": {
           "stringUnit": {
             "state": "translated",
-            "value": "Apri SelfPhotos per riprovare o rimuovere i caricamenti non riusciti in Backup > Visualizza dettagli."
+            "value": "Apri Immi per riprovare o rimuovere i caricamenti non riusciti in Backup > Visualizza dettagli."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos を開いて、[バックアップ] > [詳細の表示] で失敗したアップロードを再試行または削除します。"
+            "value": "Immi を開いて、[バックアップ] > [詳細の表示] で失敗したアップロードを再試行または削除します。"
           }
         },
         "kk": {
           "stringUnit": {
             "state": "translated",
-            "value": "Сақтық көшірме > Мәліметтерді қарау тармағында сәтсіз жүктеп салуларды қайталап көру немесе жою үшін SelfPhotos қолданбасын ашыңыз."
+            "value": "Сақтық көшірме > Мәліметтерді қарау тармағында сәтсіз жүктеп салуларды қайталап көру немесе жою үшін Immi қолданбасын ашыңыз."
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "SelfPhotos를 열어 백업 > 세부 정보 보기에서 실패한 업로드를 다시 시도하거나 제거하세요."
+            "value": "Immi를 열어 백업 > 세부 정보 보기에서 실패한 업로드를 다시 시도하거나 제거하세요."
           }
         },
         "lt": {
           "stringUnit": {
             "state": "translated",
-            "value": "Atidarykite „SelfPhotos“, kad bandytumėte dar kartą arba pašalintumėte nepavykusius įkėlimus, skiltyje Atsarginė kopija > Peržiūrėti išsamią informaciją."
+            "value": "Atidarykite „Immi“, kad bandytumėte dar kartą arba pašalintumėte nepavykusius įkėlimus, skiltyje Atsarginė kopija > Peržiūrėti išsamią informaciją."
           }
         },
         "ms": {
           "stringUnit": {
             "state": "translated",
-            "value": "Buka SelfPhotos untuk mencuba semula atau mengalih keluar muat naik yang gagal dalam Sandaran > Lihat Butiran."
+            "value": "Buka Immi untuk mencuba semula atau mengalih keluar muat naik yang gagal dalam Sandaran > Lihat Butiran."
           }
         },
         "nb": {
           "stringUnit": {
             "state": "translated",
-            "value": "Åpne SelfPhotos for å prøve på nytt eller fjerne mislykkede opplastinger i Sikkerhetskopiering > Vis detaljer."
+            "value": "Åpne Immi for å prøve på nytt eller fjerne mislykkede opplastinger i Sikkerhetskopiering > Vis detaljer."
           }
         },
         "nl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Open SelfPhotos om mislukte uploads opnieuw te proberen of te verwijderen in Back-up > Details bekijken."
+            "value": "Open Immi om mislukte uploads opnieuw te proberen of te verwijderen in Back-up > Details bekijken."
           }
         },
         "pl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Otwórz SelfPhotos, aby ponowić próbę lub usunąć nieudane przesyłanie w Kopia zapasowa > Wyświetl szczegóły."
+            "value": "Otwórz Immi, aby ponowić próbę lub usunąć nieudane przesyłanie w Kopia zapasowa > Wyświetl szczegóły."
           }
         },
         "pt": {
           "stringUnit": {
             "state": "translated",
-            "value": "Abra SelfPhotos para tentar novamente ou remover uploads com falha em Backup > Ver detalhes."
+            "value": "Abra Immi para tentar novamente ou remover uploads com falha em Backup > Ver detalhes."
           }
         },
         "ro": {
           "stringUnit": {
             "state": "translated",
-            "value": "Deschideți SelfPhotos pentru a reîncerca sau pentru a elimina încărcările eșuate în Backup > Vedeți detalii."
+            "value": "Deschideți Immi pentru a reîncerca sau pentru a elimina încărcările eșuate în Backup > Vedeți detalii."
           }
         },
         "ru": {
           "stringUnit": {
             "state": "translated",
-            "value": "Откройте SelfPhotos, чтобы повторить попытку или удалить неудачные загрузки, в разделе «Резервное копирование» > «Просмотреть подробности»."
+            "value": "Откройте Immi, чтобы повторить попытку или удалить неудачные загрузки, в разделе «Резервное копирование» > «Просмотреть подробности»."
           }
         },
         "sk": {
           "stringUnit": {
             "state": "translated",
-            "value": "Otvorte SelfPhotos a skúste to znova alebo odstráňte neúspešné nahrávanie v časti Záloha > Zobraziť podrobnosti."
+            "value": "Otvorte Immi a skúste to znova alebo odstráňte neúspešné nahrávanie v časti Záloha > Zobraziť podrobnosti."
           }
         },
         "sl": {
           "stringUnit": {
             "state": "translated",
-            "value": "Odprite SelfPhotos, da poskusite znova ali odstranite neuspela nalaganja v Varnostno kopiranje > Ogled podrobnosti."
+            "value": "Odprite Immi, da poskusite znova ali odstranite neuspela nalaganja v Varnostno kopiranje > Ogled podrobnosti."
           }
         },
         "sv": {
           "stringUnit": {
             "state": "translated",
-            "value": "Öppna SelfPhotos för att försöka igen eller ta bort misslyckade uppladdningar i Säkerhetskopiering > Visa detaljer."
+            "value": "Öppna Immi för att försöka igen eller ta bort misslyckade uppladdningar i Säkerhetskopiering > Visa detaljer."
           }
         },
         "th": {
           "stringUnit": {
             "state": "translated",
-            "value": "เปิด SelfPhotos เพื่อลองอีกครั้งหรือลบการอัพโหลดที่ล้มเหลวในการสำรองข้อมูล > ดูรายละเอียด"
+            "value": "เปิด Immi เพื่อลองอีกครั้งหรือลบการอัพโหลดที่ล้มเหลวในการสำรองข้อมูล > ดูรายละเอียด"
           }
         },
         "tr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Yedekleme > Ayrıntıları Görüntüle bölümünde başarısız yüklemeleri yeniden denemek veya kaldırmak için SelfPhotos'u açın."
+            "value": "Yedekleme > Ayrıntıları Görüntüle bölümünde başarısız yüklemeleri yeniden denemek veya kaldırmak için Immi'u açın."
           }
         },
         "uk": {
           "stringUnit": {
             "state": "translated",
-            "value": "Відкрийте SelfPhotos, щоб повторити спробу або видалити невдалі завантаження в Резервне копіювання > Переглянути деталі."
+            "value": "Відкрийте Immi, щоб повторити спробу або видалити невдалі завантаження в Резервне копіювання > Переглянути деталі."
           }
         },
         "vi": {
           "stringUnit": {
             "state": "translated",
-            "value": "Mở SelfPhotos để thử lại hoặc xóa các lần tải lên không thành công trong Sao lưu > Xem chi tiết."
+            "value": "Mở Immi để thử lại hoặc xóa các lần tải lên không thành công trong Sao lưu > Xem chi tiết."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "打开 SelfPhotos，在“备份”>“查看详细信息”中重试或删除失败的上传。"
+            "value": "打开 Immi，在“备份”>“查看详细信息”中重试或删除失败的上传。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "開啟 SelfPhotos，在「備份」>「檢視詳細資料」中重試或刪除失敗的上傳。"
+            "value": "開啟 Immi，在「備份」>「檢視詳細資料」中重試或刪除失敗的上傳。"
           }
         }
       }

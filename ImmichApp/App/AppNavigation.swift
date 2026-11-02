@@ -28,9 +28,8 @@ final class AppNavigation {
     }
 
     func handle(_ url: URL) {
-        // `immiches` adalah scheme versi sebelum rebrand. Tetap diterima agar
-        // widget dan deep link yang sudah tersimpan tidak putus saat update.
-        let acceptedSchemes = ["selfphotos", "immiches"]
+        // Keep legacy schemes valid for existing widgets and saved links.
+        let acceptedSchemes = ["immi", "selfphotos", "immiches"]
         guard let scheme = url.scheme?.lowercased(),
               acceptedSchemes.contains(scheme)
         else { return }

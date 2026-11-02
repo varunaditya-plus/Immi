@@ -1,7 +1,7 @@
 import Foundation
 import Security
 
-enum SelfPhotosSharedContainer {
+enum ImmiSharedContainer {
     static let appGroup = "group.xyz.0xmwehehe.ImmichApp"
     static let keychainAccessGroup = "5KQGTJX2K7.xyz.0xmwehehe.ImmichApp.shared"
 
@@ -17,7 +17,7 @@ enum SelfPhotosSharedContainer {
 
 /// Keychain yang dapat dibaca aplikasi utama dan Share Extension.
 ///
-/// Entri lama SelfPhotos tidak memakai access group. `read` memigrasikannya
+/// Entri lama aplikasi tidak memakai access group. `read` memigrasikannya
 /// saat aplikasi utama pertama kali dibuka setelah pembaruan; extension tidak
 /// pernah menerima salinan token di UserDefaults atau berkas App Group.
 enum SharedKeychainStore {
@@ -77,7 +77,7 @@ enum SharedKeychainStore {
             kSecAttrAccount as String: key,
         ]
         if shared {
-            query[kSecAttrAccessGroup as String] = SelfPhotosSharedContainer.keychainAccessGroup
+            query[kSecAttrAccessGroup as String] = ImmiSharedContainer.keychainAccessGroup
         }
         return query
     }
@@ -171,7 +171,7 @@ final class SharedSessionStore {
             clear()
             return false
         }
-        SelfPhotosSharedContainer.defaults.removeObject(forKey: Self.legacySessionKey)
+        ImmiSharedContainer.defaults.removeObject(forKey: Self.legacySessionKey)
         return true
     }
 
@@ -191,7 +191,7 @@ final class SharedSessionStore {
 
     func clear() {
         remove()
-        SelfPhotosSharedContainer.defaults.removeObject(forKey: Self.legacySessionKey)
+        ImmiSharedContainer.defaults.removeObject(forKey: Self.legacySessionKey)
     }
 
     private func record() -> Record? {
@@ -205,7 +205,7 @@ enum SharedDeviceIdentity {
     private static let key = "device.identity"
 
     static let current: String = {
-        let defaults = SelfPhotosSharedContainer.defaults
+        let defaults = ImmiSharedContainer.defaults
         if let existing = defaults.string(forKey: key), !existing.isEmpty {
             return existing
         }

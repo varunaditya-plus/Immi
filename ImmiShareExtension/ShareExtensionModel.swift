@@ -36,7 +36,7 @@ final class ShareExtensionModel: ObservableObject {
     var canEditSelection: Bool { !isBusy && submission.canEdit }
     var isBusy: Bool { phase == .loading || submission.isProcessing || submission.isClosing }
     var serverLabel: String {
-        session?.displayServerURL ?? String(localized: "Sign in to SelfPhotos first")
+        session?.displayServerURL ?? String(localized: "Sign in to Immi first")
     }
 
     func load() async {
@@ -104,7 +104,7 @@ final class ShareExtensionModel: ObservableObject {
     private func uploadSelected(_ selected: [SharedUploadItem]) async {
         defer { submission.finish() }
         guard let credential = session?.credential() else {
-            phase = .failed(String(localized: "Open SelfPhotos and sign in before uploading."))
+            phase = .failed(String(localized: "Open Immi and sign in before uploading."))
             return
         }
 

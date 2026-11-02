@@ -7,8 +7,8 @@ final class ServerTransportPolicyTests: XCTestCase {
         let plugins = try XCTUnwrap(Bundle.main.builtInPlugInsURL)
         let bundles = [
             Bundle.main,
-            try XCTUnwrap(Bundle(url: plugins.appendingPathComponent("SelfPhotosShareExtension.appex"))),
-            try XCTUnwrap(Bundle(url: plugins.appendingPathComponent("SelfPhotosUploadAction.appex"))),
+            try XCTUnwrap(Bundle(url: plugins.appendingPathComponent("ImmiShareExtension.appex"))),
+            try XCTUnwrap(Bundle(url: plugins.appendingPathComponent("ImmiUploadAction.appex"))),
         ]
 
         for bundle in bundles {
@@ -48,7 +48,7 @@ final class ServerTransportPolicyTests: XCTestCase {
 
     func testConfiguredHTTPHostnameRespondsThroughLoopbackProxy() async throws {
         let ready = expectation(description: "Loopback HTTP listener is ready")
-        let body = Data("SelfPhotos HTTP response".utf8) + Data([0, 255])
+        let body = Data("Immi HTTP response".utf8) + Data([0, 255])
         let server = try LoopbackHTTPServer(body: body, ready: ready)
         defer { server.stop() }
         await fulfillment(of: [ready], timeout: 5)

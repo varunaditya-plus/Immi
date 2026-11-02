@@ -12,7 +12,7 @@ struct AppStorageUsage: Sendable {
 
     static func measure() async -> Self {
         let home = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
-        let shared = SelfPhotosSharedContainer.rootURL
+        let shared = ImmiSharedContainer.rootURL
         return await Task.detached(priority: .utility) {
             scan(home: home, shared: shared)
         }.value

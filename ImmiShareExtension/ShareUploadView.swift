@@ -23,7 +23,7 @@ struct ShareUploadView: View {
                 }
                 ToolbarItem(placement: .principal) {
                     VStack(spacing: 1) {
-                        Text("Upload to SelfPhotos (\(model.selectedCount))")
+                        Text("Upload to Immi (\(model.selectedCount))")
                             .font(.headline)
                         Text(model.serverLabel)
                             .font(.caption)
@@ -67,14 +67,14 @@ struct ShareUploadView: View {
                     if case .completed(let queued, let failed) = model.phase {
                         if queued > 0 {
                             Label(
-                                "\(queued) item(s) will retry when SelfPhotos opens.",
+                                "\(queued) item(s) will retry when Immi opens.",
                                 systemImage: "clock.arrow.circlepath")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                                 .padding(.top, 8)
                         }
                         if failed > 0 {
-                            Label("Open SelfPhotos to retry or remove failed uploads in Backup > View Details.",
+                            Label("Open Immi to retry or remove failed uploads in Backup > View Details.",
                                   systemImage: "exclamationmark.triangle")
                                 .font(.footnote)
                                 .foregroundStyle(.orange)
