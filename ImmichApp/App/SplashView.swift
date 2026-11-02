@@ -1,26 +1,13 @@
 import SwiftUI
 
-/// Identitas visual yang sama untuk splash dan login. Palette memberi lapisan
-/// SF Symbol warna berbeda; masing-masing lapisan memakai linear gradient agar
-/// tetap hidup di light maupun dark mode tanpa aset bitmap terpisah.
-struct SelfPhotosTortoiseLogo: View {
+struct ImmiLogo: View {
     let size: CGFloat
 
     var body: some View {
-        Image(systemName: "tortoise.fill")
-            .font(.system(size: size, weight: .regular))
-            .symbolRenderingMode(.palette)
-            .foregroundStyle(
-                Color.gray,
-                LinearGradient(
-                    colors: [.cyan, .blue, .indigo],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing)
-//                LinearGradient(
-//                    colors: [.orange, .pink, .purple],
-//                    startPoint: .leading,
-//                    endPoint: .trailing)
-            )
+        Image("ImmiLogo")
+            .resizable()
+            .scaledToFit()
+            .frame(width: size, height: size)
     }
 }
 
@@ -40,8 +27,7 @@ struct SplashView: View {
             Color(.systemBackground)
                 .ignoresSafeArea()
 
-            SelfPhotosTortoiseLogo(size: 64)
-                .symbolEffect(.pulse)
+            ImmiLogo(size: 64)
                 .accessibilityHidden(true)
         }
     }

@@ -14,6 +14,9 @@ final class AppBrandingTests: XCTestCase {
             let name = try XCTUnwrap(target.bundle.infoDictionary?["CFBundleName"] as? String)
             XCTAssertFalse(containsOldBrand(name), name)
         }
+        let icons = try XCTUnwrap(Bundle.main.infoDictionary?["CFBundleIcons"] as? [String: Any])
+        let primary = try XCTUnwrap(icons["CFBundlePrimaryIcon"] as? [String: Any])
+        XCTAssertEqual(primary["CFBundleIconName"] as? String, "immi")
     }
 
     func testCompiledDisplayNamesAndPrivacyDescriptionsUseImmiInEverySupportedLanguage() throws {

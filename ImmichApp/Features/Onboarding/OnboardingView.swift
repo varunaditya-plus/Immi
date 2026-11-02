@@ -180,7 +180,7 @@ struct OnboardingView: View {
         logoSize: CGFloat = 58
     ) -> some View {
         VStack(spacing: 10) {
-            SelfPhotosTortoiseLogo(size: logoSize)
+            ImmiLogo(size: logoSize)
                 .accessibilityHidden(true)
 
             Text(title)
